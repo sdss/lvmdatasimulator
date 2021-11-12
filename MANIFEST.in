@@ -1,0 +1,2 @@
+recursive-include python/lvmdatasimulator/etc *
+recursive-include cextern/**/*

@@ -1,0 +1,38 @@
+language: python
+
+cache:
+  pip: true
+  timeout: 1000
+
+sudo: false
+
+python:
+- '3.7'
+- '3.8'
+
+os:
+- linux
+
+matrix:
+  fast_finish: true
+
+notifications:
+  email: false
+
+# repo branches to test
+branches:
+- main
+
+install:
+- pip install -U pip wheel --quiet
+- pip install --upgrade setuptools --quiet
+- pip install pytest
+- pip install pytest-coverage
+- pip install codecov
+- pip install .[dev]
+
+script:
+- pytest tests --cov lvmdatasimulator --cov-report html
+
+after_success:
+- codecov
