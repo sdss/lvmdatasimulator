@@ -139,7 +139,7 @@ class StarsList:
         self.stars_table = vstack([self.stars_table, result])
 
 
-def query_gaia(coord, radius, colnames):
+def query_gaia(coord, radius):
     """
     Query Gaia DR2 catalog for sources in a given field.
 
