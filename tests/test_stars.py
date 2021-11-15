@@ -24,3 +24,4 @@ class TestStars:
         assert stars.stars_table.loc[1]['teff_val'] == teff
         assert stars.stars_table.loc[1]['a_g_val'] == ag
         assert stars.stars_table.loc[1]['gaia'] == False
+
