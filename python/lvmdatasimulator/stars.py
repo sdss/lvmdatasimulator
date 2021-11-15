@@ -133,7 +133,7 @@ class StarsList:
         result['star_id'] = idx
 
         # setting the gaia flag on the table
-        result['gaia'] = np.ones(len(result), type=bool)
+        result['gaia'] = np.ones(len(result), dtype=bool)
 
         # finally saving the new table
         self.stars_table = vstack([self.stars_table, result])
