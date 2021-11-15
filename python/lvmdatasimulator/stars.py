@@ -7,7 +7,15 @@
 # @Copyright: Oleg Egorov, Enrico Congiu
 
 import numpy as np
+import astropy.units as u
+
 from astropy.table import Table
+from astropy.coordinates import SkyCoord
+from astroquery.gaia import Gaia
+
+from lvmdatasimulator import log
+
+Gaia.MAIN_GAIA_TABLE = "gaiadr2.gaia_source"  # Select Data Release 2. EDR3 is missing temperatures
 
 
 class StarsList:
@@ -62,7 +70,7 @@ class StarsList:
                 extinction on the gaia G band
                 
         """
-        new_row = {'star_id': len(self)+1,
+        new_row = {'star_id': len(self) + 1,
                    'ra': ra,
                    'dec': dec,
                    'phot_g_mean_mag': gmag,
@@ -71,4 +79,23 @@ class StarsList:
                    'gaia': False,
                    'source_id': np.nan}
         
+        log.info('star {} with Teff {} and Gmag {} was added to star list at position ({} , {}' 
+                 .format(new_row['star_id'], new_row['teff_val'], new_row['phot_g_mean_mag'],
+                         new_row['ra'], new_row['dec']))
+        
         self.stars_table.add_row(new_row)
+        
+    def add_gaia_stars(self, ra, dec, radius, gmag_limit=17):
+               
+        coords = SkyCoord(ra, dec, unit=(u.deg, u.deg))
+        
+        result = query_gaia(coords, radius)
+        
+
+def query_gaia(coord, radius, colnames):
+    
+    job = Gaia.cone_search(coord, radius)
+    results = job.get_results()
+    results = results[colnames]
+    
+    return results
