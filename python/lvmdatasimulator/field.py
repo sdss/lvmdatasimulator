@@ -7,12 +7,11 @@
 # @Copyright: Oleg Egorov, Enrico Congiu
 
 
-
 class LVMField(object):
     """Main container for objects in field of view of LVM.
 
-    This is the main class of the simulator of a sources that contains all the functions and reproduces
-    the data as it is on the "fake" sky.
+    This is the main class of the simulator of a sources that contains all the functions and
+    reproduces the data as it is on the "fake" sky.
 
     Parameters:
         name (str):
@@ -38,9 +37,6 @@ class LVMField(object):
         """Add stars from GAIA catalogue for current RA and Dec.
         """
         pass
-
-
-
 
 
 class Cloud(object):

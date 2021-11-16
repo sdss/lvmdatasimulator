@@ -15,6 +15,7 @@ import os
 
 from pkg_resources import parse_version
 
+
 try:
     from lvmdatasimulator import __version__
 except ModuleNotFoundError:
