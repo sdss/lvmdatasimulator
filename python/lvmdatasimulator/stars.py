@@ -6,14 +6,14 @@
 # @License: BSD 3-Clause
 # @Copyright: Oleg Egorov, Enrico Congiu
 
-import numpy as np
 import astropy.units as u
-
-from astropy.table import Table, vstack
+import numpy as np
 from astropy.coordinates import SkyCoord
+from astropy.table import Table, vstack
 from astroquery.gaia import Gaia
 
 from lvmdatasimulator import log
+
 
 Gaia.MAIN_GAIA_TABLE = "gaiadr2.gaia_source"  # Select Data Release 2. EDR3 is missing temperatures
 

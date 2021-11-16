@@ -2,6 +2,7 @@
 
 from sdsstools import get_config, get_logger, get_package_version
 
+
 # pip package name
 NAME = 'sdss-lvmdatasimulator'
 
