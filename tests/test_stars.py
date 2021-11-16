@@ -3,7 +3,6 @@
 # testing the code into the stars.py file
 
 import astropy.units as u
-
 from pytest import mark
 
 from lvmdatasimulator.stars import StarsList
