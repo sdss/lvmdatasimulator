@@ -43,10 +43,10 @@ jobs:
         # stop the build if there are Python syntax errors or undefined names
         flake8 . --count --show-source --statistics
 
-    # - name: Lint with isort
-    #   run: |
-    #     pip install isort
-    #     isort -c .
+    - name: Lint with isort
+      run: |
+        pip install isort
+        isort -c .
 
     - name: Test with pytest
       run: |
