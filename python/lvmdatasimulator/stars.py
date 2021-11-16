@@ -138,6 +138,24 @@ class StarsList:
         # finally saving the new table
         self.stars_table = vstack([self.stars_table, result])
 
+    def associate_spectra(self):
+
+        pass
+
+    def rescale_spectra(self):
+
+        pass
+
+
+
+def open_gaia_passband(wave, band='G'):
+
+    pass
+
+
+
+
+
 
 def query_gaia(coord, radius):
     """
