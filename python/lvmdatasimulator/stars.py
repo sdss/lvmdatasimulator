@@ -8,7 +8,7 @@
 
 import astropy.units as u
 import numpy as np
-import matplotlib.pyplot as plt
+# import matplotlib.pyplot as plt
 
 from astropy.coordinates import SkyCoord
 from astropy.table import Table, vstack
@@ -246,7 +246,8 @@ def query_gaia(coord, radius):
     return results
 
 
-if __name__ == '__main__':
+# if __name__ == '__main__':
 
-    wave = np.arange(3000, 10000.1, 0.1)
-    open_gaia_passband(wave, band='G')
+#     wave = np.arange(3000, 10000.1, 0.1)
+#     open_gaia_passband(wave, band='G')
+
