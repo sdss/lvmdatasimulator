@@ -8,9 +8,13 @@
 
 import astropy.units as u
 import numpy as np
+import matplotlib.pyplot as plt
+
 from astropy.coordinates import SkyCoord
 from astropy.table import Table, vstack
 from astroquery.gaia import Gaia
+from spectres import spectres
+from scipy.interpolate import interp1d
 
 from lvmdatasimulator import log
 
@@ -147,14 +151,67 @@ class StarsList:
         pass
 
 
+def open_gaia_passband(wave, band='G', conserve_flux=False):
+    """
+    Open the desired GAIA DR2 passband.
 
-def open_gaia_passband(wave, band='G'):
+    This function opens the desired GAIA DR2 passband and resample it on the same wavelength
+    of the spectra.
 
-    pass
+    Args:
+        wave (1-D array-like object):
+            Array containing the wavelengths over which the passband must be resampled
+        band (str, optional):
+            GAIA DR2 passband to extract from the file. Defaults to 'G'. Other available bands are
+            'BP' and 'RP'.
+        conserve_flux (bool, optional):
+            If True, it uses the spectres package to resample the passband. If False, it uses a
+            standard linear interpolation. Defaults to False.
 
+    Raises:
+        ValueError:
+            raised if the required passband is not included in the available ones
 
+    Returns:
+        numpy.array:
+            GAIA passband resampled on the wavelengths provided by the wave array
+    """
 
+    filename = '../../data/GaiaDR2_Passbands.dat'
+    available_bands = {'G': 'col2', 'BP': 'col4', 'RP': 'col6'}
 
+    # Only GAIA DR2 passbands are allowed
+    if band not in list(available_bands.keys()):
+        raise ValueError(f'The {band} band is not available. Try with G, BP, RP')
+
+    table = Table.read(filename, format='ascii')
+
+    old_wave = table['col1'] * 10  # from nm to A
+
+    sensitivity = table[available_bands[band]]  # can extract any of the three bands
+    mask = sensitivity == 99.99  # 99.99 is used to mark non existing data in the passband file
+    sensitivity[mask] = 0
+
+    if conserve_flux:
+        # using spectres: weird shape of spectrum
+        new_sensitivity = spectres(wave, old_wave, sensitivity)
+    else:
+        # interpolate the sensitivity to a better resolution
+        interpolated = interp1d(old_wave, sensitivity)
+        new_sensitivity = interpolated(wave)
+
+    # new_sensitivity = spectres(wave, old_wave, sensitivity)
+
+    # fig, ax = plt.subplots(1,1)
+
+    # ax.plot(wave, new_sensitivity, c='k', label='resampled')
+    # ax.plot(old_wave, sensitivity, c='r', label='original')
+    # ax.plot(wave, interp_sensitivity, c='b', label='scipy')
+    # ax.legend(loc='best')
+
+    # plt.show()
+
+    return new_sensitivity
 
 
 def query_gaia(coord, radius):
@@ -187,3 +244,9 @@ def query_gaia(coord, radius):
         log.info('{} Gaia stars in the field' .format(len(results)))
 
     return results
+
+
+if __name__ == '__main__':
+
+    wave = np.arange(3000, 10000.1, 0.1)
+    open_gaia_passband(wave, band='G')
