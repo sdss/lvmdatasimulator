@@ -1,14 +1,15 @@
-import scipy.optimize
+# import scipy.optimize
 from astropy import units as u
 import numpy as np
 from matplotlib import pyplot as plt
-from scipy.integrate import nquad
-from tqdm import tqdm
-from scipy.special import sph_harm
+# from scipy.integrate import nquad
+# from tqdm import tqdm
+# from scipy.special import sph_harm
 from dataclasses import dataclass
 import functools
 from scipy.ndimage.interpolation import map_coordinates
 from scipy.interpolate import interp1d
+
 
 @dataclass
 class Filament:
@@ -19,12 +20,14 @@ class Filament:
     """
     pass
 
+
 @dataclass
 class DIG:
     """
     Class defining the DIG component. For now it is defined just by its brightness (constant)
     """
     pass
+
 
 @dataclass
 class Cloud:
@@ -35,8 +38,9 @@ class Cloud:
     phi_bins: int = 180
     theta_bins: int = 180
     rad_bins: int = 100
-    total_brightness = 1.8e21 *u.cm**-2
+    total_brightness = 1.8e21 * u.cm ** -2
     thickness = 1.0
+
     @functools.cached_property
     def theta_grid(self):
         return np.linspace(0, np.pi, self.theta_bins)
@@ -52,7 +56,7 @@ class Cloud:
     @functools.cached_property
     def cartesian_1d_grid(self):
         npix = np.ceil(1.05*self.radius/self.pxscale).astype(int)
-        return np.linspace(-npix, npix, 2*npix+1)*self.pxscale
+        return np.linspace(-npix, npix, 2 * npix + 1) * self.pxscale
 
     @functools.cached_property
     def brightness_3d_spherical(self):
@@ -66,10 +70,10 @@ class Cloud:
             3D cube of brightness in theta-phi-rad grid, in astropy.Quantity
         """
         theta, phi, rho = np.meshgrid(self.theta_grid, self.phi_grid, self.rad_grid)
-        brt=np.ones_like(theta)
-        brt[rho<(self.radius*(1-self.thickness))]=0
-        brt[rho > self.radius]=0
-        brt=brt/np.sum(brt)*self.total_brightness
+        brt = np.ones_like(theta)
+        brt[rho < (self.radius * (1 - self.thickness))] = 0
+        brt[rho > self.radius] = 0
+        brt = brt / np.sum(brt) * self.total_brightness
         return brt
 
     def brightness_3d_cartesian(self):
@@ -78,13 +82,13 @@ class Cloud:
                               self.cartesian_1d_grid)
         Pc = (np.arctan2(Y, X))
         Rc = (np.sqrt(X ** 2 + Y ** 2 + Z ** 2))
-        Rc[Rc==0*u.pc] = 1e-3*self.pxscale
-        Tc = (np.arccos(Z/Rc))
+        Rc[Rc == 0 * u.pc] = 1e-3 * self.pxscale
+        Tc = (np.arccos(Z / Rc))
 
-        Pc[Pc < (0*u.radian)] = 2 * np.pi*u.radian + Pc[Pc < (0*u.radian)]
-        Pc[Pc > (2 * np.pi*u.radian)] = -2 * np.pi*u.radian + Pc[Pc > (2 * np.pi*u.radian)]
-        Tc[Tc < (0*u.radian)] = np.pi*u.radian + Tc[Tc < (0*u.radian)]
-        Tc[Tc > (np.pi*u.radian)] = -np.pi*u.radian + Tc[Tc > (np.pi*u.radian)]
+        Pc[Pc < (0 * u.radian)] = 2 * np.pi * u.radian + Pc[Pc < (0 * u.radian)]
+        Pc[Pc > (2 * np.pi * u.radian)] = -2 * np.pi * u.radian + Pc[Pc > (2 * np.pi * u.radian)]
+        Tc[Tc < (0 * u.radian)] = np.pi * u.radian + Tc[Tc < (0 * u.radian)]
+        Tc[Tc > (np.pi * u.radian)] = -np.pi * u.radian + Tc[Tc > (np.pi * u.radian)]
 
         ir = interp1d(self.rad_grid, np.arange(self.rad_bins), bounds_error=False)
         ith = interp1d(self.theta_grid, np.arange(self.theta_bins))
@@ -95,12 +99,12 @@ class Cloud:
         cart_data = map_coordinates(self.brightness_3d_spherical,
                                     np.vstack([new_ith, new_iphi, new_ir]),
                                     order=1, mode='constant', cval=0)
-        cart_data=cart_data/np.sum(cart_data)*np.sum(self.brightness_3d_spherical)
+        cart_data = cart_data / np.sum(cart_data) * np.sum(self.brightness_3d_spherical)
         # The data is reshaped and returned
-        return cart_data.reshape([len(self.cartesian_1d_grid)]*3)
+        return cart_data.reshape([len(self.cartesian_1d_grid)] * 3)
 
     def brightness_skyplane(self, ):
-        return np.nansum(self.brightness_3d_cartesian(),0)
+        return np.nansum(self.brightness_3d_cartesian(), 0)
 
 
 @dataclass
@@ -110,7 +114,7 @@ class Bubble(Cloud):
     expansion_velocity: u.km / u.s = 20 * u.km / u.s
     turbulent_sigma: u.km / u.s = 30 * u.km / u.s
     center_velocity: u.km / u.s = 0 * u.km / u.s
-    total_brightness = 1e-13 * u.erg/u.cm**2 / u.s ** 2
+    total_brightness = 1e-13 * u.erg / u.cm**2 / u.s ** 2
     thickness: float = 0.2
     quad_epsrel = 1e-2
 
@@ -200,7 +204,6 @@ if __name__ == '__main__':
     brt_2d = bbl.brightness_skyplane()
 
     fig, ax = plt.subplots()
-    plt.imshow(brt_2d,origin='lower')
+    plt.imshow(brt_2d, origin='lower')
     plt.colorbar()
     plt.show()
-
