@@ -10,6 +10,7 @@ import astropy.units as u
 import numpy as np
 # import matplotlib.pyplot as plt
 
+from astropy.io import fits
 from astropy.coordinates import SkyCoord
 from astropy.table import Table, vstack
 from astroquery.gaia import Gaia
@@ -184,13 +185,64 @@ class StarsList:
         # finally saving the new table
         self.stars_table = vstack([self.stars_table, result])
 
-    def associate_spectra(self):
+    def associate_spectra(self, library='../../data/pollux_resampled_v0.fits.gz'):
 
-        pass
+        self.wave = self._get_wavelength_array(library)
+
+        self.spectra = np.zeros((len(self.stars_table), len(self.wave)))
+
+        for i, row in enumerate(self.stars_table):
+            spectrum = get_spectrum(row['teff_val'], library)
+
+            self.spectra[i] = spectrum
+
+    @staticmethod
+    def _get_wavelength_array(filename='../../data/pollux_resampled_v0.fits.gz',
+                              unit=u.AA):
+
+        with fits.open(filename) as hdu:
+
+            wave = hdu['WAVE'].data * unit
+
+        return wave
+
 
     def rescale_spectra(self):
 
         pass
+
+
+def get_spectrum(temp, library):
+    """
+    Extract a spectrum from a provided library.
+
+    The library should have at least two extensions, one called TEMP which includes the physical
+    properties of the associated spectrum, and one called FLUX which contains an array where each
+    column is a spectrum.
+
+
+    Args:
+        temp (float):
+            temperature of the star for which the spectrum is needed
+        library (str):
+            path to the desired stellar spectral library
+
+    Returns:
+        array:
+            simulated stellar spectrum with T ~ temp
+    """
+
+    with fits.open(library) as hdu:
+
+        properties = Table.read(hdu['TEMP'])
+        fluxes = hdu['FLUX'].data
+
+    delta = properties['T'] - temp
+    idx = np.argmin(delta)
+
+    spectrum = fluxes[idx]
+
+    return spectrum
 
 
 def open_gaia_passband(wave, band='G', conserve_flux=False):
@@ -288,11 +340,14 @@ def query_gaia(coord, radius):
 
 # if __name__ == '__main__':
 
-#     # wave = np.arange(3000, 10000.1, 0.1)
-#     # open_gaia_passband(wave, band='G')
+    # # wave = np.arange(3000, 10000.1, 0.1)
+    # # open_gaia_passband(wave, band='G')
 
-#     starlist = StarsList(0, 0, 2)
-#     starlist.add_gaia_stars(18)
-#     starlist.add_star(0, 0, 7, 10000, 0.4)
+    # starlist = StarsList(0, 0, 2)
+    # starlist.add_gaia_stars(18)
+    # print(len(starlist))
 
-#     print(starlist.stars_table)
+    # starlist.add_star(0, 0, 7, 10000, 0.4)
+    # starlist.associate_spectra()
+
+    # print(starlist.stars_table)
