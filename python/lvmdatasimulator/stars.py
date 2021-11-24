@@ -8,6 +8,8 @@
 
 import astropy.units as u
 import numpy as np
+import pyphot
+import progressbar
 # import matplotlib.pyplot as plt
 
 from astropy.io import fits
@@ -78,6 +80,8 @@ class StarsList:
         self.colunits = units
         self.stars_table = Table(names=self.colnames, dtype=types, units=units)
         self.stars_table.add_index('star_id')
+        self.wave = None  # empty for now
+        self.spectra = None  # empty for now
 
     def __len__(self):
         return len(self.stars_table)
@@ -186,15 +190,29 @@ class StarsList:
         self.stars_table = vstack([self.stars_table, result])
 
     def associate_spectra(self, library='../../data/pollux_resampled_v0.fits.gz'):
+        """
+        Associate a spectrum from a syntetic library to each one of the stars in the list.
+
+        Each star is associated to the spectrum with the closest temperature, which is rescaled to
+        roughly match the observed gaia magnitude.
+
+        parameters:
+            library (str, optional):
+                path to the spectral library to use.
+                Defaults to '../../data/pollux_resampled_v0.fits.gz'.
+        """
 
         self.wave = self._get_wavelength_array(library)
-
         self.spectra = np.zeros((len(self.stars_table), len(self.wave)))
 
+        bar = progressbar.ProgressBar(max_value=len(self.stars_table)).start()
         for i, row in enumerate(self.stars_table):
             spectrum = get_spectrum(row['teff_val'], library)
 
             self.spectra[i] = spectrum
+            bar.update(i)
+
+        bar.finish()
 
     @staticmethod
     def _get_wavelength_array(filename='../../data/pollux_resampled_v0.fits.gz',
@@ -206,10 +224,7 @@ class StarsList:
 
         return wave
 
-
-    def rescale_spectra(self):
-
-        pass
+################################################################################
 
 
 def get_spectrum(temp, library):
@@ -344,10 +359,11 @@ def query_gaia(coord, radius):
     # # open_gaia_passband(wave, band='G')
 
     # starlist = StarsList(0, 0, 2)
-    # starlist.add_gaia_stars(18)
+    # starlist.add_gaia_stars(17)
     # print(len(starlist))
 
     # starlist.add_star(0, 0, 7, 10000, 0.4)
     # starlist.associate_spectra()
+    # # starlist.rescale_spectra()
 
     # print(starlist.stars_table)
