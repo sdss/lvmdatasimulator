@@ -228,8 +228,6 @@ def query_gaia(coord, radius):
         radius (Quantity):
             Radius of the field to be searched for around the central coordinates.
 
-
-
     Returns:
         astropy.Table:
             astropy table containing the result of the query.
@@ -250,4 +248,3 @@ def query_gaia(coord, radius):
 
 #     wave = np.arange(3000, 10000.1, 0.1)
 #     open_gaia_passband(wave, band='G')
-
