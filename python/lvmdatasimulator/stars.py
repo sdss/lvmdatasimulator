@@ -33,27 +33,49 @@ class StarsList:
     on a particolar field.
 
     Parameters:
-        colnames (list):
+        ra (float):
+            right ascension of the center of the field. This parameter is expected in degree.
+        dec (float):
+            declination of the center of the field. This parameter is expected in degree.
+        radius (float):
+            radius of the field to be searched in Gaia.
+        unit_ra (astropy.unit, optional):
+            unit associated to the right ascension. Defaults to u.deg
+        unit_dec (astropy.unit, optional):
+            unit associated to the declination. Defaults to u.deg
+        unit_radius (astropy.unit, optional):
+            unit associated to the radius variable. Defaults to u.arcmin
+        colnames (list, optional):
             list of column names to initiate the table containing the list of stars.
+        types (list, optional):
+            data type to be associated to each column in the table
 
     Attributes:
+        TBU
         colnames (list):
             list of column names to initiate the table containing the list of stars.
         stars_table (astropy.table):
             table containing the list of stars and their parameters
     """
 
-    def __init__(self,
+    def __init__(self, ra, dec, radius,
+                 unit_ra=u.deg, unit_dec=u.deg, unit_radius=u.arcmin,
                  colnames=['star_id', 'ra', 'dec', 'phot_g_mean_mag', 'phot_bp_mean_mag',
                            'phot_rp_mean_mag', 'teff_val', 'a_g_val', 'e_bp_min_rp_val',
                            'gaia', 'source_id'],
                  types=['int', 'float', 'float', 'float', 'float', 'float', 'float', 'float',
-                        'float', 'bool', 'float']
+                        'float', 'bool', 'float'],
+                 units=[None, u.deg, u.deg, u.mag, u.mag, u.mag, u.K, u.mag, u.mag, None, None]
                  ):
 
         # create an empty table to contain the list of stars
+        self.ra = ra * unit_ra
+        self.dec = dec * unit_dec
+        self.center = SkyCoord(self.ra, self.dec)
+        self.radius = radius * unit_radius
         self.colnames = colnames
-        self.stars_table = Table(names=self.colnames, dtype=types)
+        self.colunits = units
+        self.stars_table = Table(names=self.colnames, dtype=types, units=units)
         self.stars_table.add_index('star_id')
 
     def __len__(self):
@@ -69,17 +91,24 @@ class StarsList:
 
         Parameters:
             ra (float):
-                right ascension of the star
+                right ascension of the star in degrees.
             dec (float):
-                declination of the star
+                declination of the star in degrees.
             gmag (float):
                 gaia G band magnitude of the star
             teff (float):
                 effective temperature of the star (it is used to look for the correct spectrum)
+                in K.
             ag (float):
-                extinction on the gaia G band
+                extinction on the gaia G band.
+
 
         """
+
+        # check if the star is within the simulated FOV
+
+        self._check_inside(ra, dec)
+
         new_row = {'star_id': len(self) + 1,
                    'ra': ra,
                    'dec': dec,
@@ -95,7 +124,29 @@ class StarsList:
 
         self.stars_table.add_row(new_row)
 
-    def add_gaia_stars(self, ra, dec, radius, gmag_limit=17):
+    def _check_inside(self, ra, dec):
+        """
+        Check if the manually added star falls within the required FOV
+
+        Args:
+            ra (float):
+                ra of the manually added star.
+            dec (float):
+                dec of the manually added star.
+
+        Raises:
+            ValueError:
+                raise an error if the star is outside the required FOV
+        """
+
+        star_coord = SkyCoord(ra, dec, unit=(u.deg, u.deg))
+
+        sep = star_coord.separation(self.center)
+
+        if sep > self.radius:
+            raise ValueError('This star is outside the simulated field of view...')
+
+    def add_gaia_stars(self, gmag_limit=17):
         """
         Add stars from the Gaia DR2 catalog to the stars list.
 
@@ -103,20 +154,11 @@ class StarsList:
         to the list of stars used to simulated the observed field.
 
         Parameters:
-            ra (float):
-                right ascension of the center of the field. This parameter is expected in degree.
-            dec (float):
-                declination of the center of the field. This parameter is expected in degree.
-            radius (Quantity):
-                radius of the field to be searched in Gaia.
             gmag_limit (float, optional):
                 Maximum magnitude for a star to be included in the list. Defaults to 17.
-
         """
 
-        coords = SkyCoord(ra, dec, unit=(u.deg, u.deg))
-
-        result = query_gaia(coords, radius)
+        result = query_gaia(self.center, self.radius.to(u.deg))
 
         # select only the relevant columns
         colnames = [item for item in self.colnames if item not in ['gaia', 'star_id']]
@@ -182,7 +224,7 @@ def open_gaia_passband(wave, band='G', conserve_flux=False):
 
     # Only GAIA DR2 passbands are allowed
     if band not in list(available_bands.keys()):
-        raise ValueError(f'The {band} band is not available. Try with G, BP, RP')
+        raise ValueError(f'The {band} band is not available. Try with G, BP or RP')
 
     table = Table.read(filename, format='ascii')
 
@@ -246,5 +288,11 @@ def query_gaia(coord, radius):
 
 # if __name__ == '__main__':
 
-#     wave = np.arange(3000, 10000.1, 0.1)
-#     open_gaia_passband(wave, band='G')
+#     # wave = np.arange(3000, 10000.1, 0.1)
+#     # open_gaia_passband(wave, band='G')
+
+#     starlist = StarsList(0, 0, 2)
+#     starlist.add_gaia_stars(18)
+#     starlist.add_star(0, 0, 7, 10000, 0.4)
+
+#     print(starlist.stars_table)
