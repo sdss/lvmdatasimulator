@@ -94,3 +94,19 @@ class TestStars:
                               passband.Vega_zero_flux)
 
         assert np.round(mag[0], 0) == starlist.stars_table['phot_g_mean_mag'][0]
+
+    def test_remove_star(self):
+
+        starlist = StarsList(0, 0, 2)
+        starlist.add_star(0, 0, 7, 10000, 0.4)
+        starlist.add_star(0, 0, 15, 15000, 0.4)
+        starlist.associate_spectra()
+
+        len1 = len(starlist)
+
+        starlist.remove_star(1)
+
+        len2 = len(starlist)
+
+        assert len1 == len2 + 1
+        assert 1 not in starlist.stars_table['star_id']
