@@ -22,6 +22,7 @@ from astroquery.gaia import Gaia
 
 from lvmdatasimulator import log, ROOT_DIR
 
+import os
 
 Gaia.MAIN_GAIA_TABLE = "gaiadr2.gaia_source"  # Select Data Release 2. EDR3 is missing temperatures
 
@@ -253,6 +254,48 @@ class StarsList:
             wave = hdu['WAVE'].data * unit
 
         return wave
+
+    def apply_extinction(self):
+        pass
+
+    def save(self, outname='starlist.fits.gz', outdir='./', overwrite=True):
+        """
+        Save the StarList as a fits file.
+
+        Parameters:
+            outname (str, optional):
+                name of the output file. Defaults to 'starlist.fits.gz'.
+            outdir (str, optional):
+                path to the output directory. Defaults to './'.
+            overwrite (bool, optional):
+                overwrite the file if it already exist. Defaults to True.
+        """
+
+        # confirming that outfile is a fits or a compressed fits file
+        accepted_types = ('.fits', '.fits.gz')
+
+        if not outname.endswith(accepted_types):
+            outname += '.fits.gz'
+            log.warning(f'the name of the output file has been updated to {outname}')
+
+        primary = fits.PrimaryHDU()  # creating the primary hdu
+
+        # adding extension names in the primary header
+        primary.header['EXT1'] = 'TABLE'
+        primary.header['EXT2'] = 'FLUX'
+        primary.header['EXT3'] = 'WAVE'
+
+        table = fits.table_to_hdu(self.stars_table)  # creating the table extension
+        spectra = fits.ImageHDU(data=self.spectra, name='FLUX')  # creating the fluxes extension
+        wave = fits.ImageHDU(data=self.wave.value, name='WAVE')  # creating the wave extension
+
+        hdul = fits.HDUList([primary, table, spectra, wave])
+
+        filename = os.path.join(outdir, outname)
+        if overwrite and os.path.isfile(filename):
+            log.warning(f'The file {filename} already exist and it will be overwritten')
+
+        hdul.writeto(filename, overwrite=overwrite)
 
 ################################################################################
 
