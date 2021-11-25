@@ -261,7 +261,24 @@ class StarsList:
     def apply_extinction(self):
         pass
 
-    def save(self, outname='starlist.fits.gz', outdir='./', overwrite=True):
+    def compute_star_positions(self, wcs):
+        """
+        Converting world coordinates to pixel coordinates.
+
+        It can be used to build, in the future, a datacube or a 2D map
+
+        Args:
+            wcs (astropy.wcs):
+                wcs of the source field that should be produced.
+        """
+
+        log.info('Transforming world coordinates to pixel coordinates')
+        x, y = wcs.all_world2pix(self.stars_table['ra'], self.stars_table['dec'], 0)
+
+        self.stars_table['x'] = x
+        self.stars_table['y'] = y
+
+    def save_to_fits(self, outname='starlist.fits.gz', outdir='./', overwrite=True):
         """
         Save the StarList as a fits file.
 
@@ -288,7 +305,18 @@ class StarsList:
         primary.header['EXT2'] = 'FLUX'
         primary.header['EXT3'] = 'WAVE'
 
+        # Add other info in the header
+        print(self.ra.to(u.deg).value)
+        primary.header['RA'] = (self.ra.to(u.deg).value,
+                                'Right ascension of the center of the field (deg)')
+        primary.header['DEC'] = (self.dec.to(u.deg).value,
+                                 'Declination of the center of the field (deg)')
+        primary.header['RADIUS'] = (self.radius.to(u.deg).value,
+                                    'Radius of the field (deg)')
+
         table = fits.table_to_hdu(self.stars_table)  # creating the table extension
+        table.header['EXTNAME'] = 'TABLE'  # add name to the extension
+
         spectra = fits.ImageHDU(data=self.spectra, name='FLUX')  # creating the fluxes extension
         wave = fits.ImageHDU(data=self.wave.value, name='WAVE')  # creating the wave extension
 
