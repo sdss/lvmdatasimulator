@@ -292,6 +292,8 @@ class StarsList:
 
         self.stars_table['x'] = x
         self.stars_table['y'] = y
+        self.stars_table['x'].unit = u.pix
+        self.stars_table['y'].unit = u.pix
 
     def save_to_fits(self, outname='starlist.fits.gz', outdir='./', overwrite=True):
         """
