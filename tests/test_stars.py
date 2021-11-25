@@ -90,10 +90,7 @@ class TestStars:
 
         passband = pyphot.get_library()['GaiaDR2_G']
         print(starlist.spectra)
-        mag = -2.5 * np.log10(passband.get_flux(starlist.wave.value, starlist.spectra, axis=1)/
+        mag = -2.5 * np.log10(passband.get_flux(starlist.wave.value, starlist.spectra, axis=1) /
                               passband.Vega_zero_flux)
 
         assert np.round(mag[0], 0) == starlist.stars_table['phot_g_mean_mag'][0]
-
-
-
