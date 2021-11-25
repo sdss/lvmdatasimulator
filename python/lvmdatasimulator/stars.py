@@ -233,6 +233,9 @@ class StarsList:
         passband = pyphot.get_library()['GaiaDR2_G']
 
         # convert gaia magnitudes to fluxes in erg etc
+        # I could do directly with mag, but pyphot has some problems when working on a single
+        # spectra with magnitudes
+
         gaia_fluxes = passband.Vega_zero_flux * \
             10**(-0.4 * self.stars_table['phot_g_mean_mag'].data)
 
