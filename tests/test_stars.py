@@ -3,6 +3,9 @@
 # testing the code into the stars.py file
 
 import astropy.units as u
+import pyphot
+import numpy as np
+
 from pytest import mark
 
 from lvmdatasimulator.stars import StarsList
@@ -68,3 +71,29 @@ class TestStars:
         stars = StarsList(ra, dec, radius, unit_radius=u.arcsec)
         stars.add_gaia_stars(gmag_limit=gmag_limit)
         assert 'No star detected!' in caplog.text
+
+    def test_associate_spectra(self):
+
+        starlist = StarsList(0, 0, 2)
+        starlist.add_star(0, 0, 7, 10000, 0.4)
+        starlist.associate_spectra()
+
+    def test_rescale_spectra(self):
+        """
+        this test is a little bit janky
+        """
+        starlist = StarsList(0, 0, 2)
+        starlist.add_star(0, 0, 7, 10000, 0.4)
+        starlist.add_star(0, 0, 15, 15000, 0.4)
+        starlist.associate_spectra()
+        starlist.rescale_spectra()
+
+        passband = pyphot.get_library()['GaiaDR2_G']
+        print(starlist.spectra)
+        mag = -2.5 * np.log10(passband.get_flux(starlist.wave.value, starlist.spectra, axis=1)/
+                              passband.Vega_zero_flux)
+
+        assert np.round(mag[0], 0) == starlist.stars_table['phot_g_mean_mag'][0]
+
+
+
