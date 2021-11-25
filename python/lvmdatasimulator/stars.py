@@ -17,8 +17,8 @@ from astropy.io import fits
 from astropy.coordinates import SkyCoord
 from astropy.table import Table, vstack
 from astroquery.gaia import Gaia
-from spectres import spectres
-from scipy.interpolate import interp1d
+# from spectres import spectres
+# from scipy.interpolate import interp1d
 
 from lvmdatasimulator import log, ROOT_DIR
 
@@ -229,7 +229,8 @@ class StarsList:
         passband = pyphot.get_library()['GaiaDR2_G']
 
         # convert gaia magnitudes to fluxes in erg etc
-        gaia_fluxes = passband.Vega_zero_flux * 10**(-0.4*self.stars_table['phot_g_mean_mag'].data)
+        gaia_fluxes = passband.Vega_zero_flux * \
+            10**(-0.4 * self.stars_table['phot_g_mean_mag'].data)
 
         synth_flux = passband.get_flux(self.wave.value, self.spectra, axis=1)
 
@@ -296,8 +297,8 @@ def get_spectrum(temp, library):
 #         wave (1-D array-like object):
 #             Array containing the wavelengths over which the passband must be resampled
 #         band (str, optional):
-#             GAIA DR2 passband to extract from the file. Defaults to 'G'. Other available bands are
-#             'BP' and 'RP'.
+#             GAIA DR2 passband to extract from the file. Defaults to 'G'. Other available bands
+#             are 'BP' and 'RP'.
 #         conserve_flux (bool, optional):
 #             If True, it uses the spectres package to resample the passband. If False, it uses a
 #             standard linear interpolation. Defaults to False.
@@ -367,8 +368,12 @@ def query_gaia(coord, radius):
             astropy table containing the result of the query.
     """
 
-    job = Gaia.cone_search_async(coord, radius)
-    results = job.get_results()
+    try:
+        job = Gaia.cone_search_async(coord, radius)
+        results = job.get_results()
+    except TimeoutError:
+        log.warning('GAIA DR2 server timed out. Continuing without gaia stars')
+        pass
 
     if len(results) == 0:
         log.warning('No star detected!')
@@ -378,18 +383,18 @@ def query_gaia(coord, radius):
     return results
 
 
-if __name__ == '__main__':
+# if __name__ == '__main__':
 
-    # # wave = np.arange(3000, 10000.1, 0.1)
-    # # open_gaia_passband(wave, band='G')
+#     # # wave = np.arange(3000, 10000.1, 0.1)
+#     # # open_gaia_passband(wave, band='G')
 
-    starlist = StarsList(0, 0, 2)
-    # starlist.add_gaia_stars(17)
-    # print(len(starlist))
+#     starlist = StarsList(0, 0, 2)
+#     # starlist.add_gaia_stars(17)
+#     # print(len(starlist))
 
-    starlist.add_star(0, 0, 7, 10000, 0.4)
-    # starlist.add_star(0, 0, 15, 20000, 0.4)
-    starlist.associate_spectra()
-    starlist.rescale_spectra()
+#     starlist.add_star(0, 0, 7, 10000, 0.4)
+#     # starlist.add_star(0, 0, 15, 20000, 0.4)
+#     starlist.associate_spectra()
+#     starlist.rescale_spectra()
 
-    # print(starlist.stars_table)
+#     # print(starlist.stars_table)
