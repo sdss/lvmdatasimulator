@@ -1,5 +1,5 @@
 # encoding: utf-8
-
+import os
 from sdsstools import get_config, get_logger, get_package_version
 
 
@@ -14,6 +14,11 @@ config = get_config('lvmdatasimulator')
 # than NAME.
 log = get_logger(NAME)
 
+# import root directory
+ROOT_DIR = os.path.realpath(os.path.join(os.path.dirname(__file__), '..', '..'))
+
 
 # package name should be pip package name
 __version__ = get_package_version(path=__file__, package_name=NAME)
+
+
