@@ -34,16 +34,25 @@ class StarsList:
     This class allows to create, modify and store the list of stars needed by the LVMField object
     to create the datacube that will be feed to the LVM simulator.
 
-    The class is initiated with an empty table, and stars can be added manually, or by quering gaia
-    on a particolar field.
+    The class can also open a previously saved fits file with the correct informations.
+
+    If no filename is provided, the class is initiated with an empty table, and stars can be added
+    manually or by quering gaia on a particolar field.
 
     Parameters:
-        ra (float):
+        ra (float, optional):
             right ascension of the center of the field. This parameter is expected in degree.
-        dec (float):
+            Defaults to 0.
+        dec (float, optional):
             declination of the center of the field. This parameter is expected in degree.
-        radius (float):
-            radius of the field to be searched in Gaia.
+            Defaults to 0.
+        radius (float, optional):
+            radius of the field to be searched in Gaia. Defaults to 1.
+        filename (str, optional):
+            name of the file to be opened. If it is not provided an empty object is created using
+            the default options or the user provided ones. Defaults to None.
+        dir (str, optional):
+            directory where the file to open is located. Defaults to './'
         unit_ra (astropy.unit, optional):
             unit associated to the right ascension. Defaults to u.deg
         unit_dec (astropy.unit, optional):
@@ -336,6 +345,23 @@ class StarsList:
         hdul.writeto(filename, overwrite=overwrite)
 
     def _read_from_fits(self, filename, dir='./'):
+        """
+        Read a starlist object from a fits file.
+
+        The structure of the file must be the one required by the save_to_fits method and it
+        must contain all the informations required to build a StarList object.
+        It should be used to only open data previously saved by the save_to_fits method
+
+        Parameters:
+            filename (str):
+                name of the file to open. It must be a .fits or a .fits.gz file
+            dir (str, optional):
+                directory where the file is located. Defaults to './'.
+
+        Raises:
+            ValueError:
+                raises a ValueError when the file is not a .fits or a .fits.gz file.
+        """
 
         accepted_types = ('.fits', '.fits.gz')
 
@@ -345,23 +371,24 @@ class StarsList:
         filename = os.path.join(dir, filename)
 
         # reading the file
-        hdu = fits.open(filename)
+        with fits.open(filename) as hdu:
 
-        self.stars_table = Table.read(hdu['TABLE'])
-        self.spectra = hdu['FLUX'].data
-        self.wave = hdu['WAVE'].data * u.AA
+            # opening the main extensions
+            self.stars_table = Table.read(hdu['TABLE'])
+            self.spectra = hdu['FLUX'].data
+            self.wave = hdu['WAVE'].data * u.AA
 
-        self.ra = hdu[0].header['RA'] * u.deg
-        self.dec = hdu[0].header['DEC'] * u.deg
-        self.radius = hdu[0].header['RADIUS'] * u.deg
+            # recovering main info from primary header
+            self.ra = hdu[0].header['RA'] * u.deg
+            self.dec = hdu[0].header['DEC'] * u.deg
+            self.radius = hdu[0].header['RADIUS'] * u.deg
 
-        self.colnames = self.stars_table.colnames
-        self.colunits = []
-        for col in self.colnames:
-            self.colunits.append(self.stars_table[col].unit)
-        self.stars_table.add_index('star_id')
-
-
+            # recovering info on the name of the columns and their units
+            self.colnames = self.stars_table.colnames
+            self.colunits = []
+            for col in self.colnames:
+                self.colunits.append(self.stars_table[col].unit)
+            self.stars_table.add_index('star_id')
 
 ################################################################################
 
