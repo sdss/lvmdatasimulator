@@ -163,8 +163,11 @@ class StarsList:
             gmag_limit (float, optional):
                 Maximum magnitude for a star to be included in the list. Defaults to 17.
         """
-
-        result = query_gaia(self.center, self.radius.to(u.deg))
+        try:
+            result = query_gaia(self.center, self.radius.to(u.deg))
+        except TimeoutError:
+            log.warning('GAIA DR2 server timed out. Continuing without gaia stars')
+            return
 
         # select only the relevant columns
         colnames = [item for item in self.colnames if item not in ['gaia', 'star_id']]
@@ -368,12 +371,8 @@ def query_gaia(coord, radius):
             astropy table containing the result of the query.
     """
 
-    try:
-        job = Gaia.cone_search_async(coord, radius)
-        results = job.get_results()
-    except TimeoutError:
-        log.warning('GAIA DR2 server timed out. Continuing without gaia stars')
-        pass
+    job = Gaia.cone_search_async(coord, radius)
+    results = job.get_results()
 
     if len(results) == 0:
         log.warning('No star detected!')
