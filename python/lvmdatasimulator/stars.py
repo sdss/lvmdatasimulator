@@ -203,6 +203,8 @@ class StarsList:
                 Defaults to '{ROOT_DIR}/data/pollux_resampled_v0.fits.gz'.
         """
 
+        log.info('Associating spectra to stars')
+
         self.wave = self._get_wavelength_array(library)
         self.spectra = np.zeros((len(self.stars_table), len(self.wave)))
 
@@ -216,15 +218,27 @@ class StarsList:
         bar.finish()
 
     def rescale_spectra(self):
+        """
+        This function rescales the synthetic spectra in order to match them to the gaia photometry.
+        It works only with the G band of gaia DR2.
+
+        """
+
+        log.info(f'Rescaling {len(self.stars_table)} synthetic spectra.')
 
         passband = pyphot.get_library()['GaiaDR2_G']
 
-        print(self.spectra[0])
-        print(self.spectra[1])
+        # convert gaia magnitudes to fluxes in erg etc
+        gaia_fluxes = passband.Vega_zero_flux * 10**(-0.4*self.stars_table['phot_g_mean_mag'].data)
+
         synth_flux = passband.get_flux(self.wave.value, self.spectra, axis=1)
-        synth_mag = -2.5 * np.log10(synth_flux / passband.Vega_zero_flux)
-        print(synth_flux)
-        print(synth_mag)
+
+        scale_factor = gaia_fluxes / synth_flux  # scale factor for the spectra
+
+        # I don't understand why but it does not work by just multiplying.
+        # I'm not sure I want to keep going with this package
+        for i, factor in enumerate(scale_factor):
+            self.spectra[i] = self.spectra[i] * factor
 
     @staticmethod
     def _get_wavelength_array(filename=f'{ROOT_DIR}/data/pollux_resampled_v0.fits.gz',
@@ -374,8 +388,8 @@ if __name__ == '__main__':
     # print(len(starlist))
 
     starlist.add_star(0, 0, 7, 10000, 0.4)
-    starlist.add_star(0, 0, 15, 20000, 0.4)
+    # starlist.add_star(0, 0, 15, 20000, 0.4)
     starlist.associate_spectra()
-    # starlist.rescale_spectra()
+    starlist.rescale_spectra()
 
     # print(starlist.stars_table)
