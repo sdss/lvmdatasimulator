@@ -132,14 +132,13 @@ class StarsList:
 
         self._check_inside(ra, dec)
 
-        new_row = {'star_id': len(self) + 1,
+        new_row = {'star_id': len(self.stars_table) + 1,
                    'ra': ra,
                    'dec': dec,
                    'phot_g_mean_mag': gmag,
                    'teff_val': teff,
                    'a_g_val': ag,
-                   'gaia': False,
-                   'source_id': np.nan}
+                   'gaia': False}
 
         log.info('star {} with Teff {} and Gmag {} was added to star list at position ({} , {})'
                  .format(new_row['star_id'], new_row['teff_val'], new_row['phot_g_mean_mag'],
@@ -382,6 +381,7 @@ class StarsList:
             self.ra = hdu[0].header['RA'] * u.deg
             self.dec = hdu[0].header['DEC'] * u.deg
             self.radius = hdu[0].header['RADIUS'] * u.deg
+            self.center = SkyCoord(self.ra, self.dec)
 
             # recovering info on the name of the columns and their units
             self.colnames = self.stars_table.colnames
@@ -389,6 +389,34 @@ class StarsList:
             for col in self.colnames:
                 self.colunits.append(self.stars_table[col].unit)
             self.stars_table.add_index('star_id')
+
+    def remove_star(self, id):
+        """
+        Remove a star with a specific star_id
+
+        Args:
+            id (int):
+                star_id of the star to be removed
+        """
+
+        # checking if id exist
+        if id not in self.stars_table['star_id']:
+            log.warning(f'There is no star with star_id = {id}')
+            return
+
+        # if it existh remove the star
+        log.info(f'Removing star (star_id: {id})')
+
+        mask = self.stars_table['star_id'] == id  # mask identifying the correct star
+        # self.stars_table = self.stars_table[~mask].copy()  # select all the other stars
+        self.stars_table.remove_row(id)
+
+        # if spectra where already assigned, remove also the spectrum
+        if self.spectra is not None:
+            self.spectra = self.spectra[~mask].copy()
+
+        assert len(self.stars_table) == len(self.spectra), \
+            'The star and spectrum where not removed correctly'
 
 ################################################################################
 
