@@ -12,6 +12,7 @@ import pyphot
 import progressbar
 # import matplotlib.pyplot as plt
 
+# from pyphot import unit
 from astropy.io import fits
 from astropy.coordinates import SkyCoord
 from astropy.table import Table, vstack
@@ -19,7 +20,7 @@ from astroquery.gaia import Gaia
 from spectres import spectres
 from scipy.interpolate import interp1d
 
-from lvmdatasimulator import log
+from lvmdatasimulator import log, ROOT_DIR
 
 
 Gaia.MAIN_GAIA_TABLE = "gaiadr2.gaia_source"  # Select Data Release 2. EDR3 is missing temperatures
@@ -123,7 +124,7 @@ class StarsList:
                    'gaia': False,
                    'source_id': np.nan}
 
-        log.info('star {} with Teff {} and Gmag {} was added to star list at position ({} , {}'
+        log.info('star {} with Teff {} and Gmag {} was added to star list at position ({} , {})'
                  .format(new_row['star_id'], new_row['teff_val'], new_row['phot_g_mean_mag'],
                          new_row['ra'], new_row['dec']))
 
@@ -189,7 +190,7 @@ class StarsList:
         # finally saving the new table
         self.stars_table = vstack([self.stars_table, result])
 
-    def associate_spectra(self, library='../../data/pollux_resampled_v0.fits.gz'):
+    def associate_spectra(self, library=f'{ROOT_DIR}/data/pollux_resampled_v0.fits.gz'):
         """
         Associate a spectrum from a syntetic library to each one of the stars in the list.
 
@@ -199,7 +200,7 @@ class StarsList:
         parameters:
             library (str, optional):
                 path to the spectral library to use.
-                Defaults to '../../data/pollux_resampled_v0.fits.gz'.
+                Defaults to '{ROOT_DIR}/data/pollux_resampled_v0.fits.gz'.
         """
 
         self.wave = self._get_wavelength_array(library)
@@ -214,8 +215,19 @@ class StarsList:
 
         bar.finish()
 
+    def rescale_spectra(self):
+
+        passband = pyphot.get_library()['GaiaDR2_G']
+
+        print(self.spectra[0])
+        print(self.spectra[1])
+        synth_flux = passband.get_flux(self.wave.value, self.spectra, axis=1)
+        synth_mag = -2.5 * np.log10(synth_flux / passband.Vega_zero_flux)
+        print(synth_flux)
+        print(synth_mag)
+
     @staticmethod
-    def _get_wavelength_array(filename='../../data/pollux_resampled_v0.fits.gz',
+    def _get_wavelength_array(filename=f'{ROOT_DIR}/data/pollux_resampled_v0.fits.gz',
                               unit=u.AA):
 
         with fits.open(filename) as hdu:
@@ -252,75 +264,74 @@ def get_spectrum(temp, library):
         properties = Table.read(hdu['TEMP'])
         fluxes = hdu['FLUX'].data
 
-    delta = properties['T'] - temp
+    delta = np.abs(properties['T'] - temp)
     idx = np.argmin(delta)
 
     spectrum = fluxes[idx]
-
     return spectrum
 
 
-def open_gaia_passband(wave, band='G', conserve_flux=False):
-    """
-    Open the desired GAIA DR2 passband.
+# def open_gaia_passband(wave, band='G', conserve_flux=False):
+#     """
+#     Open the desired GAIA DR2 passband.
 
-    This function opens the desired GAIA DR2 passband and resample it on the same wavelength
-    of the spectra.
+#     This function opens the desired GAIA DR2 passband and resample it on the same wavelength
+#     of the spectra.
 
-    Args:
-        wave (1-D array-like object):
-            Array containing the wavelengths over which the passband must be resampled
-        band (str, optional):
-            GAIA DR2 passband to extract from the file. Defaults to 'G'. Other available bands are
-            'BP' and 'RP'.
-        conserve_flux (bool, optional):
-            If True, it uses the spectres package to resample the passband. If False, it uses a
-            standard linear interpolation. Defaults to False.
+#     Args:
+#         wave (1-D array-like object):
+#             Array containing the wavelengths over which the passband must be resampled
+#         band (str, optional):
+#             GAIA DR2 passband to extract from the file. Defaults to 'G'. Other available bands are
+#             'BP' and 'RP'.
+#         conserve_flux (bool, optional):
+#             If True, it uses the spectres package to resample the passband. If False, it uses a
+#             standard linear interpolation. Defaults to False.
 
-    Raises:
-        ValueError:
-            raised if the required passband is not included in the available ones
+#     Raises:
+#         ValueError:
+#             raised if the required passband is not included in the available ones
 
-    Returns:
-        numpy.array:
-            GAIA passband resampled on the wavelengths provided by the wave array
-    """
+#     Returns:
+#         numpy.array:
+#             GAIA passband resampled on the wavelengths provided by the wave array
+#     """
 
-    filename = '../../data/GaiaDR2_Passbands.dat'
-    available_bands = {'G': 'col2', 'BP': 'col4', 'RP': 'col6'}
+#     filename = '../../data/GaiaDR2_Passbands.dat'
+#     available_bands = {'G': 'col2', 'BP': 'col4', 'RP': 'col6'}
 
-    # Only GAIA DR2 passbands are allowed
-    if band not in list(available_bands.keys()):
-        raise ValueError(f'The {band} band is not available. Try with G, BP or RP')
+#     # Only GAIA DR2 passbands are allowed
+#     if band not in list(available_bands.keys()):
+#         raise ValueError(f'The {band} band is not available. Try with G, BP or RP')
 
-    table = Table.read(filename, format='ascii')
+#     table = Table.read(filename, format='ascii')
 
-    old_wave = table['col1'] * 10  # from nm to A
+#     old_wave = table['col1'] * 10  # from nm to A
 
-    sensitivity = table[available_bands[band]]  # can extract any of the three bands
-    mask = sensitivity == 99.99  # 99.99 is used to mark non existing data in the passband file
-    sensitivity[mask] = 0
+#     sensitivity = table[available_bands[band]]  # can extract any of the three bands
+#     mask = sensitivity == 99.99  # 99.99 is used to mark non existing data in the passband file
+#     sensitivity[mask] = 0
 
-    if conserve_flux:
-        # using spectres: weird shape of spectrum
-        new_sensitivity = spectres(wave, old_wave, sensitivity)
-    else:
-        # interpolate the sensitivity to a better resolution
-        interpolated = interp1d(old_wave, sensitivity)
-        new_sensitivity = interpolated(wave)
+#     if conserve_flux:
+#         # using spectres: weird shape of spectrum
+#         new_sensitivity = spectres(wave, old_wave, sensitivity)
+#     else:
+#         # interpolate the sensitivity to a better resolution
+#         interpolated = interp1d(old_wave, sensitivity)
+#         new_sensitivity = interpolated(wave)
 
-    # new_sensitivity = spectres(wave, old_wave, sensitivity)
+#     # new_sensitivity = spectres(wave, old_wave, sensitivity)
 
-    # fig, ax = plt.subplots(1,1)
+#     # fig, ax = plt.subplots(1,1)
 
-    # ax.plot(wave, new_sensitivity, c='k', label='resampled')
-    # ax.plot(old_wave, sensitivity, c='r', label='original')
-    # ax.plot(wave, interp_sensitivity, c='b', label='scipy')
-    # ax.legend(loc='best')
+#     # ax.plot(wave, new_sensitivity, c='k', label='resampled')
+#     # ax.plot(old_wave, sensitivity, c='r', label='original')
+#     # ax.plot(wave, interp_sensitivity, c='b', label='scipy')
+#     # ax.legend(loc='best')
 
-    # plt.show()
+#     # plt.show()
 
-    return new_sensitivity
+#     return new_sensitivity
 
 
 def query_gaia(coord, radius):
@@ -353,17 +364,18 @@ def query_gaia(coord, radius):
     return results
 
 
-# if __name__ == '__main__':
+if __name__ == '__main__':
 
     # # wave = np.arange(3000, 10000.1, 0.1)
     # # open_gaia_passband(wave, band='G')
 
-    # starlist = StarsList(0, 0, 2)
+    starlist = StarsList(0, 0, 2)
     # starlist.add_gaia_stars(17)
     # print(len(starlist))
 
-    # starlist.add_star(0, 0, 7, 10000, 0.4)
-    # starlist.associate_spectra()
-    # # starlist.rescale_spectra()
+    starlist.add_star(0, 0, 7, 10000, 0.4)
+    starlist.add_star(0, 0, 15, 20000, 0.4)
+    starlist.associate_spectra()
+    # starlist.rescale_spectra()
 
     # print(starlist.stars_table)
