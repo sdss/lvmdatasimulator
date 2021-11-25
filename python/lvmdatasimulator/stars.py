@@ -63,7 +63,7 @@ class StarsList:
             table containing the list of stars and their parameters
     """
 
-    def __init__(self, ra, dec, radius,
+    def __init__(self, ra=0, dec=0, radius=1, filename=None, dir='./',
                  unit_ra=u.deg, unit_dec=u.deg, unit_radius=u.arcmin,
                  colnames=['star_id', 'ra', 'dec', 'phot_g_mean_mag', 'phot_bp_mean_mag',
                            'phot_rp_mean_mag', 'teff_val', 'a_g_val', 'e_bp_min_rp_val',
@@ -73,17 +73,24 @@ class StarsList:
                  units=[None, u.deg, u.deg, u.mag, u.mag, u.mag, u.K, u.mag, u.mag, None, None]
                  ):
 
-        # create an empty table to contain the list of stars
-        self.ra = ra * unit_ra
-        self.dec = dec * unit_dec
-        self.center = SkyCoord(self.ra, self.dec)
-        self.radius = radius * unit_radius
-        self.colnames = colnames
-        self.colunits = units
-        self.stars_table = Table(names=self.colnames, dtype=types, units=units)
-        self.stars_table.add_index('star_id')
-        self.wave = None  # empty for now
-        self.spectra = None  # empty for now
+        # if a filename is given open the file, otherwise create an object with the default
+        # or user provided details
+        if filename is not None:
+            filename = os.path.join(dir, filename)
+            self._read_from_fits(filename)
+
+        else:
+            # create an empty table to contain the list of stars
+            self.ra = ra * unit_ra
+            self.dec = dec * unit_dec
+            self.center = SkyCoord(self.ra, self.dec)
+            self.radius = radius * unit_radius
+            self.colnames = colnames
+            self.colunits = units
+            self.stars_table = Table(names=self.colnames, dtype=types, units=units)
+            self.stars_table.add_index('star_id')
+            self.wave = None  # empty for now
+            self.spectra = None  # empty for now
 
     def __len__(self):
         return len(self.stars_table)
@@ -201,7 +208,7 @@ class StarsList:
         Each star is associated to the spectrum with the closest temperature, which is rescaled to
         roughly match the observed gaia magnitude.
 
-        parameters:
+        Parameters:
             library (str, optional):
                 path to the spectral library to use.
                 Defaults to '{ROOT_DIR}/data/pollux_resampled_v0.fits.gz'.
@@ -327,6 +334,34 @@ class StarsList:
             log.warning(f'The file {filename} already exist and it will be overwritten')
 
         hdul.writeto(filename, overwrite=overwrite)
+
+    def _read_from_fits(self, filename, dir='./'):
+
+        accepted_types = ('.fits', '.fits.gz')
+
+        if not filename.endswith(accepted_types):
+            raise ValueError('Only .fits or .fits.gz files are accepted')
+
+        filename = os.path.join(dir, filename)
+
+        # reading the file
+        hdu = fits.open(filename)
+
+        self.stars_table = Table.read(hdu['TABLE'])
+        self.spectra = hdu['FLUX'].data
+        self.wave = hdu['WAVE'].data * u.AA
+
+        self.ra = hdu[0].header['RA'] * u.deg
+        self.dec = hdu[0].header['DEC'] * u.deg
+        self.radius = hdu[0].header['RADIUS'] * u.deg
+
+        self.colnames = self.stars_table.colnames
+        self.colunits = []
+        for col in self.colnames:
+            self.colunits.append(self.stars_table[col].unit)
+        self.stars_table.add_index('star_id')
+
+
 
 ################################################################################
 
