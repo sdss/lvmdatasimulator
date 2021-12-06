@@ -77,8 +77,8 @@ class StarsList:
                  colnames=['star_id', 'ra', 'dec', 'phot_g_mean_mag', 'phot_bp_mean_mag',
                            'phot_rp_mean_mag', 'teff_val', 'a_g_val', 'e_bp_min_rp_val',
                            'gaia', 'source_id'],
-                 types=['int', 'float', 'float', 'float', 'float', 'float', 'float', 'float',
-                        'float', 'bool', 'float'],
+                 types=[int, float, float, float, float, float, float, float,
+                        float, bool, int],
                  units=[None, u.deg, u.deg, u.mag, u.mag, u.mag, u.K, u.mag, u.mag, None, None]
                  ):
 
@@ -138,7 +138,8 @@ class StarsList:
                    'phot_g_mean_mag': gmag,
                    'teff_val': teff,
                    'a_g_val': ag,
-                   'gaia': False}
+                   'gaia': False,
+                   }
 
         log.info('star {} with Teff {} and Gmag {} was added to star list at position ({} , {})'
                  .format(new_row['star_id'], new_row['teff_val'], new_row['phot_g_mean_mag'],
@@ -410,8 +411,8 @@ class StarsList:
         log.info(f'Removing star (star_id: {id})')
 
         mask = self.stars_table['star_id'] == id  # mask identifying the correct star
-        # self.stars_table = self.stars_table[~mask].copy()  # select all the other stars
-        self.stars_table.remove_row(id)
+        self.stars_table = self.stars_table[~mask].copy()  # select all the other stars
+        # self.stars_table.remove_row(id)
 
         # if spectra where already assigned, remove also the spectrum
         if self.spectra is not None:
