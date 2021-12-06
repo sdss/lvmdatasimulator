@@ -3,6 +3,9 @@
 # testing the code into the stars.py file
 
 import astropy.units as u
+import pyphot
+import numpy as np
+
 from pytest import mark
 
 from lvmdatasimulator.stars import StarsList
@@ -17,7 +20,7 @@ class TestStars:
         Test the add_star function
         """
 
-        stars = StarsList()
+        stars = StarsList(15, -25, 3)
         stars.add_star(ra, dec, gmag, teff, ag)
 
         assert len(stars) == 1
@@ -33,38 +36,77 @@ class TestStars:
         assert not stars.stars_table.loc[1]['gaia']
 
     @mark.parametrize(('ra', 'dec', 'radius', 'gmag_limit', 'nstars'),
-                      [(0, 0, 2 * u.arcmin, 30, 10),
-                       (0, 0, 2 * u.arcmin, 17, 2),
-                       (0, 0, 2 * u.arcmin, 10, 0)])
+                      [(0, 0, 2, 30, 10),
+                       (0, 0, 2, 17, 2),
+                       (0, 0, 2, 10, 0)])
     def test_add_gaia_stars(self, ra, dec, radius, gmag_limit, nstars):
         """
         Test the add_gaia_stars function
         """
 
-        stars = StarsList()
-        stars.add_gaia_stars(ra, dec, radius, gmag_limit=gmag_limit)
+        stars = StarsList(ra, dec, radius)
+        stars.add_gaia_stars(gmag_limit=gmag_limit)
         assert len(stars) == nstars
 
     @mark.parametrize(('ra', 'dec', 'radius', 'gmag_limit'),
-                      [(0, 0, 2 * u.arcmin, 10)])
+                      [(0, 0, 2, 10)])
     def test_add_gaia_stars_logging_rejected(self, ra, dec, radius, gmag_limit, caplog):
         """
         Test if the logging in the case of all stars being rejected is working
         """
 
         caplog.clear()
-        stars = StarsList()
-        stars.add_gaia_stars(ra, dec, radius, gmag_limit=gmag_limit)
+        stars = StarsList(ra, dec, radius)
+        stars.add_gaia_stars(gmag_limit=gmag_limit)
         assert 'All the stars have been rejected!' in caplog.text
 
     @mark.parametrize(('ra', 'dec', 'radius', 'gmag_limit'),
-                      [(0, 0, 2 * u.arcsec, 17)])
+                      [(0, 0, 2, 17)])
     def test_add_gaia_stars_logging_nostars(self, ra, dec, radius, gmag_limit, caplog):
         """
         Test if the logging works in the case there are no Gaia stars
         """
 
         caplog.clear()
-        stars = StarsList()
-        stars.add_gaia_stars(ra, dec, radius, gmag_limit=gmag_limit)
+        stars = StarsList(ra, dec, radius, unit_radius=u.arcsec)
+        stars.add_gaia_stars(gmag_limit=gmag_limit)
         assert 'No star detected!' in caplog.text
+
+    def test_associate_spectra(self):
+
+        starlist = StarsList(0, 0, 2)
+        starlist.add_star(0, 0, 7, 10000, 0.4)
+        starlist.associate_spectra()
+
+    def test_rescale_spectra(self):
+        """
+        this test is a little bit janky
+        """
+        starlist = StarsList(0, 0, 2)
+        starlist.add_star(0, 0, 7, 10000, 0.4)
+        starlist.add_star(0, 0, 15, 15000, 0.4)
+        starlist.associate_spectra()
+        starlist.rescale_spectra()
+
+        passband = pyphot.get_library()['GaiaDR2_G']
+        print(starlist.spectra)
+        mag = -2.5 * np.log10(passband.get_flux(starlist.wave.value, starlist.spectra, axis=1) /
+                              passband.Vega_zero_flux)
+
+        assert np.round(mag[0], 0) == starlist.stars_table['phot_g_mean_mag'][0]
+
+    def test_remove_star(self):
+
+        starlist = StarsList(0, 0, 2)
+        starlist.add_star(0, 0, 7, 10000, 0.4)
+        starlist.add_star(0, 0, 15, 15000, 0.4)
+        starlist.associate_spectra()
+
+        len1 = len(starlist)
+
+        starlist.remove_star(1)
+
+        len2 = len(starlist)
+
+        assert len1 == len2 + 1
+        assert 1 not in starlist.stars_table['star_id']

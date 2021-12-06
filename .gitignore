@@ -113,3 +113,6 @@ ENV/
 *~
 *.swp
 *.swo
+
+# huge data directory
+data/*
