@@ -17,14 +17,17 @@ from astropy.io import fits
 from astropy.coordinates import SkyCoord
 from astropy.table import Table, vstack
 from astroquery.gaia import Gaia
-# from spectres import spectres
+from spectres import spectres
 # from scipy.interpolate import interp1d
 
 from lvmdatasimulator import log, ROOT_DIR
 
 import os
 
+# config parameters
 Gaia.MAIN_GAIA_TABLE = "gaiadr2.gaia_source"  # Select Data Release 2. EDR3 is missing temperatures
+kms = u.km / u.s
+c = 299792.458 * kms
 
 
 class StarsList:
@@ -76,10 +79,11 @@ class StarsList:
                  unit_ra=u.deg, unit_dec=u.deg, unit_radius=u.arcmin,
                  colnames=['star_id', 'ra', 'dec', 'phot_g_mean_mag', 'phot_bp_mean_mag',
                            'phot_rp_mean_mag', 'teff_val', 'a_g_val', 'e_bp_min_rp_val',
-                           'gaia', 'source_id'],
+                           'radial_velocity', 'gaia', 'source_id'],
                  types=[int, float, float, float, float, float, float, float,
-                        float, bool, int],
-                 units=[None, u.deg, u.deg, u.mag, u.mag, u.mag, u.K, u.mag, u.mag, None, None]
+                        float, float, bool, int],
+                 units=[None, u.deg, u.deg, u.mag, u.mag, u.mag, u.K, u.mag, u.mag, kms, None,
+                        None]
                  ):
 
         # if a filename is given open the file, otherwise create an object with the default
@@ -104,7 +108,7 @@ class StarsList:
     def __len__(self):
         return len(self.stars_table)
 
-    def add_star(self, ra, dec, gmag, teff, ag):
+    def add_star(self, ra, dec, gmag, teff, ag, v):
         """
         Manually add a single star to the list.
 
@@ -138,12 +142,13 @@ class StarsList:
                    'phot_g_mean_mag': gmag,
                    'teff_val': teff,
                    'a_g_val': ag,
+                   'radial_velocity': v,
                    'gaia': False,
                    }
 
-        log.info('star {} with Teff {} and Gmag {} was added to star list at position ({} , {})'
+        log.info('star {} with Teff {}, Gmag {} and velocity {} added at position ({} , {})'
                  .format(new_row['star_id'], new_row['teff_val'], new_row['phot_g_mean_mag'],
-                         new_row['ra'], new_row['dec']))
+                         new_row['radial_velocity'], new_row['ra'], new_row['dec']))
 
         self.stars_table.add_row(new_row)
 
@@ -210,7 +215,8 @@ class StarsList:
         # finally saving the new table
         self.stars_table = vstack([self.stars_table, result])
 
-    def associate_spectra(self, library=f'{ROOT_DIR}/data/pollux_resampled_v0.fits.gz'):
+    def associate_spectra(self, shift=False,
+                          library=f'{ROOT_DIR}/data/pollux_resampled_v0.fits.gz'):
         """
         Associate a spectrum from a syntetic library to each one of the stars in the list.
 
@@ -231,6 +237,8 @@ class StarsList:
         bar = progressbar.ProgressBar(max_value=len(self.stars_table)).start()
         for i, row in enumerate(self.stars_table):
             spectrum = get_spectrum(row['teff_val'], library)
+            if shift:
+                spectrum = shift_spectrum(self.wave, spectrum, row['radial_velocity'])
 
             self.spectra[i] = spectrum
             bar.update(i)
@@ -485,6 +493,29 @@ def query_gaia(coord, radius):
 
     return results
 
+
+def shift_spectrum(wave, flux, radial_velocity):
+    """
+    Apply a velocity shift to a stellar spectrum.
+
+    The code applies the correction to the wavelength range and the flux, then it resample the
+    spectrum on the original wavelength range.
+
+    Returns:
+        array-like:
+            the shifted spectrum on the original wavelength axis
+    """
+
+    z = radial_velocity / c
+    new_wave = wave * (1 + z)
+    new_flux = flux / (1 + z)
+
+    try:
+        resampled = spectres(wave, new_wave, new_flux)
+    except TypeError:  # spectres does not like units
+        resampled = spectres(wave.value, new_wave, new_flux)
+
+    return resampled
 
 # if __name__ == '__main__':
 
