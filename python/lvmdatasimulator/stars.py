@@ -94,10 +94,19 @@ class StarsList:
 
         else:
             # create an empty table to contain the list of stars
-            self.ra = ra * unit_ra
-            self.dec = dec * unit_dec
+            self.ra = ra
+            self.dec = dec
+            self.radius = radius
+
+            # fix the unit of measurements
+            if isinstance(self.ra, float):
+                self.ra *= unit_ra
+            if isinstance(self.ra, float):
+                self.dec *= unit_dec
+            if isinstance(self.ra, float):
+                self.radius *= unit_radius
+
             self.center = SkyCoord(self.ra, self.dec)
-            self.radius = radius * unit_radius
             self.colnames = colnames
             self.colunits = units
             self.stars_table = Table(names=self.colnames, dtype=types, units=units)
