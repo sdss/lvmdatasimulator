@@ -237,7 +237,7 @@ class StarsList:
         bar = progressbar.ProgressBar(max_value=len(self.stars_table)).start()
         for i, row in enumerate(self.stars_table):
             spectrum = get_spectrum(row['teff_val'], library)
-            if shift:
+            if shift and row['radial_velocity']:
                 spectrum = shift_spectrum(self.wave, spectrum, row['radial_velocity'])
 
             self.spectra[i] = spectrum
@@ -332,7 +332,6 @@ class StarsList:
         primary.header['EXT3'] = 'WAVE'
 
         # Add other info in the header
-        print(self.ra.to(u.deg).value)
         primary.header['RA'] = (self.ra.to(u.deg).value,
                                 'Right ascension of the center of the field (deg)')
         primary.header['DEC'] = (self.dec.to(u.deg).value,
@@ -494,26 +493,34 @@ def query_gaia(coord, radius):
     return results
 
 
-def shift_spectrum(wave, flux, radial_velocity):
+def shift_spectrum(wave, flux, radial_velocity, unit_v=kms):
     """
-    Apply a velocity shift to a stellar spectrum.
+    Apply a shift to a spectrum based on the radial_velocity of the object.
 
-    The code applies the correction to the wavelength range and the flux, then it resample the
-    spectrum on the original wavelength range.
+    First corrects the wave and flux array, then resample the spectrum using the original
+    wavelength range.
+
+    Args:
+        wave (array-like):
+            array containing the wavelenght axis of the spectrum.
+        flux (array-like):
+            array with the fluxes
+        radial_velocity (float):
+            radial velocity of the object used for the shift
+        unit_v (astropy.unit):
+            unit of the radial_velocity
 
     Returns:
         array-like:
-            the shifted spectrum on the original wavelength axis
+            resampled and shifted spectrum
     """
 
+    radial_velocity *= unit_v
     z = radial_velocity / c
     new_wave = wave * (1 + z)
     new_flux = flux / (1 + z)
 
-    try:
-        resampled = spectres(wave, new_wave, new_flux)
-    except TypeError:  # spectres does not like units
-        resampled = spectres(wave.value, new_wave, new_flux)
+    resampled = spectres(wave.value, new_wave.value, new_flux)
 
     return resampled
 
