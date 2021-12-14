@@ -233,6 +233,8 @@ class StarsList:
         roughly match the observed gaia magnitude.
 
         Parameters:
+            shift (bool, optional):
+                shift the spectra according to the radial velocity of the stars
             library (str, optional):
                 path to the spectral library to use.
                 Defaults to '{ROOT_DIR}/data/pollux_resampled_v0.fits.gz'.
@@ -408,6 +410,20 @@ class StarsList:
             for col in self.colnames:
                 self.colunits.append(self.stars_table[col].unit)
             self.stars_table.add_index('star_id')
+
+    def generate(self, gmag_limit=17, shift=False):
+        """
+        Generate the star list and associate the spectra automatically
+
+        Args:
+            gmag_limit (float, optional):
+                Maximum magnitude for a star to be included in the list. Defaults to 17.
+            shift (bool, optional):
+                shift the spectra according to the radial velocity of the stars. Defaults to False.
+        """
+        self.add_gaia_stars(gmag_limit=gmag_limit)
+        self.associate_spectra(shift=shift)
+        self.rescale_spectra()
 
     def remove_star(self, id):
         """
