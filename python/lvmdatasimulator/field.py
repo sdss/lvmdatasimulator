@@ -6,8 +6,13 @@
 # @License: BSD 3-Clause
 # @Copyright: Oleg Egorov, Enrico Congiu
 
+import numpy as np
+import astropy.units as u
 
-class LVMField(object):
+from astropy.wcs import WCS
+
+
+class LVMField:
     """Main container for objects in field of view of LVM.
 
     This is the main class of the simulator of a sources that contains all the functions and
@@ -30,24 +35,37 @@ class LVMField(object):
 
     """
 
-    def __init__(self, name='LVM_field', RA=None, Dec=None):
+    def __init__(self, ra, dec, size, spaxel, unit_ra=u.deg, unit_dec=u.deg,
+                 unit_size=u.arcmin, unit_spaxel=u.arcsec,
+                 name='LVM_field'):
+
         self.name = name
+        self.ra = ra * unit_ra
+        self.dec = dec * unit_dec
+        self.size = size * unit_size
+        self.spaxel = spaxel * unit_spaxel
+        self.npixels = self.size.to(u.arcsec) / self.spaxel.to(u.arcsec)
 
-    def add_stars(self, RA=None, Dec=None):
-        """Add stars from GAIA catalogue for current RA and Dec.
+        self.wcs = self._create_wcs()
+
+    def _create_wcs(self):
         """
-        pass
+        Create a wcs object that can be used to generate the elements of the field.
 
+        The reference point is at the center of the field, the pixel size is defined by the user.
 
-class Cloud(object):
-    """Add a cloud to the current field.
+        Returns:
+            astropy.wcs:
+                wcs object with the desired quantities
+        """
 
-    """
-    pass
+        # initializing the wcs object
+        wcs = WCS(naxis=2)
 
+        # setting up the different fields
+        wcs.wcs.crpix = [self.npixels / 2, self.npixels / 2]
+        wcs.wcs.cdelt = np.array([-self.spaxel.to(u.deg).value, self.spaxel.to(u.deg).value])
+        wcs.wcs.crval = [self.ra, self.dec]
+        wcs.wcs.ctype = ["RA---TAN", "DEC--TAN"]
 
-class Bubble(Cloud):
-    """Add a bubble to the current field.
-
-    """
-    pass
+        return wcs
