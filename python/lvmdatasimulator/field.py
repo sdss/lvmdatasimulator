@@ -11,6 +11,8 @@ import astropy.units as u
 
 from astropy.wcs import WCS
 
+from .stars import StarsList
+
 
 class LVMField:
     """Main container for objects in field of view of LVM.
@@ -43,10 +45,13 @@ class LVMField:
         self.ra = ra * unit_ra
         self.dec = dec * unit_dec
         self.size = size * unit_size
+        self.radius = self.size / 2  # to generate the star list
         self.spaxel = spaxel * unit_spaxel
         self.npixels = self.size.to(u.arcsec) / self.spaxel.to(u.arcsec)
 
         self.wcs = self._create_wcs()
+
+        self.starlist = None
 
     def _create_wcs(self):
         """
@@ -69,3 +74,12 @@ class LVMField:
         wcs.wcs.ctype = ["RA---TAN", "DEC--TAN"]
 
         return wcs
+
+    def generate_starlist(self, gmag_limit=17, shift=False, save=True):
+
+        self.starlist = StarsList(ra=self.ra, dec=self.dec, radius=self.radius)
+        self.starlist.generate(gmag_limit=gmag_limit, shift=shift)
+
+        if save:
+            self.starlist.save_to_fits(outname=f'{self.name}_starlist.fits.gz')
+
