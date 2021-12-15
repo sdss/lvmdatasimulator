@@ -113,6 +113,7 @@ class StarsList:
             self.stars_table.add_index('star_id')
             self.wave = None  # empty for now
             self.spectra = None  # empty for now
+            self.library = None  # empty for now
 
     def __len__(self):
         return len(self.stars_table)
@@ -242,6 +243,10 @@ class StarsList:
 
         log.info('Associating spectra to stars')
 
+        self.library = os.path.split(library)[1]
+
+        log.info(f'Using library {self.library}')
+
         self.wave = self._get_wavelength_array(library)
         self.spectra = np.zeros((len(self.stars_table), len(self.wave)))
 
@@ -341,6 +346,7 @@ class StarsList:
         primary.header['EXT1'] = 'TABLE'
         primary.header['EXT2'] = 'FLUX'
         primary.header['EXT3'] = 'WAVE'
+        primary.header['LIBRARY'] = (self.library, 'Stellar library')
 
         # Add other info in the header
         primary.header['RA'] = (self.ra.to(u.deg).value,
