@@ -417,7 +417,7 @@ class StarsList:
                 self.colunits.append(self.stars_table[col].unit)
             self.stars_table.add_index('star_id')
 
-    def generate(self, gmag_limit=17, shift=False):
+    def generate(self, wcs, gmag_limit=17, shift=False):
         """
         Generate the star list and associate the spectra automatically
 
@@ -428,6 +428,7 @@ class StarsList:
                 shift the spectra according to the radial velocity of the stars. Defaults to False.
         """
         self.add_gaia_stars(gmag_limit=gmag_limit)
+        self.compute_star_positions(self, wcs)
         self.associate_spectra(shift=shift)
         self.rescale_spectra()
 
