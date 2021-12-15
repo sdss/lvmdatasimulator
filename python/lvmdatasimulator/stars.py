@@ -26,6 +26,7 @@ import os
 
 # config parameters
 Gaia.MAIN_GAIA_TABLE = "gaiadr2.gaia_source"  # Select Data Release 2. EDR3 is missing temperatures
+Gaia.ROW_LIMIT = -1
 kms = u.km / u.s
 c = 299792.458 * kms
 
@@ -226,7 +227,7 @@ class StarsList:
         self.stars_table = vstack([self.stars_table, result])
 
     def associate_spectra(self, shift=False,
-                          library=f'{ROOT_DIR}/data/pollux_resampled_v0.fits.gz'):
+                          library=f'{ROOT_DIR}/data/pollux_resampled_v0.fits'):
         """
         Associate a spectrum from a syntetic library to each one of the stars in the list.
 
@@ -238,7 +239,7 @@ class StarsList:
                 shift the spectra according to the radial velocity of the stars
             library (str, optional):
                 path to the spectral library to use.
-                Defaults to '{ROOT_DIR}/data/pollux_resampled_v0.fits.gz'.
+                Defaults to '{ROOT_DIR}/data/pollux_resampled_v0.fits'.
         """
 
         log.info('Associating spectra to stars')
@@ -289,7 +290,7 @@ class StarsList:
             self.spectra[i] = self.spectra[i] * factor
 
     @staticmethod
-    def _get_wavelength_array(filename=f'{ROOT_DIR}/data/pollux_resampled_v0.fits.gz',
+    def _get_wavelength_array(filename=f'{ROOT_DIR}/data/pollux_resampled_v0.fits',
                               unit=u.AA):
 
         with fits.open(filename) as hdu:
