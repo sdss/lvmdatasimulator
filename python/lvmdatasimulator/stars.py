@@ -428,7 +428,7 @@ class StarsList:
                 shift the spectra according to the radial velocity of the stars. Defaults to False.
         """
         self.add_gaia_stars(gmag_limit=gmag_limit)
-        self.compute_star_positions(self, wcs)
+        self.compute_star_positions(wcs)
         self.associate_spectra(shift=shift)
         self.rescale_spectra()
 
