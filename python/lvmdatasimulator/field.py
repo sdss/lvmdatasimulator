@@ -78,7 +78,7 @@ class LVMField:
 
     def generate_starlist(self, gmag_limit=17, shift=False, save=True):
         """
-        Generate the a list of stars by querying gaia.
+        Generate a list of stars by querying gaia.
 
         Args:
             gmag_limit (float, optional):
