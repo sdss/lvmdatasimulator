@@ -8,6 +8,7 @@
 
 import numpy as np
 import astropy.units as u
+import matplotlib.pyplot as plt
 
 from astropy.wcs import WCS
 
@@ -70,16 +71,42 @@ class LVMField:
         # setting up the different fields
         wcs.wcs.crpix = [self.npixels / 2, self.npixels / 2]
         wcs.wcs.cdelt = np.array([-self.spaxel.to(u.deg).value, self.spaxel.to(u.deg).value])
-        wcs.wcs.crval = [self.ra, self.dec]
+        wcs.wcs.crval = [self.ra.to(u.deg).value, self.dec.to(u.deg).value]
         wcs.wcs.ctype = ["RA---TAN", "DEC--TAN"]
 
         return wcs
 
     def generate_starlist(self, gmag_limit=17, shift=False, save=True):
+        """
+        Generate the a list of stars by querying gaia.
 
+        Args:
+            gmag_limit (float, optional):
+                Maximum magnitude for a star to be included in the list. Defaults to 17.
+            shift (bool, optional):
+                shift the spectra according to the radial velocity of the stars. Defaults to False.
+            save (bool, optional):
+                If True save the list of stars to file. Defaults to True.
+        """
         self.starlist = StarsList(ra=self.ra, dec=self.dec, radius=self.radius)
-        self.starlist.generate(gmag_limit=gmag_limit, shift=shift)
+        self.starlist.generate(self.wcs, gmag_limit=gmag_limit, shift=shift)
 
         if save:
             self.starlist.save_to_fits(outname=f'{self.name}_starlist.fits.gz')
 
+    def plot(self, subplots_kw=None, scatter_kw=None):
+
+        fig, ax = plt.subplots(1, 1, subplot_kw=dict(projection=self.wcs))
+        self._plot_stars(ax=ax)
+
+        ax.set_xlabel('RA', fontsize=15)
+        ax.set_ylabel('Dec', fontsize=15)
+
+        plt.show()
+
+    def _plot_stars(self, ax):
+
+        ax.scatter(self.starlist.stars_table['ra'], self.starlist.stars_table['dec'],
+                   transform=ax.get_transform('world'),
+                   marker=(5, 1), c='r')
+        pass
