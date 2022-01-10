@@ -100,11 +100,11 @@ class StarsList:
             self.radius = radius
 
             # fix the unit of measurements
-            if isinstance(self.ra, float):
+            if isinstance(self.ra, (float, int)):
                 self.ra *= unit_ra
-            if isinstance(self.ra, float):
+            if isinstance(self.dec, (float, int)):
                 self.dec *= unit_dec
-            if isinstance(self.ra, float):
+            if isinstance(self.radius, (float, int)):
                 self.radius *= unit_radius
 
             self.center = SkyCoord(self.ra, self.dec)
@@ -226,30 +226,48 @@ class StarsList:
         # finally saving the new table
         self.stars_table = vstack([self.stars_table, result])
 
-    def associate_spectra(self, shift=False,
+    def associate_spectra(self, shift=False, append=False,
                           library=f'{ROOT_DIR}/data/pollux_resampled_v0.fits'):
         """
-        Associate a spectrum from a syntetic library to each one of the stars in the list.
+        Associate spectra to the identifyied stars. It can both associate spectra to the full list
+        or append them if the first part of the list have already been processed.
 
-        Each star is associated to the spectrum with the closest temperature, which is rescaled to
-        roughly match the observed gaia magnitude.
-
-        Parameters:
+        Args:
             shift (bool, optional):
-                shift the spectra according to the radial velocity of the stars
+                Shift spectra according to the velocity included in the catalog. Defaults to False.
+            append (bool, optional):
+                If some spectra have been associated to the first part of the stars in the list,
+                it can be used to process only the newly added stars. Defaults to False.
             library (str, optional):
                 path to the spectral library to use.
-                Defaults to '{ROOT_DIR}/data/pollux_resampled_v0.fits'.
+                Defaults to f'{ROOT_DIR}/data/pollux_resampled_v0.fits'.
         """
-
-        log.info('Associating spectra to stars')
 
         self.library = os.path.split(library)[1]
 
-        log.info(f'Using library {self.library}')
+        log.info(f'Associating spectra to stars using library {self.library}...')
 
-        self.wave = self._get_wavelength_array(library)
-        self.spectra = np.zeros((len(self.stars_table), len(self.wave)))
+        if self.spectra is None:
+            self.wave = self._get_wavelength_array(library)
+
+        if append and self.spectra is not None:
+            log.info('Appending new spectra to existing ones')
+            self._append_spectra(library, shift=False)
+        else:
+            self._associate_spectra(library, shift=False)
+
+    def _associate_spectra(self, library, shift=False):
+        """
+        Associate a spectrum from a syntetic library to each one of the stars in the list.
+
+        Parameters:
+            library (str):
+                path to the spectral library to use.
+            shift (bool, optional):
+                shift the spectra according to the radial velocity of the stars. Defaults to False
+        """
+
+        tmp_spectra = np.zeros((len(self.stars_table), len(self.wave)))
 
         bar = progressbar.ProgressBar(max_value=len(self.stars_table)).start()
         for i, row in enumerate(self.stars_table):
@@ -257,10 +275,44 @@ class StarsList:
             if shift and row['radial_velocity']:
                 spectrum = shift_spectrum(self.wave, spectrum, row['radial_velocity'])
 
-            self.spectra[i] = spectrum
+            tmp_spectra[i] = spectrum
             bar.update(i)
 
         bar.finish()
+        self.spectra = tmp_spectra
+
+    def _append_spectra(self, library, shift=False):
+        """
+        Associate spectra to newly added stars appending the spectra at the end of the list.
+
+        Parameters:
+            library (str):
+                path to the spectral library to use.
+            shift (bool, optional):
+                shift the spectra according to the radial velocity of the stars. Defaults to False
+        """
+
+        nstars = len(self.stars_table)
+        nspectra = len(self.spectra)
+
+        if nstars - nspectra == 0:
+            log.info('All stars have an associated spectrum')
+            return
+
+        tmp_spectra = np.zeros((nstars - nspectra, len(self.wave)))
+
+        bar = progressbar.ProgressBar(max_value=nstars - nspectra).start()
+        for i, row in enumerate(self.stars_table):
+            if i >= nspectra:
+                spectrum = get_spectrum(row['teff_val'], library)
+                if shift and row['radial_velocity']:
+                    spectrum = shift_spectrum(self.wave, spectrum, row['radial_velocity'])
+
+                tmp_spectra[i - nspectra] = spectrum
+                bar.update(i - nspectra)
+
+        bar.finish()
+        self.spectra = np.append(self.spectra, tmp_spectra, axis=0)
 
     def rescale_spectra(self):
         """
@@ -433,14 +485,14 @@ class StarsList:
         self.associate_spectra(shift=shift)
         self.rescale_spectra()
 
-    def generate_fake_stars(self, wcs, shift=False, **kwargs):
+    def generate_stars_manually(self, wcs, parameters, shift=False):
 
-        ra_list = kwargs.get('ra', [0])
-        dec_list = kwargs.get('dec', [0])
-        gmag_list = kwargs.get('gmag', [17])
-        teff_list = kwargs.get('teff', [6000])
-        ag_list = kwargs.get('ag', [0])
-        v_list = kwargs.get('v', [0])
+        ra_list = parameters.get('ra', [0])
+        dec_list = parameters.get('dec', [0])
+        gmag_list = parameters.get('gmag', [17])
+        teff_list = parameters.get('teff', [6000])
+        ag_list = parameters.get('ag', [0])
+        v_list = parameters.get('v', [0])
 
         for ra, dec, gmag, teff, ag, v \
                 in zip(ra_list, dec_list, gmag_list, teff_list, ag_list, v_list):
