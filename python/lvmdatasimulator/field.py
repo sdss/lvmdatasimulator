@@ -149,7 +149,6 @@ class LVMField:
 
         self.starlist = StarsList(filename=filename, dir=directory)
 
-
     def plot(self, subplots_kw=None, scatter_kw=None):
         """
         Plots the LVM field. This is a work in progress.

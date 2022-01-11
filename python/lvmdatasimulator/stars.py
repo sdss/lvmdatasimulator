@@ -572,6 +572,8 @@ def get_spectrum(temp, library):
     spectrum = fluxes[idx]
     return spectrum
 
+################################################################################
+
 
 def query_gaia(coord, radius):
     """
@@ -601,6 +603,8 @@ def query_gaia(coord, radius):
         log.info('{} Gaia stars in the field' .format(len(results)))
 
     return results
+
+################################################################################
 
 
 def shift_spectrum(wave, flux, radial_velocity, unit_v=kms):
