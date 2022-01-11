@@ -139,6 +139,8 @@ class StarsList:
                 in K.
             ag (float):
                 extinction on the gaia G band.
+            v (float):
+                radial velocity of the star.
 
 
         """
@@ -155,6 +157,7 @@ class StarsList:
                    'a_g_val': ag,
                    'radial_velocity': v,
                    'gaia': False,
+                   'source_id': 0,
                    }
 
         log.info('star {} with Teff {}, Gmag {} and velocity {} added at position ({} , {})'
@@ -267,9 +270,9 @@ class StarsList:
                 shift the spectra according to the radial velocity of the stars. Defaults to False
         """
 
-        tmp_spectra = np.zeros((len(self.stars_table), len(self.wave)))
+        tmp_spectra = np.zeros((len(self), len(self.wave)))
 
-        bar = progressbar.ProgressBar(max_value=len(self.stars_table)).start()
+        bar = progressbar.ProgressBar(max_value=len(self)).start()
         for i, row in enumerate(self.stars_table):
             spectrum = get_spectrum(row['teff_val'], library)
             if shift and row['radial_velocity']:
@@ -292,7 +295,7 @@ class StarsList:
                 shift the spectra according to the radial velocity of the stars. Defaults to False
         """
 
-        nstars = len(self.stars_table)
+        nstars = len(self)
         nspectra = len(self.spectra)
 
         if nstars - nspectra == 0:
@@ -321,7 +324,7 @@ class StarsList:
 
         """
 
-        log.info(f'Rescaling {len(self.stars_table)} synthetic spectra.')
+        log.info(f'Rescaling {len(self)} synthetic spectra.')
 
         passband = pyphot.get_library()['GaiaDR2_G']
 
@@ -352,6 +355,9 @@ class StarsList:
         return wave
 
     def apply_extinction(self):
+        """
+        Apply extinction to a stellar spectrum, to be implemented.
+        """
         pass
 
     def compute_star_positions(self, wcs):
@@ -505,7 +511,8 @@ class StarsList:
 
     def remove_star(self, id):
         """
-        Remove a star with a specific star_id
+        Remove a star with a specific star_id. That is something that breaks the object when it is
+        saved, a star is removed and then re added
 
         Args:
             id (int):
@@ -517,7 +524,7 @@ class StarsList:
             log.warning(f'There is no star with star_id = {id}')
             return
 
-        # if it existh remove the star
+        # if it exists remove the star
         log.info(f'Removing star (star_id: {id})')
 
         mask = self.stars_table['star_id'] == id  # mask identifying the correct star
