@@ -538,6 +538,50 @@ class StarsList:
         assert len(self.stars_table) == len(self.spectra), \
             'The star and spectrum where not removed correctly'
 
+    def recover_star_at_position(self, coords, wcs, pixel=True, radius=1):
+        """
+        Check if there are stars in a certain position, and return the entry and the spectrum
+
+        Args:
+            coords (tuple):
+                coordinates where to check. It can be both in ra, dec or in pixels
+            wcs (astropy.wcs):
+                wcs object to convert coordinates to pixels
+            pixel (bool, optional):
+                if True the coordinates are in pixel, else are in ra and dec (degrees).
+                Defaults to True.
+            radius (float, optional):
+                radius to check around the central coordinates. Defaults to 1.
+
+        Returns:
+            (astropy.table or astropy.table.row):
+                row(s) of the table representing the identified stars
+            (array)
+                array containing the spectra of the selected stars
+        """
+
+        if not pixel:
+            coords = SkyCoord(coords)
+            coords = wcs.all_world2pix(coords.ra.deg, coords.deg.dec, 0)
+
+        if 'x' not in self.stars_table['x']:
+            self.compute_star_positions(wcs)
+
+        distance = np.sqrt((coords[0] - self.stars_table['x']) **2 +
+                           (coords[1] - self.stars_table['y']) **2)
+
+        mask = distance < radius
+
+        if mask.sum() == 0:
+            log.warning('No star found at the required position')
+            return None, None
+
+        stars = self.stars_table[mask]
+        spectra = self.spectra[mask]
+
+        return stars, spectra
+
+
 ################################################################################
 
 
