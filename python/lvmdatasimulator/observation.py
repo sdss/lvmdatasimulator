@@ -11,7 +11,7 @@ import astropy.units as u
 
 from dataclasses import dataclass
 from astropy.time import Time
-from astropy.coordinates import get_body, EarthLocation, AltAz
+from astropy.coordinates import get_body, EarthLocation, AltAz, SkyCoord
 from astroplan import moon_illumination
 
 
@@ -76,8 +76,24 @@ class Observation:
         self.time = Time(self.time, format='isot', scale='utc')  # time of obs.
         if self.sky_transparency not in ['PHOT', 'CLR', 'THIN']:
             raise ValueError(f'{self.sky_transparency} is not accepted.')
-        self.localtime = self.time + self.utcoffset
-        self.target_coords(self.ra, self.dec)
+
+    @functools.cached_property
+    def localtime(self):
+        return self.time + self.utcoffset
+
+    @functools.cached_property
+    def target_coords(self):
+        '''get target coordinates'''
+        return  SkyCoord(self.ra, self.dec)
+
+    @functools.cached_property
+    def target_coords_altaz(self):
+        '''get target altazimuthal coordinates'''
+        return self.target_coords.transform_to(self._altaz)
+
+    @functools.cached_property
+    def _altaz(self):
+        return AltAz(obstime=self.time, location=self.location)
 
     @functools.cached_property
     def total_time(self):
@@ -99,15 +115,13 @@ class Observation:
     @functools.cached_property
     def moon_coords_altaz(self):
         '''get moon altazimuthal coordinates'''
-        altaz = AltAz(obstime=self.time, location=self.location)
-        coord = self.moon_coords.transform_to(altaz)
+        coord = self.moon_coords.transform_to(self._altaz)
         return coord
 
     @functools.cached_property
     def sun_coords_altaz(self):
         '''get sun altazimuthal coordinates'''
-        altaz = AltAz(obstime=self.time, location=self.location)
-        coord = self.sun_coords.transform_to(altaz)
+        coord = self.sun_coords.transform_to(self._altaz)
         return coord
 
     @functools.cached_property
@@ -117,11 +131,16 @@ class Observation:
 
     @functools.cached_property
     def jd(self):
-        ''' get julian date'''
+        '''get julian date'''
         return self.time.jd
 
     @functools.cached_property
     def moon_distance(self):
         '''get distance between the target field and the moon'''
-        return self.target_coords(self.moon_coords)
+        # this is weird. moon to target is ok, target to moon is not
+        return self.moon_coords.separation(self.target_coords)
 
+    @functools.cached_property
+    def moon_illumination(self):
+        '''get moon illumination'''
+        return round(moon_illumination(self.time), 2)
