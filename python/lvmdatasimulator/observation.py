@@ -84,7 +84,7 @@ class Observation:
     @functools.cached_property
     def target_coords(self):
         '''get target coordinates'''
-        return  SkyCoord(self.ra, self.dec)
+        return SkyCoord(self.ra, self.dec)
 
     @functools.cached_property
     def target_coords_altaz(self):
