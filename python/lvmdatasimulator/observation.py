@@ -12,6 +12,7 @@ import astropy.units as u
 from dataclasses import dataclass
 from astropy.time import Time
 from astropy.coordinates import get_body, EarthLocation, AltAz
+from astroplan import moon_illumination
 
 
 @dataclass
@@ -61,6 +62,8 @@ class Observation:
 
     """
 
+    ra: u.deg = 0.0 * u.deg
+    dec: u.deg = 0.0 * u.deg
     time: str = '2022-01-01T00:00:00.00'  # UT time of observations
     location: EarthLocation = EarthLocation.of_site('lco')
     utcoffset: u.hour = -3 * u.hour  # Correction to local time. It is important to keep it updated
@@ -74,37 +77,51 @@ class Observation:
         if self.sky_transparency not in ['PHOT', 'CLR', 'THIN']:
             raise ValueError(f'{self.sky_transparency} is not accepted.')
         self.localtime = self.time + self.utcoffset
+        self.target_coords(self.ra, self.dec)
 
     @functools.cached_property
     def total_time(self):
+        '''get total exposure time for the observations'''
         return self.nexp * self.exptime
 
     @functools.cached_property
     def moon_coords(self):
+        '''get moon coordinates'''
         coord = get_body('moon', time=self.time, location=self.location)
         return coord
 
     @functools.cached_property
     def sun_coords(self):
+        '''get sun coordinates'''
         coord = get_body('sun', time=self.time, location=self.location)
         return coord
 
     @functools.cached_property
     def moon_coords_altaz(self):
+        '''get moon altazimuthal coordinates'''
         altaz = AltAz(obstime=self.time, location=self.location)
         coord = self.moon_coords.transform_to(altaz)
         return coord
 
     @functools.cached_property
     def sun_coords_altaz(self):
+        '''get sun altazimuthal coordinates'''
         altaz = AltAz(obstime=self.time, location=self.location)
         coord = self.sun_coords.transform_to(altaz)
         return coord
 
     @functools.cached_property
     def mjd(self):
+        '''get modified julian date'''
         return self.time.mjd
 
     @functools.cached_property
     def jd(self):
+        ''' get julian date'''
         return self.time.jd
+
+    @functools.cached_property
+    def moon_distance(self):
+        '''get distance between the target field and the moon'''
+        return self.target_coords(self.moon_coords)
+
