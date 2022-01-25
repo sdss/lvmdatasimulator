@@ -567,8 +567,8 @@ class StarsList:
         if 'x' not in self.stars_table['x']:
             self.compute_star_positions(wcs)
 
-        distance = np.sqrt((coords[0] - self.stars_table['x']) **2 +
-                           (coords[1] - self.stars_table['y']) **2)
+        distance = np.sqrt((coords[0] - self.stars_table['x']) ** 2 +
+                           (coords[1] - self.stars_table['y']) ** 2)
 
         mask = distance < radius
 
