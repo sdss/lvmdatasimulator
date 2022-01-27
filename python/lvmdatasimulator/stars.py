@@ -17,14 +17,18 @@ from astropy.io import fits
 from astropy.coordinates import SkyCoord
 from astropy.table import Table, vstack
 from astroquery.gaia import Gaia
-# from spectres import spectres
+from spectres import spectres
 # from scipy.interpolate import interp1d
 
 from lvmdatasimulator import log, ROOT_DIR
 
 import os
 
+# config parameters
 Gaia.MAIN_GAIA_TABLE = "gaiadr2.gaia_source"  # Select Data Release 2. EDR3 is missing temperatures
+Gaia.ROW_LIMIT = -1
+kms = u.km / u.s
+c = 299792.458 * kms
 
 
 class StarsList:
@@ -76,10 +80,11 @@ class StarsList:
                  unit_ra=u.deg, unit_dec=u.deg, unit_radius=u.arcmin,
                  colnames=['star_id', 'ra', 'dec', 'phot_g_mean_mag', 'phot_bp_mean_mag',
                            'phot_rp_mean_mag', 'teff_val', 'a_g_val', 'e_bp_min_rp_val',
-                           'gaia', 'source_id'],
+                           'radial_velocity', 'gaia', 'source_id'],
                  types=[int, float, float, float, float, float, float, float,
-                        float, bool, int],
-                 units=[None, u.deg, u.deg, u.mag, u.mag, u.mag, u.K, u.mag, u.mag, None, None]
+                        float, float, bool, int],
+                 units=[None, u.deg, u.deg, u.mag, u.mag, u.mag, u.K, u.mag, u.mag, kms, None,
+                        None]
                  ):
 
         # if a filename is given open the file, otherwise create an object with the default
@@ -90,21 +95,31 @@ class StarsList:
 
         else:
             # create an empty table to contain the list of stars
-            self.ra = ra * unit_ra
-            self.dec = dec * unit_dec
+            self.ra = ra
+            self.dec = dec
+            self.radius = radius
+
+            # fix the unit of measurements
+            if isinstance(self.ra, (float, int)):
+                self.ra *= unit_ra
+            if isinstance(self.dec, (float, int)):
+                self.dec *= unit_dec
+            if isinstance(self.radius, (float, int)):
+                self.radius *= unit_radius
+
             self.center = SkyCoord(self.ra, self.dec)
-            self.radius = radius * unit_radius
             self.colnames = colnames
             self.colunits = units
             self.stars_table = Table(names=self.colnames, dtype=types, units=units)
             self.stars_table.add_index('star_id')
             self.wave = None  # empty for now
             self.spectra = None  # empty for now
+            self.library = None  # empty for now
 
     def __len__(self):
         return len(self.stars_table)
 
-    def add_star(self, ra, dec, gmag, teff, ag):
+    def add_star(self, ra, dec, gmag, teff, ag, v):
         """
         Manually add a single star to the list.
 
@@ -124,6 +139,8 @@ class StarsList:
                 in K.
             ag (float):
                 extinction on the gaia G band.
+            v (float):
+                radial velocity of the star.
 
 
         """
@@ -138,12 +155,14 @@ class StarsList:
                    'phot_g_mean_mag': gmag,
                    'teff_val': teff,
                    'a_g_val': ag,
+                   'radial_velocity': v,
                    'gaia': False,
+                   'source_id': 0,
                    }
 
-        log.info('star {} with Teff {} and Gmag {} was added to star list at position ({} , {})'
+        log.info('star {} with Teff {}, Gmag {} and velocity {} added at position ({} , {})'
                  .format(new_row['star_id'], new_row['teff_val'], new_row['phot_g_mean_mag'],
-                         new_row['ra'], new_row['dec']))
+                         new_row['radial_velocity'], new_row['ra'], new_row['dec']))
 
         self.stars_table.add_row(new_row)
 
@@ -210,32 +229,93 @@ class StarsList:
         # finally saving the new table
         self.stars_table = vstack([self.stars_table, result])
 
-    def associate_spectra(self, library=f'{ROOT_DIR}/data/pollux_resampled_v0.fits.gz'):
+    def associate_spectra(self, shift=False, append=False,
+                          library=f'{ROOT_DIR}/data/pollux_resampled_v0.fits'):
+        """
+        Associate spectra to the identifyied stars. It can both associate spectra to the full list
+        or append them if the first part of the list have already been processed.
+
+        Args:
+            shift (bool, optional):
+                Shift spectra according to the velocity included in the catalog. Defaults to False.
+            append (bool, optional):
+                If some spectra have been associated to the first part of the stars in the list,
+                it can be used to process only the newly added stars. Defaults to False.
+            library (str, optional):
+                path to the spectral library to use.
+                Defaults to f'{ROOT_DIR}/data/pollux_resampled_v0.fits'.
+        """
+
+        self.library = os.path.split(library)[1]
+
+        log.info(f'Associating spectra to stars using library {self.library}...')
+
+        if self.spectra is None:
+            self.wave = self._get_wavelength_array(library)
+
+        if append and self.spectra is not None:
+            log.info('Appending new spectra to existing ones')
+            self._append_spectra(library, shift=False)
+        else:
+            self._associate_spectra(library, shift=False)
+
+    def _associate_spectra(self, library, shift=False):
         """
         Associate a spectrum from a syntetic library to each one of the stars in the list.
 
-        Each star is associated to the spectrum with the closest temperature, which is rescaled to
-        roughly match the observed gaia magnitude.
-
         Parameters:
-            library (str, optional):
+            library (str):
                 path to the spectral library to use.
-                Defaults to '{ROOT_DIR}/data/pollux_resampled_v0.fits.gz'.
+            shift (bool, optional):
+                shift the spectra according to the radial velocity of the stars. Defaults to False
         """
 
-        log.info('Associating spectra to stars')
+        tmp_spectra = np.zeros((len(self), len(self.wave)))
 
-        self.wave = self._get_wavelength_array(library)
-        self.spectra = np.zeros((len(self.stars_table), len(self.wave)))
-
-        bar = progressbar.ProgressBar(max_value=len(self.stars_table)).start()
+        bar = progressbar.ProgressBar(max_value=len(self)).start()
         for i, row in enumerate(self.stars_table):
             spectrum = get_spectrum(row['teff_val'], library)
+            if shift and row['radial_velocity']:
+                spectrum = shift_spectrum(self.wave, spectrum, row['radial_velocity'])
 
-            self.spectra[i] = spectrum
+            tmp_spectra[i] = spectrum
             bar.update(i)
 
         bar.finish()
+        self.spectra = tmp_spectra
+
+    def _append_spectra(self, library, shift=False):
+        """
+        Associate spectra to newly added stars appending the spectra at the end of the list.
+
+        Parameters:
+            library (str):
+                path to the spectral library to use.
+            shift (bool, optional):
+                shift the spectra according to the radial velocity of the stars. Defaults to False
+        """
+
+        nstars = len(self)
+        nspectra = len(self.spectra)
+
+        if nstars - nspectra == 0:
+            log.info('All stars have an associated spectrum')
+            return
+
+        tmp_spectra = np.zeros((nstars - nspectra, len(self.wave)))
+
+        bar = progressbar.ProgressBar(max_value=nstars - nspectra).start()
+        for i, row in enumerate(self.stars_table):
+            if i >= nspectra:
+                spectrum = get_spectrum(row['teff_val'], library)
+                if shift and row['radial_velocity']:
+                    spectrum = shift_spectrum(self.wave, spectrum, row['radial_velocity'])
+
+                tmp_spectra[i - nspectra] = spectrum
+                bar.update(i - nspectra)
+
+        bar.finish()
+        self.spectra = np.append(self.spectra, tmp_spectra, axis=0)
 
     def rescale_spectra(self):
         """
@@ -244,7 +324,7 @@ class StarsList:
 
         """
 
-        log.info(f'Rescaling {len(self.stars_table)} synthetic spectra.')
+        log.info(f'Rescaling {len(self)} synthetic spectra.')
 
         passband = pyphot.get_library()['GaiaDR2_G']
 
@@ -265,7 +345,7 @@ class StarsList:
             self.spectra[i] = self.spectra[i] * factor
 
     @staticmethod
-    def _get_wavelength_array(filename=f'{ROOT_DIR}/data/pollux_resampled_v0.fits.gz',
+    def _get_wavelength_array(filename=f'{ROOT_DIR}/data/pollux_resampled_v0.fits',
                               unit=u.AA):
 
         with fits.open(filename) as hdu:
@@ -275,6 +355,9 @@ class StarsList:
         return wave
 
     def apply_extinction(self):
+        """
+        Apply extinction to a stellar spectrum, to be implemented.
+        """
         pass
 
     def compute_star_positions(self, wcs):
@@ -322,9 +405,9 @@ class StarsList:
         primary.header['EXT1'] = 'TABLE'
         primary.header['EXT2'] = 'FLUX'
         primary.header['EXT3'] = 'WAVE'
+        primary.header['LIBRARY'] = (self.library, 'Stellar library')
 
         # Add other info in the header
-        print(self.ra.to(u.deg).value)
         primary.header['RA'] = (self.ra.to(u.deg).value,
                                 'Right ascension of the center of the field (deg)')
         primary.header['DEC'] = (self.dec.to(u.deg).value,
@@ -393,9 +476,43 @@ class StarsList:
                 self.colunits.append(self.stars_table[col].unit)
             self.stars_table.add_index('star_id')
 
+    def generate_gaia(self, wcs, gmag_limit=17, shift=False):
+        """
+        Generate the star list and associate the spectra automatically
+
+        Args:
+            gmag_limit (float, optional):
+                Maximum magnitude for a star to be included in the list. Defaults to 17.
+            shift (bool, optional):
+                shift the spectra according to the radial velocity of the stars. Defaults to False.
+        """
+        self.add_gaia_stars(gmag_limit=gmag_limit)
+        self.compute_star_positions(wcs)
+        self.associate_spectra(shift=shift)
+        self.rescale_spectra()
+
+    def generate_stars_manually(self, wcs, parameters, shift=False):
+
+        ra_list = parameters.get('ra', [0])
+        dec_list = parameters.get('dec', [0])
+        gmag_list = parameters.get('gmag', [17])
+        teff_list = parameters.get('teff', [6000])
+        ag_list = parameters.get('ag', [0])
+        v_list = parameters.get('v', [0])
+
+        for ra, dec, gmag, teff, ag, v \
+                in zip(ra_list, dec_list, gmag_list, teff_list, ag_list, v_list):
+
+            self.add_star(ra, dec, gmag, teff, ag, v)
+
+        self.compute_star_positions(wcs)
+        self.associate_spectra(shift=shift)
+        self.rescale_spectra()
+
     def remove_star(self, id):
         """
-        Remove a star with a specific star_id
+        Remove a star with a specific star_id. That is something that breaks the object when it is
+        saved, a star is removed and then re added
 
         Args:
             id (int):
@@ -407,7 +524,7 @@ class StarsList:
             log.warning(f'There is no star with star_id = {id}')
             return
 
-        # if it existh remove the star
+        # if it exists remove the star
         log.info(f'Removing star (star_id: {id})')
 
         mask = self.stars_table['star_id'] == id  # mask identifying the correct star
@@ -420,6 +537,50 @@ class StarsList:
 
         assert len(self.stars_table) == len(self.spectra), \
             'The star and spectrum where not removed correctly'
+
+    def recover_star_at_position(self, coords, wcs, pixel=True, radius=1):
+        """
+        Check if there are stars in a certain position, and return the entry and the spectrum
+
+        Args:
+            coords (tuple):
+                coordinates where to check. It can be both in ra, dec or in pixels
+            wcs (astropy.wcs):
+                wcs object to convert coordinates to pixels
+            pixel (bool, optional):
+                if True the coordinates are in pixel, else are in ra and dec (degrees).
+                Defaults to True.
+            radius (float, optional):
+                radius to check around the central coordinates. Defaults to 1.
+
+        Returns:
+            (astropy.table or astropy.table.row):
+                row(s) of the table representing the identified stars
+            (array)
+                array containing the spectra of the selected stars
+        """
+
+        if not pixel:
+            coords = SkyCoord(coords)
+            coords = wcs.all_world2pix(coords.ra.deg, coords.deg.dec, 0)
+
+        if 'x' not in self.stars_table['x']:
+            self.compute_star_positions(wcs)
+
+        distance = np.sqrt((coords[0] - self.stars_table['x']) ** 2 +
+                           (coords[1] - self.stars_table['y']) ** 2)
+
+        mask = distance < radius
+
+        if mask.sum() == 0:
+            log.warning('No star found at the required position')
+            return None, None
+
+        stars = self.stars_table[mask]
+        spectra = self.spectra[mask]
+
+        return stars, spectra
+
 
 ################################################################################
 
@@ -455,6 +616,8 @@ def get_spectrum(temp, library):
     spectrum = fluxes[idx]
     return spectrum
 
+################################################################################
+
 
 def query_gaia(coord, radius):
     """
@@ -485,6 +648,39 @@ def query_gaia(coord, radius):
 
     return results
 
+################################################################################
+
+
+def shift_spectrum(wave, flux, radial_velocity, unit_v=kms):
+    """
+    Apply a shift to a spectrum based on the radial_velocity of the object.
+
+    First corrects the wave and flux array, then resample the spectrum using the original
+    wavelength range.
+
+    Args:
+        wave (array-like):
+            array containing the wavelenght axis of the spectrum.
+        flux (array-like):
+            array with the fluxes
+        radial_velocity (float):
+            radial velocity of the object used for the shift
+        unit_v (astropy.unit):
+            unit of the radial_velocity
+
+    Returns:
+        array-like:
+            resampled and shifted spectrum
+    """
+
+    radial_velocity *= unit_v
+    z = radial_velocity / c
+    new_wave = wave * (1 + z)
+    new_flux = flux / (1 + z)
+
+    resampled = spectres(wave.value, new_wave.value, new_flux)
+
+    return resampled
 
 # if __name__ == '__main__':
 
