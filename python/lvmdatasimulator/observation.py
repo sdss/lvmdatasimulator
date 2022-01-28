@@ -144,3 +144,8 @@ class Observation:
     def moon_illumination(self):
         '''get moon illumination'''
         return round(moon_illumination(self.time), 2)
+
+    @functools.cached_property
+    def airmass(self):
+        '''get airmass of target from coordinates'''
+        return self.target_coords_altaz.secz
