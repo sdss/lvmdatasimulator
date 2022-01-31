@@ -20,6 +20,7 @@ from astropy.visualization import astropy_mpl_style, quantity_support
 plt.style.use(astropy_mpl_style)
 quantity_support()
 
+
 @dataclass
 class Observation:
     """
