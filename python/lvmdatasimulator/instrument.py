@@ -6,6 +6,8 @@
 # @License: BSD 3-Clause
 # @Copyright: Oleg Egorov, Enrico Congiu
 
+import numpy as np
+import functools
 import astropy.units as u
 
 from dataclasses import dataclass
@@ -32,3 +34,11 @@ class Instrument:
     # def line_spread_function(self):
     #     return Gaussian1DKernel(stddev=self.dlsf/2.355/ddisp0,
     #                             x_size=round_up_to_odd(10*self.dlsf/2.355/ddisp0))
+
+    @functools.cached_property
+    def mklam(self):
+        """
+        Returns wavelength array sampled at the instrument pixel dispersion.
+        """
+
+        return np.arange(self.lmin, self.lmax + self.ddisp, self.ddisp)
