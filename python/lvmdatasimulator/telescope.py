@@ -6,10 +6,10 @@
 # @License: BSD 3-Clause
 # @Copyright: Oleg Egorov, Enrico Congiu
 
-import functools
 import astropy.units as u
 
 from dataclasses import dataclass
+
 
 @dataclass
 class LVM160:
@@ -18,6 +18,3 @@ class LVM160:
     this
     """
     aperture_area: u.cm**2 = 201 * u.cm**2  # not sure where this cames from
-
-
-
