@@ -23,13 +23,12 @@ class Instrument:
     lmax: u.A = 9800 * u.A
     dspax: u.arcsec = 37 * u.arcsec
     dfib: u.px = 3.0 * u.px
-    ddisp: u.arcsec/u.pix = 0.5 * u.arcsec/u.pix
+    ddisp: u.arcsec / u.pix = 0.5 * u.arcsec / u.pix
     dlsf: u.arcsec = 0.5 * u.arcsec
-    gain: u.e/u.adu = 1.0 * u.e/u.adu
+    gain: u.e / u.adu = 1.0 * u.e / u.adu
     rdn: u.e = 5.0 * u.e
-    dark: u.e/u.s = 0.001 * u.e/u.s
+    dark: u.e / u.s = 0.001 * u.e / u.s
 
     # def line_spread_function(self):
     #     return Gaussian1DKernel(stddev=self.dlsf/2.355/ddisp0,
     #                             x_size=round_up_to_odd(10*self.dlsf/2.355/ddisp0))
-
