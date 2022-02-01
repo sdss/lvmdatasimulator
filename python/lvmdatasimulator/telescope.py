@@ -17,4 +17,4 @@ class LVM160:
     Class summarizing the properties of the telescope. Pretty empty, but for the ETC we need just
     this
     """
-    aperture_area: u.cm**2 = 201 * u.cm**2  # not sure where this cames from
+    aperture_area: u.cm**2 = 201 * u.cm**2
