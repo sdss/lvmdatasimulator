@@ -36,7 +36,7 @@ class Instrument:
     #                             x_size=round_up_to_odd(10*self.dlsf/2.355/ddisp0))
 
     @functools.cached_property
-    def mklam(self):
+    def wave(self):
         """
         Returns wavelength array sampled at the instrument pixel dispersion.
         """
