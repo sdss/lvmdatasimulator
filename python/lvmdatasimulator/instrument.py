@@ -9,36 +9,40 @@
 import numpy as np
 import functools
 import astropy.units as u
+import lvmdatasimulator.wavecoords as w
 
 from dataclasses import dataclass
 from astropy.convolution import Gaussian1DKernel
 
+from lvmdatasimulator.utils import round_up_to_odd
+from lvmdatasimulator import fibers
+
 
 @dataclass
-class Instrument:
-    """
-    Main properties of the LVM instrument. This is just a draft, and contains only what can be
-    used to run Kathryn's ETC
-    """
+class Branch:
 
-    lmin: u.A = 3650 * u.A
-    lmax: u.A = 9800 * u.A
-    dspax: u.arcsec = 37 * u.arcsec
-    dfib: u.px = 3.0 * u.px
-    ddisp: u.arcsec / u.pix = 0.5 * u.arcsec / u.pix
-    dlsf: u.arcsec = 0.5 * u.arcsec
-    gain: u.e / u.adu = 1.0 * u.e / u.adu
-    rdn: u.e = 5.0 * u.e
-    dark: u.e / u.s = 0.001 * u.e / u.s
+    wavecoord: w.WaveCoord
+    lsf_fwhm: u.A = 0.5 * u.A
+    gain: u.electron / u.adu = 1.0 * u.electron / u.adu
+    ron: u.electron = 5.0 * u.electron
+    dark: u.electron / u.s = 0.001 * u.electron / u.s
 
-    # def line_spread_function(self):
-    #     return Gaussian1DKernel(stddev=self.dlsf/2.355/ddisp0,
-    #                             x_size=round_up_to_odd(10*self.dlsf/2.355/ddisp0))
 
-    @functools.cached_property
-    def wave(self):
-        """
-        Returns wavelength array sampled at the instrument pixel dispersion.
-        """
+class LinearSpectrograph:
 
-        return np.arange(self.lmin, self.lmax + self.ddisp, self.ddisp)
+    def __init__(self, bundle='central'):
+
+        self.branches = [Branch(wavecoord=w.LinearWave)]
+
+        self.bundle = fibers.FiberBundle(bundle)
+
+
+class LVMSpectrograph:
+
+    def __init__(self, bundle='central'):
+
+        self.branches = [Branch(wavecoord=w.BlueWave),
+                         Branch(wavecoord=w.RedWave),
+                         Branch(wavecoord=w.IRWave)]
+
+        self.bundle = fibers.FiberBundle(bundle)
