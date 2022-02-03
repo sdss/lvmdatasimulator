@@ -52,9 +52,9 @@ class LinearWave(WaveCoord):
     def wave(self):
 
         filename = f'{ROOT_DIR}/data/instrument/linear_wave.dat'
-        data = np.genfromtxt(filename, skip_header=1)
+        data = np.genfromtxt(filename, skip_header=1, unpack=True)
 
-        return np.arange(self.lmin, self.lmax + self.ddisp, self.ddisp)
+        return np.arange(data[0], data[1] + data[2], data[2])
 
     @cached_property
     def start(self):
@@ -72,7 +72,7 @@ class LinearWave(WaveCoord):
 
 @dataclass
 class BlueWave(WaveCoord):
-    """ Linear wavelength axis, most for preliminary tests purposes """
+    """ Wavelength axis of the blue spectrograph """
 
     @cached_property
     def wave(self):
@@ -93,7 +93,7 @@ class BlueWave(WaveCoord):
 
 @dataclass
 class RedWave(WaveCoord):
-    """ Linear wavelength axis, most for preliminary tests purposes """
+    """ wavelength axis of the red spectrograph """
 
     @cached_property
     def wave(self):
@@ -113,7 +113,7 @@ class RedWave(WaveCoord):
 
 @dataclass
 class IRWave(WaveCoord):
-    """ Linear wavelength axis, most for preliminary tests purposes """
+    """ wavelength axis of the IR spectrograph """
 
     @cached_property
     def wave(self):
@@ -130,5 +130,4 @@ class IRWave(WaveCoord):
     @cached_property
     def step(self):
         pass
-
 
