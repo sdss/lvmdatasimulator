@@ -6,14 +6,10 @@
 # @License: BSD 3-Clause
 # @Copyright: Oleg Egorov, Enrico Congiu
 
-import numpy as np
 import astropy.units as u
 
 from dataclasses import dataclass
-from functools import cached_property
-from astropy.convolution import Gaussian1DKernel
 
-from lvmdatasimulator.utils import round_up_to_odd
 from lvmdatasimulator import ROOT_DIR, log
 
 
@@ -42,7 +38,7 @@ class FiberBundle:
     def __init__(self, bundle_type='central'):
 
         if bundle_type not in ['central', 'slit1', 'slit2', 'slit3', 'full']:
-            error = f'{bundle_type} is not an accepted bundle.'+ \
+            error = f'{bundle_type} is not an accepted bundle.' + \
                     'Allowed values: central, slit1, slit2, slit3, full.'
             log.error(error)
             raise ValueError(error)
@@ -77,11 +73,3 @@ class FiberBundle:
         TBW
         """
         return []
-
-
-
-
-
-
-
-
