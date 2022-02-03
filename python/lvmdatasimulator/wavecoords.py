@@ -11,10 +11,10 @@ import astropy.units as u
 
 from dataclasses import dataclass
 from abc import ABC, abstractmethod
-from functools import cache, cached_property
-from astropy.convolution import Gaussian1DKernel
+from functools import cached_property
 
 from lvmdatasimulator import ROOT_DIR
+
 
 @dataclass
 class WaveCoord(ABC):
@@ -54,20 +54,20 @@ class LinearWave(WaveCoord):
         filename = f'{ROOT_DIR}/data/instrument/linear_wave.dat'
         data = np.genfromtxt(filename, skip_header=1, unpack=True)
 
-        return np.arange(data[0], data[1] + data[2], data[2])
+        return np.arange(data[0], data[1] + data[2], data[2]) * u.A
 
     @cached_property
     def start(self):
-        return self.wave[0]
+        return self.wave[0] * u.A
 
     @cached_property
     def end(self):
-        return self.wave[-1]
+        return self.wave[-1] * u.A
 
     @cached_property
     def step(self):
         delta = self.wave[1: -1] - self.wave[0: -2]
-        return delta.mean()
+        return delta.mean() * u.A / u.px
 
 
 @dataclass
@@ -111,6 +111,7 @@ class RedWave(WaveCoord):
     def step(self):
         pass
 
+
 @dataclass
 class IRWave(WaveCoord):
     """ wavelength axis of the IR spectrograph """
@@ -130,4 +131,3 @@ class IRWave(WaveCoord):
     @cached_property
     def step(self):
         pass
-
