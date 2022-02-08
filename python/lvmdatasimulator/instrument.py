@@ -25,6 +25,9 @@ class Branch:
     ron: u.electron = 5.0 * u.electron
     dark: u.electron / u.s = 0.001 * u.electron / u.s
 
+    def __post_init__(self):
+        if self.name not in ['linear', 'red', 'blue', 'ir']:
+            raise ValueError(f'{self.name} is not an acepted branch name.')
 
 class Spectrograph(ABC):
 
