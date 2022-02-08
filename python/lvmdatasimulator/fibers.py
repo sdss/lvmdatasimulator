@@ -27,7 +27,7 @@ class Fiber:
 
     def __post_init(self):
         self.coords = (self.x, self.y)
-        self.nypix = 5 * self.dispersion
+        self.nypix = 5 * self.dispersion  # size of 2D spectrum
 
     def __str__(self):
         string = f'Fiber {self.id} located at {self.x}, {self.y}'
