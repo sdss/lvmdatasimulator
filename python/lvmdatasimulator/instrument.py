@@ -18,6 +18,7 @@ from abc import ABC, abstractmethod
 @dataclass
 class Branch:
 
+    name: str
     wavecoord: w.WaveCoord
     lsf_fwhm: u.A = 0.5 * u.A
     gain: u.electron / u.adu = 1.0 * u.electron / u.adu
@@ -37,11 +38,12 @@ class Spectrograph(ABC):
     def bundle(self):
         pass
 
+
 class LinearSpectrograph(Spectrograph):
 
     def __init__(self, bundle='central'):
 
-        self.branches = [Branch(wavecoord=w.LinearWave)]
+        self.branches = [Branch(name='linear', wavecoord=w.LinearWave)]
 
         self.bundle = fibers.FiberBundle(bundle)
 
@@ -50,8 +52,8 @@ class LVMSpectrograph(Spectrograph):
 
     def __init__(self, bundle='central'):
 
-        self.branches = [Branch(wavecoord=w.BlueWave),
-                         Branch(wavecoord=w.RedWave),
-                         Branch(wavecoord=w.IRWave)]
+        self.branches = [Branch(name='blue', wavecoord=w.BlueWave),
+                         Branch(name='red', wavecoord=w.RedWave),
+                         Branch(name='ir', wavecoord=w.IRWave)]
 
         self.bundle = fibers.FiberBundle(bundle)
