@@ -10,7 +10,7 @@ import astropy.units as u
 
 from dataclasses import dataclass
 
-from lvmdatasimulator import ROOT_DIR, log
+from lvmdatasimulator import log
 
 
 @dataclass
