@@ -10,9 +10,20 @@ import astropy.units as u
 
 from dataclasses import dataclass
 
+from abc import ABC, abstractmethod
+
 
 @dataclass
-class LVM160:
+class Telescope(ABC):
+
+    @property
+    @abstractmethod
+    def aperture_area(self):
+        pass
+
+
+@dataclass
+class LVM160(Telescope):
     """
     Class summarizing the properties of the telescope. Pretty empty, but for the ETC we need just
     this
