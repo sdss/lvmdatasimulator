@@ -14,9 +14,8 @@ import lvmdatasimulator.wavecoords as w
 from dataclasses import dataclass
 from astropy.convolution import Gaussian1DKernel
 
-from lvmdatasimulator.utils import round_up_to_odd
 from lvmdatasimulator import fibers
-
+from abc import ABC, abstractmethod
 
 @dataclass
 class Branch:
@@ -28,7 +27,19 @@ class Branch:
     dark: u.electron / u.s = 0.001 * u.electron / u.s
 
 
-class LinearSpectrograph:
+class Spectrograph(ABC):
+
+    @property
+    @abstractmethod
+    def brances(self):
+        pass
+
+    @property
+    @abstractmethod
+    def bundle(self):
+        pass
+
+class LinearSpectrograph(Spectrograph):
 
     def __init__(self, bundle='central'):
 
@@ -37,7 +48,7 @@ class LinearSpectrograph:
         self.bundle = fibers.FiberBundle(bundle)
 
 
-class LVMSpectrograph:
+class LVMSpectrograph(Spectrograph):
 
     def __init__(self, bundle='central'):
 
