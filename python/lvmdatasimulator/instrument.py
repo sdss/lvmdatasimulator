@@ -6,12 +6,16 @@
 # @License: BSD 3-Clause
 # @Copyright: Oleg Egorov, Enrico Congiu
 
+from functools import cached_property
 import astropy.units as u
 import lvmdatasimulator.wavecoords as w
 
 from dataclasses import dataclass
+from astropy.io import ascii
+from scipy.interpolate import interp1d
 
-from lvmdatasimulator import fibers
+
+from lvmdatasimulator import ROOT_DIR, fibers
 from abc import ABC, abstractmethod
 
 
@@ -28,6 +32,18 @@ class Branch:
     def __post_init__(self):
         if self.name not in ['linear', 'red', 'blue', 'ir']:
             raise ValueError(f'{self.name} is not an acepted branch name.')
+
+    @cached_property
+    def efficiency(self):
+        """create efficiency of the branch"""
+
+        filename = f'{ROOT_DIR}/data/instrument/LVM_ELAM_{self.name}.dat'
+        data = ascii.read(filename, names=['col1', 'col2'])
+        lam0 = data['col1']
+        elam0 = data['col2']
+        f = interp1d(lam0, elam0, fill_value='extrapolate')
+        return f(self.wavecoord.wave)
+
 
 class Spectrograph(ABC):
 
