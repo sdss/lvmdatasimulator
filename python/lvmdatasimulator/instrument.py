@@ -6,16 +6,14 @@
 # @License: BSD 3-Clause
 # @Copyright: Oleg Egorov, Enrico Congiu
 
-import numpy as np
-import functools
 import astropy.units as u
 import lvmdatasimulator.wavecoords as w
 
 from dataclasses import dataclass
-from astropy.convolution import Gaussian1DKernel
 
 from lvmdatasimulator import fibers
 from abc import ABC, abstractmethod
+
 
 @dataclass
 class Branch:

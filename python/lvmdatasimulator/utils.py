@@ -8,5 +8,6 @@
 
 import numpy as np
 
+
 def round_up_to_odd(f):
     return np.ceil(f) // 2 * 2 + 1
