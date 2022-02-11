@@ -43,6 +43,11 @@ class WaveCoord(ABC):
         """ Get the step """
         pass
 
+    @abstractmethod
+    def npix(self):
+        """ Get the step """
+        pass
+
 
 @dataclass
 class LinearWave(WaveCoord):
@@ -69,6 +74,10 @@ class LinearWave(WaveCoord):
         delta = self.wave[1: -1] - self.wave[0: -2]
         return delta.mean() * u.A / u.px
 
+    @cached_property
+    def npix(self):
+        return len(self.wave)
+
 
 @dataclass
 class BlueWave(WaveCoord):
@@ -90,6 +99,9 @@ class BlueWave(WaveCoord):
     def step(self):
         pass
 
+    @cached_property
+    def npix(self):
+        return len(self.wave)
 
 @dataclass
 class RedWave(WaveCoord):
@@ -111,6 +123,9 @@ class RedWave(WaveCoord):
     def step(self):
         pass
 
+    @cached_property
+    def npix(self):
+        return len(self.wave)
 
 @dataclass
 class IRWave(WaveCoord):
@@ -131,3 +146,7 @@ class IRWave(WaveCoord):
     @cached_property
     def step(self):
         pass
+
+    @cached_property
+    def npix(self):
+        return len(self.wave)
