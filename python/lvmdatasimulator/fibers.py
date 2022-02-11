@@ -48,6 +48,8 @@ class FiberBundle:
 
         self.fibers = self.build_bundle()
 
+        self.nfibers = len(self.fibers)
+
     def build_bundle(self):
 
         if self.bundle_type == 'central':
