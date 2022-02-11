@@ -9,7 +9,6 @@
 # import scipy.optimize
 # import sys
 import os.path
-
 from astropy import units as u
 from astropy import constants as c
 import numpy as np
@@ -18,11 +17,11 @@ from astropy.io import fits
 # from scipy.integrate import nquad
 # import tqdm
 # from multiprocessing import Pool
-# import multiprocessing
 from scipy.special import sph_harm
 from astropy.wcs import WCS
 from astropy.wcs.utils import proj_plane_pixel_scales
 from astropy.coordinates import SkyCoord
+from astropy.convolution import convolve, kernels
 from dataclasses import dataclass
 import functools
 from scipy.ndimage.interpolation import map_coordinates
@@ -30,6 +29,7 @@ from scipy.interpolate import interp1d
 # from typing import List
 import lvmdatasimulator
 from lvmdatasimulator import log
+import progressbar
 from joblib import Parallel, delayed
 
 fluxunit = u.erg / (u.cm ** 2 * u.s * u.arcsec ** 2)
@@ -136,6 +136,44 @@ def find_model_id(file=lvmdatasimulator.CLOUDY_MODELS,
     return extension_index, check_id
 
 
+def resolve_aperture(cur_wcs, width, height, aperture):
+    """
+    Construct pixel mask based on the provided WCS, width and height of the field of view and the current aperture
+
+    aperture = {"type": 'circle',  # or 'rect',
+                # position of the center; if both "RA, DEC" and "X, Y" are set => "X, Y" will be used
+                "X": 100,
+                "Y": 300,
+                "RA": 128.123443,  # degree
+                "DEC": -12.34312,  # degree
+                "rad": 12.32 # radius of the circular aperture
+                "width": 12.32 # full size of the rectangular aperture
+                "height": 12.32 # full size of the rectangular aperture
+                "size_unit": 'px'  # or 'degree' or 'arcsec' => unit of the size values (pix is default)
+                # if size = 0 => assumed single pixel
+                }
+    """
+    if type(aperture) is not dict or aperture.get('type') not in ['circle', 'rect']:
+        log.warning("Unrecognized type of aperture")
+        return None
+    xx, yy = np.meshgrid(np.arange(width), np.arange(height))
+    ap_keys_orig = aperture.keys()
+    ap_keys_compar = str.lower(ap_keys_orig)
+    pxsize = proj_plane_pixel_scales(cur_wcs)[0] * 3600
+    if 'size_unit' not in ap_keys_compar:
+        aperture['size_unit'] = 'px'
+    elif aperture[ap_keys_orig[ap_keys_compar == 'size_unit']] not in ['px', 'degree', 'arcsec']:
+        aperture['size_unit'] = 'px'
+    elif aperture[ap_keys_orig[ap_keys_compar == 'size_unit']]:
+        pass
+
+
+
+    if not ("x" in ap_keys_compar and ("y" in ap_keys_compar)):
+        if not ("ra" in ap_keys_compar and ('dec' in ap_keys_compar)):
+            log.warning("Incomplete parameters defining aperture")
+            return None
+        cur_wcs.world_to_pixel(ra="")
 @dataclass
 class Nebula:
     """
@@ -574,9 +612,9 @@ class ISM:
     vel_amplitude: velunit = 100 * velunit  # Maximal deviation from the systemic velocity to setup vel.grid
     turbulent_sigma: velunit = 10. * velunit  # turbulence vel. disp. to be used for every nebula unless other specified
     # last_id: int = 0
-    ext_eps: u.mag = 0.01 * u.mag
-    brt_eps: fluxunit = 1e-20 * fluxunit
-    vel_contrib_eps: float = 1e-3
+    # ext_eps: u.mag = 0.01 * u.mag
+    # brt_eps: fluxunit = 1e-20 * fluxunit
+    # vel_contrib_eps: float = 1e-3
 
     def __post_init__(self):
         self.content = fits.HDUList()
@@ -598,7 +636,8 @@ class ISM:
     def vel_resolution(self):
         return (self.spec_resolution / self.npix_line / (10000 * u.Angstrom) * c.c).to(velunit)
 
-    def _add_fits_extension(self, name, value, obj_to_add, zorder=0, cur_wavelength=0, add_fits_kw=None):
+    def _add_fits_extension(self, name, value, obj_to_add, zorder=0, cur_wavelength=0, add_fits_kw=None,
+                            add_counter=False):
         self.content.append(fits.ImageHDU(value, name=name))
         self.content[-1].header['Nebtype'] = type(obj_to_add).__name__
         self.content[-1].header['Dark'] = (obj_to_add.max_brightness <= 0)
@@ -625,7 +664,8 @@ class ISM:
         if add_fits_kw is not None:
             for kw in add_fits_kw:
                 self.content[-1].header[kw] = add_fits_kw[kw]
-        self.content[0].header['Nobj'] += 1
+        if add_counter:
+            self.content[0].header['Nobj'] += 1
 
     def add_nebula(self, obj_to_add, obj_id=0, zorder=0, add_fits_kw=None):
         """
@@ -649,7 +689,7 @@ class ISM:
             brt_4d = None
 
         self._add_fits_extension(name="Comp_{0}_Brightness".format(obj_id), value=brt,
-                                 obj_to_add=obj_to_add, zorder=zorder, add_fits_kw=add_fits_kw)
+                                 obj_to_add=obj_to_add, zorder=zorder, add_fits_kw=add_fits_kw, add_counter=True)
         if obj_to_add.max_brightness > 0:
             if brt_4d is not None:
                 with fits.open(lvmdatasimulator.CLOUDY_MODELS) as hdu:
@@ -699,15 +739,18 @@ class ISM:
                                 'linerat_constant': False #  if True -> lines ratios doesn't vary across Cloud/Bubble
                                 }]
         """
+        if type(all_objects) is dict:
+            all_objects = [all_objects]
         if type(all_objects) not in [list, tuple]:
             log.warning('Cannot generate nebulae as the input is not a list or tuple')
-            return
+            return None
         all_objects = [cobj for cobj in all_objects if cobj.get('type') in ['Nebula', 'Bubble',
                                                                             'Filament', 'DIG', 'Cloud']]
         n_objects = len(all_objects)
         log.info("Start generating {} nebulae".format(n_objects))
 
         obj_id = self.content[0].header['Nobj']
+        obj_id_ini = self.content[0].header['Nobj']
         for ind_obj, cur_obj in enumerate(all_objects):
             # Setup default parameters for missing keywords
             for k, v in zip(['max_brightness', 'max_extinction', 'thickness',
@@ -861,6 +904,10 @@ class ISM:
                 add_fits_kw = None
             self.add_nebula(generated_object, obj_id=obj_id, zorder=cur_obj.get('zorder'), add_fits_kw=add_fits_kw)
             obj_id += 1
+        if (obj_id-obj_id_ini) == 0:
+            return None
+        else:
+            return True
 
     def load_nebulae(self, file):
         """
@@ -873,7 +920,9 @@ class ISM:
         else:
             with fits.open(file) as hdu:
                 wcs = WCS(hdu[0].header)
-                check = ~np.isclose(wcs.proj_plane_pixel_scales(), self.wcs.proj_plane_pixel_scales())
+                cdelt_file = [cdelt.to(u.degree).value for cdelt in wcs.proj_plane_pixel_scales()]
+                cdelt_ism = [cdelt.to(u.degree).value for cdelt in self.wcs.proj_plane_pixel_scales()]
+                check = ~np.isclose(cdelt_file, cdelt_ism)
                 check = np.append(check, ~np.isclose(wcs.wcs.crval, self.wcs.wcs.crval))
                 check = np.append(check, ~np.isclose(hdu[0].header.get("VELRES"), self.vel_resolution.value))
                 if any(check):
@@ -886,15 +935,22 @@ class ISM:
                     else:
                         self.content.append(fits.ImageHDU(header=hh.header, data=hh.data,
                                                           name=hh.header.get('EXTNAME')))
+                return True
 
-    def calc_extinction(self, wavelength=6562.81, x0=0, y0=0, xs=None, ys=None):
+    def calc_extinction(self, wavelength=6562.81, x0=0, y0=0, xs=None, ys=None, extinction_name=None):
         """
         Calculate coefficient to reduce flux due to extinction at given wavelength(s)
 
-        x0, y0: start pixels in the field of view for calculations
-        xs, ys: size (in pixels) of the area for calculations (if None => then just pixel x0,y0 is considered; xs=ys=1)
-        wavelength: in angstrom, particular wavelength or (wavelengths) at which the calculations should be performed
-        Return: None (if no any dark nebula at particular location) or np.array of (nlines, ys, xs) shape
+        Args:
+            x0: start x-coordinate in the field of view for calculations
+            y0: start x-coordinate in the field of view for calculations
+            xs: x-size (in pixels) of the area for calculations (if None => then just pixel x0,y0 is considered; xs=1)
+            ys: y-size (in pixels) of the area for calculations (if None => then just pixel x0,y0 is considered; ys=1)
+            wavelength: in angstrom, particular wavelength (or wavelengths)
+                at which the calculations should be performed
+            extinction_name (str): name of the extension for current dark nebula
+        Returns:
+            None (if no any dark nebula at particular location) or np.array of (nlines, ys, xs) shape
         """
         if self.content[0].header['Nobj'] == 0 or (x0 > self.width) or (y0 > self.height):
             return None
@@ -913,11 +969,20 @@ class ISM:
             else:
                 return True
 
-        all_dark_nebulae = [hdu.header.get('EXTNAME') for hdu in self.content
-                            if hdu.header.get('EXTNAME') is not None and ("BRIGHTNESS" in hdu.header.get('EXTNAME'))
-                            and hdu.header.get('DARK')
-                            and check_in_region(hdu.header.get('X0'), hdu.header.get('Y0'),
+        if extinction_name is None:
+            all_dark_nebulae = [hdu.header.get('EXTNAME') for hdu in self.content if
+                                hdu.header.get('EXTNAME') is not None and
+                                ("BRIGHTNESS" in hdu.header.get('EXTNAME')) and
+                                hdu.header.get('DARK') and
+                                check_in_region(hdu.header.get('X0'), hdu.header.get('Y0'),
                                                 hdu.header.get('NAXIS1'), hdu.header.get('NAXIS2'))]
+        else:
+            if not check_in_region(self.content[extinction_name].header.get('X0'),
+                                   self.content[extinction_name].header.get('Y0'),
+                                   self.content[extinction_name].header.get('NAXIS1'),
+                                   self.content[extinction_name].header.get('NAXIS2')):
+                return None
+            all_dark_nebulae = [extinction_name]
         if len(all_dark_nebulae) == 0:
             return None
         if type(wavelength) in [float, int]:
@@ -932,14 +997,16 @@ class ISM:
     def get_map(self, wavelength=6562.81):
         """
         Method to produce 2D map of all ISM nebulae in the selected line
+        Args:
+            wavelength (float): exact wavelength (in Angstrom) according to the lines list
         """
         if self.content[0].header['Nobj'] == 0:
             log.warning("ISM doesn't contain any nebula")
             return None
         all_extensions = [hdu.header.get('EXTNAME') for hdu in self.content]
-        all_extensions_brt = [extname for extname in all_extensions
-                              if extname is not None and ("BRIGHTNESS" in extname)]
-        all_extensions_brt = np.array(all_extensions_brt)
+        all_extensions_brt = np.array([extname for extname in all_extensions
+                                       if extname is not None and ("BRIGHTNESS" in extname)])
+
         if all([self.content[cur_ext].header.get("DARK") for cur_ext in all_extensions_brt]):
             log.warning("ISM doesn't contain any emission nebula")
             return None
@@ -953,7 +1020,8 @@ class ISM:
             if self.content[cur_ext].header.get("DARK"):
                 if map_2d is None:
                     continue
-                map_2d = map_2d * self.calc_extinction(wavelength=wavelength, xs=self.width, ys=self.height)[0]
+                map_2d = map_2d * self.calc_extinction(wavelength=wavelength, xs=self.width, ys=self.height,
+                                                       extinction_name=cur_ext)[0]
                 continue
             my_comp = "_".join(cur_ext.split("_")[:2])
             flux_ext = [extname for extname in all_extensions
@@ -976,15 +1044,121 @@ class ISM:
 
             if map_2d is None:
                 map_2d = np.zeros(shape=(self.height, self.width), dtype=float)
-            # print(map_2d.shape, add_emission.shape,self.content[cur_ext].header['Y0'],
-            #        self.content[cur_ext].header['Y0'] + self.content[cur_ext].header['NAXIS2'],
-            #        self.content[cur_ext].header['X0'],
-            #        self.content[cur_ext].header['X0'] + self.content[cur_ext].header['NAXIS1'])
             map_2d[self.content[cur_ext].header['Y0']:
                    self.content[cur_ext].header['Y0'] + self.content[cur_ext].header['NAXIS2'],
                    self.content[cur_ext].header['X0']:
                    self.content[cur_ext].header['X0'] + self.content[cur_ext].header['NAXIS1']] += add_emission
         return map_2d
+
+    def _process_single_line_spectrum(self, wl_grid, cur_wl, flux, vel, lsf):
+        wl_line = ((self.vel_grid + vel) / (2.9979e5 * velunit) + 1) * cur_wl * u.AA
+        wl_indexes = np.flatnonzero((wl_grid > wl_line[0]) & (wl_grid < wl_line[-1]))
+        p = interp1d(wl_line.value, lsf.value)
+        spectrum = np.zeros_like(wl_grid.value)
+        spectrum[wl_indexes] = p(wl_grid[wl_indexes].value)
+        spectrum[wl_indexes] = spectrum[wl_indexes] / np.sum(spectrum[wl_indexes]) * flux.to(fluxunit).value
+        return spectrum
+
+    def _process_logscale_spectrum(self, wl_logscale, wl_logscale_highres,
+                                   all_wavelength, all_fluxes, vel, lsf):
+        wl_logscale_lsf = np.log(((self.vel_grid + vel) / (2.9979e5 * velunit)).value + 1)
+        p_lsf = interp1d(wl_logscale_lsf, lsf.value, assume_sorted=True)
+        wl_logscale_lsf_highres = np.arange(np.round((wl_logscale_lsf[-1] - wl_logscale_lsf[0]) * 1e6
+                                                     ).astype(int)) * 1e-6 + wl_logscale_lsf[0]
+        lsf_highres = p_lsf(wl_logscale_lsf_highres)
+        lsf_highres = lsf_highres / np.sum(lsf_highres)
+        wl_indexes = np.round((np.log(all_wavelength) - wl_logscale_highres[0])*1e6).astype(int)
+        spectrum_highres = np.zeros_like(wl_logscale_highres)
+        rec = (wl_indexes > 0) & (wl_indexes < len(wl_logscale_highres))
+        spectrum_highres[wl_indexes[rec]] = all_fluxes[rec]
+        spectrum_highres = np.convolve(spectrum_highres, lsf_highres, mode='same')
+        p = interp1d(wl_logscale_highres, spectrum_highres, assume_sorted=True)
+        delta = np.roll(wl_logscale, -1) - wl_logscale
+        delta[-1] = delta[-2]
+        return p(wl_logscale) * delta * 1e6
+
+    def _process_single_pixel_spectrum(self, xy, wl_grid, wl_logscale, wl_logscale_highres,
+                                       extensions_brt, all_extensions):
+        spectrum = np.zeros_like(wl_grid.value)
+        for cur_ext in extensions_brt:
+            cur_xy = np.array([xy[0]-self.content[cur_ext].header.get("X0"),
+                               xy[1]-self.content[cur_ext].header.get("Y0")])
+            if any(cur_xy < 0) or (cur_xy[0] >= self.content[cur_ext].header['NAXIS1']) or \
+                    (cur_xy[1] >= self.content[cur_ext].header['NAXIS2']):
+                continue
+            if self.content[cur_ext].header.get("DARK"):
+                spectrum = spectrum * self.calc_extinction(wl_grid, cur_xy[0], cur_xy[1], extinction_name=cur_ext)
+            else:
+                my_comp = "_".join(cur_ext.split("_")[:2])
+                if self.content[cur_ext].header.get("LINERAT") == 'Variable':
+                    all_wavelength = np.array([extname.split("_")[-1] for extname in all_extensions
+                                               if extname is not None and (my_comp + "_FLUX_" in extname)])
+                    all_fluxes = np.array([self.content[my_comp+"_FLUX_" + wl].data[cur_xy[1], cur_xy[0]]
+                                           for wl in all_wavelength]) * fluxunit
+                    all_wavelength = all_wavelength.astype(float)
+                else:
+                    all_wavelength = self.content[my_comp+"_FLUXRATIOS"].data[0, :]
+                    all_fluxes = self.content[cur_ext].data[cur_xy[1], cur_xy[0]] * \
+                                 self.content[my_comp + "_FLUXRATIOS"].data[1, :] * fluxunit
+                if my_comp + "_LINEPROFILE" in self.content:
+                    lsf = self.content[my_comp + "_LINEPROFILE"].data[:, cur_xy[1], cur_xy[0]] * velunit
+                else:
+                    if my_comp + "_DISP" in self.content:
+                        sigma = self.content[my_comp + "_DISP"].data[cur_xy[1], cur_xy[0]] * velunit
+                    else:
+                        sigma = self.turbulent_sigma
+                    lsf = 1. / (np.sqrt(2. * np.pi) * sigma) * np.exp(-np.power(self.vel_grid / sigma, 2.) / 2)
+                if my_comp + "_VEL" in self.content:
+                    vel = self.content[my_comp + "_VEL"].data[cur_xy[1], cur_xy[0]] * velunit
+                else:
+                    vel = 0 * velunit
+                spectrum += self._process_logscale_spectrum(wl_logscale, wl_logscale_highres,
+                                                            all_wavelength, all_fluxes *10., vel, lsf)
+                # spectrum += np.sum(Parallel(n_jobs=lvmdatasimulator.n_process)
+                #                    (delayed(self._process_single_line_spectrum)
+                #                    (wl_grid, all_wavelength[ind], all_fluxes[ind] * 1000., vel, lsf)
+                #                    for ind in range(len(all_wavelength))),
+                #                    axis=0)
+        return spectrum # * fluxunit
+
+    def get_spectrum(self, wl_grid=None, aperture_mask=None):
+        if aperture_mask is None or np.sum(aperture_mask) == 0:
+            return None
+        if self.content[0].header['Nobj'] == 0:
+            return None
+        all_extensions = [hdu.header.get('EXTNAME') for hdu in self.content]
+        all_extensions_brt = np.array([extname for extname in all_extensions
+                                       if extname is not None and ("BRIGHTNESS" in extname)])
+        if all([self.content[cur_ext].header.get("DARK") for cur_ext in all_extensions_brt]):
+            return None
+        all_extensions_brt = all_extensions_brt[np.argsort([self.content[cur_ext].header.get('ZORDER')
+                                                            for cur_ext in all_extensions_brt])]
+
+        xx, yy = np.meshgrid(np.arange(aperture_mask.shape[1]), np.arange(aperture_mask.shape[0]))
+        spectrum = np.zeros_like(wl_grid.value) #* fluxunit
+
+        wl_logscale = np.log(wl_grid.value)
+        wl_logscale_highres = np.arange((np.round(wl_logscale[-1] - wl_logscale[0]) * 1e6
+                                         ).astype(int)) * 1e-6 + np.round(wl_logscale[0], 6)
+
+        spectrum += np.sum(Parallel(n_jobs=5)#lvmdatasimulator.n_process)
+                           (delayed(self._process_single_pixel_spectrum)
+                           (xy, wl_grid, wl_logscale, wl_logscale_highres, all_extensions_brt, all_extensions)
+                           for xy in zip(xx[aperture_mask].ravel(), yy[aperture_mask].ravel())),
+                           axis=0)
+
+        # bar = progressbar.ProgressBar(max_value=np.sum(aperture_mask)).start() #np.sum(aperture_mask)
+        #
+        # for i, xy in enumerate(zip(xx[aperture_mask].ravel(), yy[aperture_mask].ravel())):
+        #     spectrum += self._process_single_pixel_spectrum(xy, wl_grid, wl_logscale, wl_logscale_highres,
+        #                                                     all_extensions_brt, all_extensions)
+        #     bar.update(i)
+        # bar.finish()
+
+        return spectrum * (proj_plane_pixel_scales(self.wcs)[0] * 3600) ** 2 * fluxunit
+
+
+
 
 #
 #

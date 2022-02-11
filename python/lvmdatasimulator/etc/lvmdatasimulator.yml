@@ -1,9 +1,20 @@
 ---
 
-option1:
-    suboption1: 1
-    suboption2: "some text"
-    suboption3:
-        subsuboption1: [1, 2, 3]
+nprocess: 8  # number of processes for parallelization
 
-option2: 2.0
+cloudy_models_name: 'LVM_cloudy_sphere_models.fits'  # Name for the pre-computed models to be used
+                                                    # (should be stored in 'data' directory)
+
+cloudy_default_params:  # parameters for the Cloudy model to be used by default
+    id: 901
+    Z: 0.3
+    qH: 49.
+    Teff: 70000.
+    nH: 30.
+    Rin: 10.01
+
+data_dir: "data"  # Path to the model grids etc. (relative to the ROOT of package unless it begins with /)
+
+run_dir: "run"  # Path to the directory where the computation results will be saved
+                # (relative to the ROOT of package unless it begins with /)
+
