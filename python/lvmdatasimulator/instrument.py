@@ -7,6 +7,7 @@
 # @Copyright: Oleg Egorov, Enrico Congiu
 
 from functools import cached_property
+import functools
 import astropy.units as u
 import lvmdatasimulator.wavecoords as w
 
@@ -60,19 +61,29 @@ class Spectrograph(ABC):
 
 class LinearSpectrograph(Spectrograph):
 
-    def __init__(self, bundle='central'):
+    def __init__(self, bundle_name='central'):
+        self.bundle_name = bundle_name
 
-        self.branches = [Branch(name='linear', wavecoord=w.LinearWave)]
+    @functools.cached_property
+    def branches(self):
+        return [Branch(name='linear', wavecoord=w.LinearWave)]
 
-        self.bundle = fibers.FiberBundle(bundle)
+    @functools.cached_property
+    def bundle(self):
+        return fibers.FiberBundle(self.bundle_name)
 
 
 class LVMSpectrograph(Spectrograph):
 
-    def __init__(self, bundle='central'):
+    def __init__(self, bundle_name='central'):
+        self.bundle_name = bundle_name
 
-        self.branches = [Branch(name='blue', wavecoord=w.BlueWave),
-                         Branch(name='red', wavecoord=w.RedWave),
-                         Branch(name='ir', wavecoord=w.IRWave)]
+    @functools.cached_property
+    def branches(self):
+        return [Branch(name='blue', wavecoord=w.BlueWave),
+                Branch(name='red', wavecoord=w.RedWave),
+                Branch(name='ir', wavecoord=w.IRWave)]
 
-        self.bundle = fibers.FiberBundle(bundle)
+    @functools.cached_property
+    def bundle(self):
+        return fibers.FiberBundle(bundle_name)
