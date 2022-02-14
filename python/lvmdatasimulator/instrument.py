@@ -66,7 +66,7 @@ class LinearSpectrograph(Spectrograph):
 
     @functools.cached_property
     def branches(self):
-        return [Branch(name='linear', wavecoord=w.LinearWave)]
+        return [Branch(name='linear', wavecoord=w.LinearWave())]
 
     @functools.cached_property
     def bundle(self):
@@ -80,9 +80,9 @@ class LVMSpectrograph(Spectrograph):
 
     @functools.cached_property
     def branches(self):
-        return [Branch(name='blue', wavecoord=w.BlueWave),
-                Branch(name='red', wavecoord=w.RedWave),
-                Branch(name='ir', wavecoord=w.IRWave)]
+        return [Branch(name='blue', wavecoord=w.BlueWave()),
+                Branch(name='red', wavecoord=w.RedWave()),
+                Branch(name='ir', wavecoord=w.IRWave())]
 
     @functools.cached_property
     def bundle(self):
