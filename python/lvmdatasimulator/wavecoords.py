@@ -103,6 +103,7 @@ class BlueWave(WaveCoord):
     def npix(self):
         return len(self.wave)
 
+
 @dataclass
 class RedWave(WaveCoord):
     """ wavelength axis of the red spectrograph """
@@ -126,6 +127,7 @@ class RedWave(WaveCoord):
     @cached_property
     def npix(self):
         return len(self.wave)
+
 
 @dataclass
 class IRWave(WaveCoord):

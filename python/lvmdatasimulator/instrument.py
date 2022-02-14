@@ -49,7 +49,7 @@ class Spectrograph(ABC):
 
     @property
     @abstractmethod
-    def brances(self):
+    def branches(self):
         pass
 
     @property
