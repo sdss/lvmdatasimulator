@@ -86,4 +86,4 @@ class LVMSpectrograph(Spectrograph):
 
     @functools.cached_property
     def bundle(self):
-        return fibers.FiberBundle(bundle_name)
+        return fibers.FiberBundle(self.bundle_name)
