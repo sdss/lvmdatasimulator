@@ -63,16 +63,16 @@ class LinearWave(WaveCoord):
 
     @cached_property
     def start(self):
-        return self.wave[0] * u.A
+        return self.wave[0]
 
     @cached_property
     def end(self):
-        return self.wave[-1] * u.A
+        return self.wave[-1]
 
     @cached_property
     def step(self):
         delta = self.wave[1: -1] - self.wave[0: -2]
-        return delta.mean() * u.A / u.pix
+        return delta.mean() / u.pix
 
     @cached_property
     def npix(self):

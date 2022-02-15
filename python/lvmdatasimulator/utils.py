@@ -7,7 +7,13 @@
 # @Copyright: Oleg Egorov, Enrico Congiu
 
 import numpy as np
+from astropy.units import UnitConversionError
 
 
 def round_up_to_odd(f):
-    return np.ceil(f) // 2 * 2 + 1
+    try:
+        return np.ceil(f) // 2 * 2 + 1
+    except UnitConversionError:
+        unit = f.unit
+        return (np.ceil(f.value) // 2 * 2 + 1) * unit
+
