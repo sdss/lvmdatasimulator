@@ -165,7 +165,7 @@ class Observation:
     @functools.cached_property
     def airmass(self):
         '''get airmass of target from coordinates'''
-        return self.target_coords_altaz.secz
+        return self.target_coords_altaz.secz.value
 
     def plot_visibilities(self, dir='.', show=False):
 
