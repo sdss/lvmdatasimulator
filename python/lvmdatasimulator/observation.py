@@ -159,7 +159,7 @@ class Observation:
         '''This is greatly approximated'''
         conversion = np.array([0, 0.01, 0.05, 0.11, 0.19, 0.27, 0.36, 0.46, 0.55,
                                0.65, 0.73, 0.81, 0.88, 0.93, 1])
-        diff = np.abs(conversion - moon_illumination)
+        diff = np.abs(conversion - self.moon_illumination)
         return np.argmin(diff)
 
     @functools.cached_property
