@@ -25,7 +25,7 @@ class Fiber:
     diameter: u.arcsec = 37 * u.arcsec
     dispersion: u.pix = 3 * u.pix
 
-    def __post_init(self):
+    def __post_init__(self):
         self.coords = (self.x, self.y)
         self.nypix = 5 * self.dispersion  # size of 2D spectrum
 
