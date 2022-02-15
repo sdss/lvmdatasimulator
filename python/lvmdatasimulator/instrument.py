@@ -27,8 +27,8 @@ class Branch:
     wavecoord: w.WaveCoord
     lsf_fwhm: u.A = 0.5 * u.A
     gain: u.electron / u.adu = 1.0 * u.electron / u.adu
-    ron: u.electron = 5.0 * u.electron
-    dark: u.electron / u.s = 0.001 * u.electron / u.s
+    ron: u.electron = 5.0 * u.electron / u.pix
+    dark: u.electron / u.s = 0.001 * u.electron / u.s / u.pix
 
     def __post_init__(self):
         if self.name not in ['linear', 'red', 'blue', 'ir']:
