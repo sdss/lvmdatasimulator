@@ -18,6 +18,11 @@ class Telescope(ABC):
 
     @property
     @abstractmethod
+    def name(self):
+        pass
+
+    @property
+    @abstractmethod
     def aperture_area(self):
         pass
 
@@ -28,4 +33,5 @@ class LVM160(Telescope):
     Class summarizing the properties of the telescope. Pretty empty, but for the ETC we need just
     this
     """
+    name: str = 'LVM160'
     aperture_area: u.cm**2 = 201 * u.cm**2
