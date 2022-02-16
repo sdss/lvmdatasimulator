@@ -20,8 +20,8 @@ from lvmdatasimulator.ism import ISM
 import os
 from lvmdatasimulator import WORK_DIR, log
 from scipy.interpolate import interp1d
-import cProfile
-from pstats import Stats
+# import cProfile
+# from pstats import Stats
 
 
 fluxunit = u.erg / (u.cm ** 2 * u.s * u.arcsec ** 2)
@@ -203,7 +203,7 @@ class LVMField:
                                         transform=ax.get_transform('fk5'))
                 else:
                     if 'PA' not in ap:
-                        pa = 0*u.degree
+                        pa = 0 * u.degree
                     else:
                         pa = ap['PA']
                     # !!! TO BE CORRECTED ('RA' and 'DEC' should correspond to the center, and correct for declination)
@@ -231,7 +231,7 @@ class LVMField:
         pass
 
     def _create_ism(self, distance=50 * u.kpc, spec_resolution=0.06 * u.Angstrom,
-                    sys_velocity=0*velunit, turbulent_sigma=10.*velunit):
+                    sys_velocity=0 * velunit, turbulent_sigma=10. * velunit):
         """
         Create ISM object related to this LVMField
         """
@@ -363,7 +363,7 @@ class LVMField:
         return spectrum
 
 
-def run_test(ra=10., dec=-10., spaxel=1/3600., size=1000/60.):
+def run_test(ra=10., dec=-10., spaxel=1 / 3600., size=1000 / 60.):
     # my_nebulae = [
     #         {"type": 'Bubble', 'expansion_velocity': 45 * u.km/u.s,
     #          'turbulent_sigma': 20 * u.km/u.s,
@@ -412,9 +412,9 @@ def run_test(ra=10., dec=-10., spaxel=1/3600., size=1000/60.):
 
     spec = my_lvmfield.extract_spectra(apertures, wl_grid)
     if spec is not None:
-        fig = plt.figure(figsize=(12, 10))
+        _ = plt.figure(figsize=(12, 10))
         for i in range(2):
-            ax = plt.subplot(211+i)
+            ax = plt.subplot(211 + i)
             ax.plot(wl_grid, spec[0], 'k', lw=0.7)
             ax.set_xlabel(r"Wavelength, $'\AA$", fontsize=14)
             ax.set_ylabel(r"Intensity, erg s$^{-1}$ cm$^{-2}$", fontsize=14)

@@ -175,7 +175,7 @@ def resolve_aperture(cur_wcs, width, height, aperture):
         cur_wcs.world_to_pixel(ra="")
 
 
-def convolve_cube(cube, kernel, selected_points_y,  selected_points_x):
+def convolve_cube(cube, kernel, selected_points_y, selected_points_x):
     return convolve_fft(cube, kernel, normalize_kernel=False)[:, selected_points_y, selected_points_x]
 
 
@@ -586,8 +586,8 @@ class Bubble(Cloud):
 
     def _d_spectrum_cartesian(self, velocity: velunit):
         """Returns local spectrum, per pc**3 of area"""
-        return (self._brightness_3d_cartesian[:, :, :, None] * (fluxunit / u.pc ** 3)
-                * self._turbulent_lsf(velocity)).to(fluxunit / velunit / u.pc ** 3)
+        return (self._brightness_3d_cartesian[:, :, :, None] * (
+                fluxunit / u.pc ** 3) * self._turbulent_lsf(velocity)).to(fluxunit / velunit / u.pc ** 3)
 
     @functools.cached_property
     def vel_field(self) -> (fluxunit / velunit):
@@ -600,10 +600,10 @@ class Bubble(Cloud):
                                     self._cartesian_x_grid,
                                     vel_axis, indexing='ij')
         spectrum = (
-                np.sum(self._d_spectrum_cartesian(vels), axis=2).T
-                * (self._cartesian_x_grid[1] - self._cartesian_x_grid[0])
-                * (self._cartesian_y_grid[1] - self._cartesian_y_grid[0])
-                * (self._cartesian_z_grid[1] - self._cartesian_z_grid[0])
+                np.sum(self._d_spectrum_cartesian(vels), axis=2
+                       ).T * (self._cartesian_x_grid[1] - self._cartesian_x_grid[0]
+                              ) * (self._cartesian_y_grid[1] - self._cartesian_y_grid[0]
+                                   ) * (self._cartesian_z_grid[1] - self._cartesian_z_grid[0])
         )
         return spectrum / np.sum(spectrum, axis=0)
 
@@ -1102,8 +1102,8 @@ class ISM:
         aperture_mask_sub = aperture_mask[ystart: yfin + 1, xstart: xfin + 1]
         xx_sub, yy_sub = np.meshgrid(np.arange(xfin - xstart + 1), np.arange(yfin - ystart + 1))
         n_apertures = np.max(aperture_mask)
-        aperture_centers = np.array([(np.round(np.mean(xx[aperture_mask == (ap_ind+1)])).astype(int),
-                                     np.round(np.mean(yy[aperture_mask == (ap_ind+1)])).astype(int))
+        aperture_centers = np.array([(np.round(np.mean(xx[aperture_mask == (ap_ind + 1)])).astype(int),
+                                     np.round(np.mean(yy[aperture_mask == (ap_ind + 1)])).astype(int))
                                      for ap_ind in range(n_apertures)])
         spectrum = np.zeros(shape=(n_apertures, len(wl_grid)), dtype=float)
 
@@ -1170,7 +1170,7 @@ class ISM:
                                                                                   xfin_neb - xstart_neb + 1))
 
             if my_comp + "_LINEPROFILE" in self.content:
-                lsf = self.content[my_comp+"_LINEPROFILE"].data[
+                lsf = self.content[my_comp + "_LINEPROFILE"].data[
                       :, cur_mask_in_neb].reshape((len(self.vel_grid), yfin_neb - ystart_neb + 1,
                                                    xfin_neb - xstart_neb + 1))
             else:
