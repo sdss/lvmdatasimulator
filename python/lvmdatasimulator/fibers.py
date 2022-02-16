@@ -9,8 +9,9 @@
 import astropy.units as u
 
 from dataclasses import dataclass
+from astropy.table import Table
 
-from lvmdatasimulator import log
+from lvmdatasimulator import ROOT_DIR, log
 
 
 @dataclass
@@ -75,4 +76,17 @@ class FiberBundle:
         Read the file containg information on the fibers corresponding to one slit
         TBW
         """
-        return []
+
+        filename = f'{ROOT_DIR}/data/instrument/{slit}.dat'
+        table = Table.read(filename, format='ascii.csv')
+
+        fibers = []
+
+        for row in table:
+            fibers.append(Fiber(row['name'],
+                                row['x'] * u.arcsec,
+                                row['y'] * u.arcsec,
+                                row['d'] * u.arcsec,
+                                row['disp'] * u.pix))
+
+        return fibers
