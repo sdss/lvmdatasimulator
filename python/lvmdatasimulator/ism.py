@@ -137,44 +137,6 @@ def find_model_id(file=lvmdatasimulator.CLOUDY_MODELS,
     return extension_index, check_id
 
 
-def resolve_aperture(cur_wcs, width, height, aperture):
-    """
-    Construct pixel mask based on the provided WCS, width and height of the field of view and the current aperture
-
-    aperture = {"type": 'circle',  # or 'rect',
-                # position of the center; if both "RA, DEC" and "X, Y" are set => "X, Y" will be used
-                "X": 100,
-                "Y": 300,
-                "RA": 128.123443,  # degree
-                "DEC": -12.34312,  # degree
-                "rad": 12.32 # radius of the circular aperture
-                "width": 12.32 # full size of the rectangular aperture
-                "height": 12.32 # full size of the rectangular aperture
-                "size_unit": 'px'  # or 'degree' or 'arcsec' => unit of the size values (pix is default)
-                # if size = 0 => assumed single pixel
-                }
-    """
-    if type(aperture) is not dict or aperture.get('type') not in ['circle', 'rect']:
-        log.warning("Unrecognized type of aperture")
-        return None
-    xx, yy = np.meshgrid(np.arange(width), np.arange(height))
-    ap_keys_orig = aperture.keys()
-    ap_keys_compar = str.lower(ap_keys_orig)
-    pxsize = proj_plane_pixel_scales(cur_wcs)[0] * 3600
-    if 'size_unit' not in ap_keys_compar:
-        aperture['size_unit'] = 'px'
-    elif aperture[ap_keys_orig[ap_keys_compar == 'size_unit']] not in ['px', 'degree', 'arcsec']:
-        aperture['size_unit'] = 'px'
-    elif aperture[ap_keys_orig[ap_keys_compar == 'size_unit']]:
-        pass
-
-    if not ("x" in ap_keys_compar and ("y" in ap_keys_compar)):
-        if not ("ra" in ap_keys_compar and ('dec' in ap_keys_compar)):
-            log.warning("Incomplete parameters defining aperture")
-            return None
-        cur_wcs.world_to_pixel(ra="")
-
-
 def convolve_cube(cube, kernel, selected_points_y, selected_points_x):
     return convolve_fft(cube, kernel, normalize_kernel=False)[:, selected_points_y, selected_points_x]
 
@@ -1044,8 +1006,8 @@ class ISM:
                 continue
             my_comp = "_".join(cur_ext.split("_")[:2])
             flux_ext = [extname for extname in all_extensions
-                        if extname is not None and (my_comp in extname
-                                                    and "FLUX_{0}".format(np.round(wavelength, 2)) in extname)]
+                        if extname is not None and (my_comp in extname and
+                                                    "FLUX_{0}".format(np.round(wavelength, 2)) in extname)]
             if len(flux_ext) == 0:
                 fluxrat_ext = [extname for extname in all_extensions
                                if extname is not None and (my_comp in extname and "FLUXRATIOS" in extname)]
