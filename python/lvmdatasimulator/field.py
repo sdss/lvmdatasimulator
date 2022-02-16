@@ -20,6 +20,9 @@ from lvmdatasimulator.ism import ISM
 import os
 from lvmdatasimulator import WORK_DIR, log
 from scipy.interpolate import interp1d
+import cProfile
+from pstats import Stats
+
 
 fluxunit = u.erg / (u.cm ** 2 * u.s * u.arcsec ** 2)
 velunit = u.km / u.s
@@ -160,7 +163,7 @@ class LVMField:
 
         self.starlist = StarsList(filename=filename, dir=directory)
 
-    def show(self, subplots_kw=None, scatter_kw=None, aperture=None):
+    def show(self, subplots_kw=None, scatter_kw=None, apertures=None):
         """
         Display the LVM field with overlaid apertures (if needed). This is a work in progress.
 
@@ -169,7 +172,7 @@ class LVMField:
                 keyword arguments to be passed to plt.subplots. Defaults to None.
             scatter_kw (dict, optional):
                 keyword arguments to be passed to plt.scatter. Defaults to None.
-            aperture (dict or list, optional):
+            apertures (dict or list of dicts, optional):
                 structure defining the position and size of aperture(s) for spectra extraction, values in astropy units
                 ({'RA', 'DEC', 'Radius', 'Width', 'Height', 'PA'};
                 'Width', 'Height' and 'PA' are ignored if 'Radius' is set)
@@ -187,10 +190,10 @@ class LVMField:
         ax.set_xlabel('RA (J2000)', fontsize=15)
         ax.set_ylabel('Dec (J2000)', fontsize=15)
 
-        if type(aperture) in [dict, list, tuple]:
-            if type(aperture) == dict:
-                aperture = [aperture]
-            for ap in aperture:
+        if type(apertures) in [dict, list, tuple]:
+            if type(apertures) == dict:
+                apertures = [apertures]
+            for ap in apertures:
                 if 'RA' not in ap or 'DEC' not in ap or ('Radius' not in ap and
                                                          ('Width' not in ap or 'Height' not in ap)):
                     continue
@@ -295,52 +298,58 @@ class LVMField:
         else:
             self.ism_map = np.zeros(shape=(self.npixels, self.npixels), dtype=float)
 
-    def extract_spectra(self, aperture, wl_grid):
+    def extract_spectra(self, apertures, wl_grid):
         """
         Perform spectra extraction within the given aperture.
 
         Args:
-            aperture (dict):
+            apertures (list or tuple of dict, TO BE CHANGED TO APERTURE BUNDLE):
                 structure defining the position and size of aperture for spectra extraction, values in astropy units
                 ({'RA', 'DEC', 'Radius', 'Width', 'Height', 'PA'};
                 'Width', 'Height' and 'PA' are ignored if 'Radius' is set)
             wl_grid (numpy.array): wavelength grid for the resulting spectrum
         """
-        if 'RA' not in aperture or 'DEC' not in aperture or ('Radius' not in aperture and
-                                                             ('Width' not in aperture or 'Height' not in aperture)):
-            log.warning('Incorrect parameters for aperture')
-            return None
-
-        xc, yc = self.wcs.world_to_pixel(SkyCoord(ra=aperture['RA'], dec=aperture['DEC']))
-        if 'Radius' in aperture:
-            s = (aperture['Radius'].to(u.degree) / self.spaxel.to(u.degree)).value
-        else:
-            s = (np.max([aperture['Width'].to(u.degree) / 2.,
-                         aperture['Height'].to(u.degree) / 2.]) / self.spaxel.to(u.degree)).value
-
-        if (xc - s) < 0 or ((xc + s) >= self.npixels) or ((yc - s) < 0) or ((yc + s) >= self.npixels):
-            log.warning('Aperture for spectra extraction is outside the LVM field')
-            return None
-
-        aperture_mask = np.zeros(shape=(self.npixels, self.npixels), dtype=bool)
+        if type(apertures) not in [list, tuple]:
+            apertures = [apertures]
+        spectrum = np.zeros(shape=(len(apertures), len(wl_grid))) * fluxunit
+        dl = (wl_grid[1] - wl_grid[0]).to(u.AA)
         xx, yy = np.meshgrid(np.arange(self.npixels), np.arange(self.npixels))
-        if 'Radius' in aperture:
-            rec = ((xx - xc) ** 2 + (yy - yc) ** 2) <= (s ** 2)
-        else:
-            w = (aperture['Width'] / 2. / self.spaxel).value
-            h = (aperture['Height'] / 2. / self.spaxel).value
-            rec = (xx >= (xc - w)) & (xx <= (xc + w)) & (yy >= (yc - h)) & (yy <= (yc + h))
-            # !!!!! ADD ROTATION !!!!
-        aperture_mask[rec] = True
-        dl = (wl_grid[1]-wl_grid[0]).to(u.AA)
-        spectrum = np.zeros_like(wl_grid.value) * fluxunit
-        if self.starlist is not None:
-            xc_stars = np.round(self.starlist.stars_table['x']).astype(int)
-            yc_stars = np.round(self.starlist.stars_table['y']).astype(int)
-            stars_id = np.flatnonzero(aperture_mask[yc_stars, xc_stars])
-            for star_id in stars_id:
-                p = interp1d(self.starlist.wave.to(u.AA).value, self.starlist.spectra[star_id])
-                spectrum += (p(wl_grid.value) * dl.value * fluxunit)
+        aperture_mask = np.zeros(shape=(self.npixels, self.npixels), dtype=int)
+        for ap_index, aperture in enumerate(apertures):
+            if 'RA' not in aperture or 'DEC' not in aperture or ('Radius' not in aperture and
+                                                                 ('Width' not in aperture or 'Height' not in aperture)):
+                log.warning('Incorrect parameters for aperture #{0}'.format(ap_index + 1))
+                continue
+
+            xc, yc = self.wcs.world_to_pixel(SkyCoord(ra=aperture['RA'], dec=aperture['DEC']))
+            if 'Radius' in aperture:
+                s = (aperture['Radius'].to(u.degree) / self.spaxel.to(u.degree)).value
+            else:
+                s = (np.max([aperture['Width'].to(u.degree) / 2.,
+                             aperture['Height'].to(u.degree) / 2.]) / self.spaxel.to(u.degree)).value
+
+            if (xc - s) < 0 or ((xc + s) >= self.npixels) or ((yc - s) < 0) or ((yc + s) >= self.npixels):
+                log.warning('Aperture #{0} for spectra extraction is outside the LVM field'.format(ap_index + 1))
+                continue
+
+            if 'Radius' in aperture:
+                rec = ((xx - xc) ** 2 + (yy - yc) ** 2) <= (s ** 2)
+            else:
+                w = (aperture['Width'] / 2. / self.spaxel).value
+                h = (aperture['Height'] / 2. / self.spaxel).value
+                rec = (xx >= (xc - w)) & (xx <= (xc + w)) & (yy >= (yc - h)) & (yy <= (yc + h))
+                # !!!!! ADD ROTATION !!!!
+            aperture_mask[rec] = ap_index + 1
+
+            if self.starlist is not None:
+                xc_stars = np.round(self.starlist.stars_table['x']).astype(int)
+                yc_stars = np.round(self.starlist.stars_table['y']).astype(int)
+                stars_id = np.flatnonzero(aperture_mask[yc_stars, xc_stars] == (ap_index + 1))
+                for star_id in stars_id:
+                    p = interp1d(self.starlist.wave.to(u.AA).value, self.starlist.spectra[star_id])
+                    # !!! APPLY EXTINCTION BY DARK NEBULAE TO STARS !!!
+                    spectrum[ap_index, :] += (p(wl_grid.value) * dl.value * fluxunit)
+        log.info("Start extracting nebular spectra")
         spectrum_ism = self.ism.get_spectrum(wl_grid.to(u.AA), aperture_mask)
         if spectrum_ism is not None:
             spectrum += spectrum_ism
@@ -353,9 +362,11 @@ def run_test(ra=10., dec=-10., spaxel=1/3600., size=1000/60.):
     my_lvmfield.add_nebulae(load_from_file="/Users/mors/Science/LVM/testneb.fits")
     my_lvmfield.generate_gaia_stars()
 
-    aperture = {"RA": 10.017*u.degree, "DEC": -10.058*u.degree, "Radius": 30*u.arcsec}
+    apertures = [{"RA": 10.017*u.degree, "DEC": -10.058*u.degree, "Radius": 30*u.arcsec},
+                 {"RA": 10.007 * u.degree, "DEC": -10.05 * u.degree, "Radius": 30 * u.arcsec},
+                 {"RA": 09.995 * u.degree, "DEC": -10.0 * u.degree, "Radius": 30 * u.arcsec}]
 
-    my_lvmfield.show(aperture=aperture)
+    my_lvmfield.show(apertures=apertures)
 
     dlam = 0.06
     l0 = 3650.
@@ -363,25 +374,23 @@ def run_test(ra=10., dec=-10., spaxel=1/3600., size=1000/60.):
     npix = np.round((l1 - l0) / dlam).astype(int)
     wl_grid = (np.arange(npix) * dlam + l0) * u.AA
 
-    spec = my_lvmfield.extract_spectra(aperture, wl_grid)
+    spec = my_lvmfield.extract_spectra(apertures, wl_grid)
     if spec is not None:
-        fig, ax = plt.subplots(figsize=(15,5))
-        ax.plot(wl_grid, spec, 'k', lw=0.7)
+        fig, ax = plt.subplots(figsize=(15, 5))
+        ax.plot(wl_grid, spec[0], 'k', lw=0.7)
         ax.set_xlabel(r"Wavelength, $'\AA$", fontsize=14)
         ax.set_ylabel(r"Intensity, erg s$^{-1}$ cm$^{-2}$", fontsize=14)
-        ax.set_xlim(6550, 6600)
+        ax.set_xlim(6550, 6590)
     plt.show()
 
 
 if __name__ == '__main__':
     run_test()
-    # from astropy.io import fits
-    # with fits.open("/Users/mors/Science/LVM/test4.fits") as hdu:
-    #     extensions = [h.header['Extname'] for h in hdu[1:] if ('COMP_1' in h.header['Extname'])]
-    #     for ext in extensions:
-    #         hdu[ext].header['Y0']+=90
-    #         hdu[ext].header['X0'] += 20
-    #     hdu[0].header['CTYPE1'] = "RA---TAN"
-    #     hdu[0].header['CTYPE2'] = "DEC--TAN"
-    #     hdu[0].header['NOBJ'] = 4
-    #     hdu.writeto("/Users/mors/Science/LVM/testneb.fits", overwrite = True)
+    # with cProfile.Profile() as pr:
+    #     run_test()
+    #     with open('/Users/mors/Science/LVM/profiling_stats.prof', 'w') as stream:
+    #         stats = Stats(pr, stream=stream)
+    #         stats.strip_dirs()
+    #         stats.sort_stats('time')
+    #         stats.dump_stats('.prof_stats')  # the name of this file is what you have to give to snakeviz
+    #         stats.print_stats()

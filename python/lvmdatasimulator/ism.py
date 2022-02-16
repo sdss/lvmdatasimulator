@@ -31,6 +31,8 @@ import lvmdatasimulator
 from lvmdatasimulator import log
 import progressbar
 from joblib import Parallel, delayed
+import time
+from astropy.convolution import convolve_fft, kernels
 
 fluxunit = u.erg / (u.cm ** 2 * u.s * u.arcsec ** 2)
 velunit = u.km / u.s
@@ -167,13 +169,13 @@ def resolve_aperture(cur_wcs, width, height, aperture):
     elif aperture[ap_keys_orig[ap_keys_compar == 'size_unit']]:
         pass
 
-
-
     if not ("x" in ap_keys_compar and ("y" in ap_keys_compar)):
         if not ("ra" in ap_keys_compar and ('dec' in ap_keys_compar)):
             log.warning("Incomplete parameters defining aperture")
             return None
         cur_wcs.world_to_pixel(ra="")
+
+
 @dataclass
 class Nebula:
     """
@@ -235,8 +237,7 @@ class Nebula:
             perturb = np.random.uniform(-1, 1, (self.height, self.width)) * self.perturb_amplitude / self._npix_los
             xx, yy = np.meshgrid(np.arange(self.width), np.arange(self.height))
             f = np.exp(-2 * (xx ** 2 + yy ** 2) / pertscale)
-            perturb = 4 / np.sqrt(np.pi) / pertscale * \
-                np.fft.ifft2(np.fft.fft2(perturb) * np.fft.fft2(f)).real
+            perturb = 4 / np.sqrt(np.pi) / pertscale * np.fft.ifft2(np.fft.fft2(perturb) * np.fft.fft2(f)).real
             brt += (perturb[:, :, None] - np.median(perturb))
         return brt
 
@@ -554,8 +555,10 @@ class Bubble(Cloud):
         rho, theta, phi = np.meshgrid(self._rad_grid, self._theta_grid, self._phi_grid, indexing='ij')
         vel_cube = np.zeros_like(self._brightness_3d_spherical)
         rec = (rho <= self.radius) & (rho >= (self.radius * (1 - self.thickness)))
-        vel_cube[rec] = np.sin(theta[rec]) * np.cos(phi[rec]) * self.expansion_velocity / \
-            self._brightness_3d_spherical[rec] * \
+        vel_cube[rec] = \
+            np.sin(theta[rec]) * \
+            np.cos(phi[rec]) * \
+            self.expansion_velocity / self._brightness_3d_spherical[rec] * \
             np.median(self._brightness_3d_spherical[self._brightness_3d_spherical > 0])
         return vel_cube
 
@@ -611,6 +614,7 @@ class ISM:
     sys_velocity: velunit = 0 * velunit  # Systemic velocity to center the vel.grid on
     vel_amplitude: velunit = 100 * velunit  # Maximal deviation from the systemic velocity to setup vel.grid
     turbulent_sigma: velunit = 10. * velunit  # turbulence vel. disp. to be used for every nebula unless other specified
+
     # last_id: int = 0
     # ext_eps: u.mag = 0.01 * u.mag
     # brt_eps: fluxunit = 1e-20 * fluxunit
@@ -904,7 +908,7 @@ class ISM:
                 add_fits_kw = None
             self.add_nebula(generated_object, obj_id=obj_id, zorder=cur_obj.get('zorder'), add_fits_kw=add_fits_kw)
             obj_id += 1
-        if (obj_id-obj_id_ini) == 0:
+        if (obj_id - obj_id_ini) == 0:
             return None
         else:
             return True
@@ -937,7 +941,7 @@ class ISM:
                                                           name=hh.header.get('EXTNAME')))
                 return True
 
-    def calc_extinction(self, wavelength=6562.81, x0=0, y0=0, xs=None, ys=None, extinction_name=None):
+    def calc_extinction(self, wavelength=6562.81, x0=0, y0=0, xs=None, ys=None, extinction_name=None, logscale=False):
         """
         Calculate coefficient to reduce flux due to extinction at given wavelength(s)
 
@@ -949,6 +953,7 @@ class ISM:
             wavelength: in angstrom, particular wavelength (or wavelengths)
                 at which the calculations should be performed
             extinction_name (str): name of the extension for current dark nebula
+            logscale: True if the wavelength is np.log(wavelength)
         Returns:
             None (if no any dark nebula at particular location) or np.array of (nlines, ys, xs) shape
         """
@@ -1046,85 +1051,12 @@ class ISM:
                 map_2d = np.zeros(shape=(self.height, self.width), dtype=float)
             map_2d[self.content[cur_ext].header['Y0']:
                    self.content[cur_ext].header['Y0'] + self.content[cur_ext].header['NAXIS2'],
-                   self.content[cur_ext].header['X0']:
-                   self.content[cur_ext].header['X0'] + self.content[cur_ext].header['NAXIS1']] += add_emission
+            self.content[cur_ext].header['X0']:
+            self.content[cur_ext].header['X0'] + self.content[cur_ext].header['NAXIS1']] += add_emission
         return map_2d
 
-    def _process_single_line_spectrum(self, wl_grid, cur_wl, flux, vel, lsf):
-        wl_line = ((self.vel_grid + vel) / (2.9979e5 * velunit) + 1) * cur_wl * u.AA
-        wl_indexes = np.flatnonzero((wl_grid > wl_line[0]) & (wl_grid < wl_line[-1]))
-        p = interp1d(wl_line.value, lsf.value)
-        spectrum = np.zeros_like(wl_grid.value)
-        spectrum[wl_indexes] = p(wl_grid[wl_indexes].value)
-        spectrum[wl_indexes] = spectrum[wl_indexes] / np.sum(spectrum[wl_indexes]) * flux.to(fluxunit).value
-        return spectrum
-
-    def _process_logscale_spectrum(self, wl_logscale, wl_logscale_highres,
-                                   all_wavelength, all_fluxes, vel, lsf):
-        wl_logscale_lsf = np.log(((self.vel_grid + vel) / (2.9979e5 * velunit)).value + 1)
-        p_lsf = interp1d(wl_logscale_lsf, lsf.value, assume_sorted=True)
-        wl_logscale_lsf_highres = np.arange(np.round((wl_logscale_lsf[-1] - wl_logscale_lsf[0]) * 1e6
-                                                     ).astype(int)) * 1e-6 + wl_logscale_lsf[0]
-        lsf_highres = p_lsf(wl_logscale_lsf_highres)
-        lsf_highres = lsf_highres / np.sum(lsf_highres)
-        wl_indexes = np.round((np.log(all_wavelength) - wl_logscale_highres[0])*1e6).astype(int)
-        spectrum_highres = np.zeros_like(wl_logscale_highres)
-        rec = (wl_indexes > 0) & (wl_indexes < len(wl_logscale_highres))
-        spectrum_highres[wl_indexes[rec]] = all_fluxes[rec]
-        spectrum_highres = np.convolve(spectrum_highres, lsf_highres, mode='same')
-        p = interp1d(wl_logscale_highres, spectrum_highres, assume_sorted=True)
-        delta = np.roll(wl_logscale, -1) - wl_logscale
-        delta[-1] = delta[-2]
-        return p(wl_logscale) * delta * 1e6
-
-    def _process_single_pixel_spectrum(self, xy, wl_grid, wl_logscale, wl_logscale_highres,
-                                       extensions_brt, all_extensions):
-        spectrum = np.zeros_like(wl_grid.value)
-        for cur_ext in extensions_brt:
-            cur_xy = np.array([xy[0]-self.content[cur_ext].header.get("X0"),
-                               xy[1]-self.content[cur_ext].header.get("Y0")])
-            if any(cur_xy < 0) or (cur_xy[0] >= self.content[cur_ext].header['NAXIS1']) or \
-                    (cur_xy[1] >= self.content[cur_ext].header['NAXIS2']):
-                continue
-            if self.content[cur_ext].header.get("DARK"):
-                spectrum = spectrum * self.calc_extinction(wl_grid, cur_xy[0], cur_xy[1], extinction_name=cur_ext)
-            else:
-                my_comp = "_".join(cur_ext.split("_")[:2])
-                if self.content[cur_ext].header.get("LINERAT") == 'Variable':
-                    all_wavelength = np.array([extname.split("_")[-1] for extname in all_extensions
-                                               if extname is not None and (my_comp + "_FLUX_" in extname)])
-                    all_fluxes = np.array([self.content[my_comp+"_FLUX_" + wl].data[cur_xy[1], cur_xy[0]]
-                                           for wl in all_wavelength]) * fluxunit
-                    all_wavelength = all_wavelength.astype(float)
-                else:
-                    all_wavelength = self.content[my_comp+"_FLUXRATIOS"].data[0, :]
-                    all_fluxes = self.content[cur_ext].data[cur_xy[1], cur_xy[0]] * \
-                                 self.content[my_comp + "_FLUXRATIOS"].data[1, :] * fluxunit
-                if my_comp + "_LINEPROFILE" in self.content:
-                    lsf = self.content[my_comp + "_LINEPROFILE"].data[:, cur_xy[1], cur_xy[0]] * velunit
-                else:
-                    if my_comp + "_DISP" in self.content:
-                        sigma = self.content[my_comp + "_DISP"].data[cur_xy[1], cur_xy[0]] * velunit
-                    else:
-                        sigma = self.turbulent_sigma
-                    lsf = 1. / (np.sqrt(2. * np.pi) * sigma) * np.exp(-np.power(self.vel_grid / sigma, 2.) / 2)
-                if my_comp + "_VEL" in self.content:
-                    vel = self.content[my_comp + "_VEL"].data[cur_xy[1], cur_xy[0]] * velunit
-                else:
-                    vel = 0 * velunit
-                spectrum += self._process_logscale_spectrum(wl_logscale, wl_logscale_highres,
-                                                            all_wavelength, all_fluxes *10., vel, lsf)
-                # spectrum += np.sum(Parallel(n_jobs=lvmdatasimulator.n_process)
-                #                    (delayed(self._process_single_line_spectrum)
-                #                    (wl_grid, all_wavelength[ind], all_fluxes[ind] * 1000., vel, lsf)
-                #                    for ind in range(len(all_wavelength))),
-                #                    axis=0)
-        return spectrum # * fluxunit
-
     def get_spectrum(self, wl_grid=None, aperture_mask=None):
-        if aperture_mask is None or np.sum(aperture_mask) == 0:
-            return None
-        if self.content[0].header['Nobj'] == 0:
+        if aperture_mask is None or (np.sum(aperture_mask) == 0) or (self.content[0].header['Nobj'] == 0):
             return None
         all_extensions = [hdu.header.get('EXTNAME') for hdu in self.content]
         all_extensions_brt = np.array([extname for extname in all_extensions
@@ -1134,31 +1066,163 @@ class ISM:
         all_extensions_brt = all_extensions_brt[np.argsort([self.content[cur_ext].header.get('ZORDER')
                                                             for cur_ext in all_extensions_brt])]
 
-        xx, yy = np.meshgrid(np.arange(aperture_mask.shape[1]), np.arange(aperture_mask.shape[0]))
-        spectrum = np.zeros_like(wl_grid.value) #* fluxunit
-
         wl_logscale = np.log(wl_grid.value)
         wl_logscale_highres = np.arange((np.round(wl_logscale[-1] - wl_logscale[0]) * 1e6
                                          ).astype(int)) * 1e-6 + np.round(wl_logscale[0], 6)
-
-        spectrum += np.sum(Parallel(n_jobs=5)#lvmdatasimulator.n_process)
-                           (delayed(self._process_single_pixel_spectrum)
-                           (xy, wl_grid, wl_logscale, wl_logscale_highres, all_extensions_brt, all_extensions)
-                           for xy in zip(xx[aperture_mask].ravel(), yy[aperture_mask].ravel())),
-                           axis=0)
-
-        # bar = progressbar.ProgressBar(max_value=np.sum(aperture_mask)).start() #np.sum(aperture_mask)
-        #
-        # for i, xy in enumerate(zip(xx[aperture_mask].ravel(), yy[aperture_mask].ravel())):
-        #     spectrum += self._process_single_pixel_spectrum(xy, wl_grid, wl_logscale, wl_logscale_highres,
-        #                                                     all_extensions_brt, all_extensions)
-        #     bar.update(i)
-        # bar.finish()
-
-        return spectrum * (proj_plane_pixel_scales(self.wcs)[0] * 3600) ** 2 * fluxunit
+        # delta_lr = np.roll(wl_grid.value, -1) - wl_grid.value
+        # delta_lr[-1] = delta_lr[-2]
+        # wl_highres = np.exp(wl_logscale_highres)
+        # delta_hr = np.roll(wl_highres, -1) - wl_highres
+        # delta_hr[-1] = delta_hr[-2]
+        # p = interp1d(wl_highres, delta_hr, assume_sorted=True)
+        # delta_hr = p(wl_grid.value)
+        delta_lr = np.roll(wl_logscale, -1) - wl_logscale
+        delta_lr[-1] = delta_lr[-2]
 
 
+        xx, yy = np.meshgrid(np.arange(aperture_mask.shape[1]), np.arange(aperture_mask.shape[0]))
+        pix_in_apertures = aperture_mask > 0
+        xstart = np.min(xx[pix_in_apertures])
+        ystart = np.min(yy[pix_in_apertures])
+        xfin = np.max(xx[pix_in_apertures])
+        yfin = np.max(yy[pix_in_apertures])
+        aperture_mask_sub = aperture_mask[ystart: yfin + 1, xstart: xfin + 1]
+        xx_sub, yy_sub = np.meshgrid(np.arange(xfin - xstart + 1), np.arange(yfin - ystart + 1))
+        n_apertures = np.max(aperture_mask)
+        aperture_centers = np.array([(np.round(np.mean(xx[aperture_mask == (ap_ind+1)])).astype(int),
+                                     np.round(np.mean(yy[aperture_mask == (ap_ind+1)])).astype(int))
+                                     for ap_ind in range(n_apertures)])
+        spectrum = np.zeros(shape=(n_apertures, len(wl_grid)), dtype=float)
 
+        radius = np.round(np.sqrt(np.sum(aperture_mask == n_apertures) / np.pi)).astype(int)
+        size = 2 * radius + 1
+        if size % 2 == 0:
+            size += 1
+        kern_array = np.zeros(shape=(1, size, size), dtype=int)
+        xx_kern, yy_kern = np.meshgrid(np.arange(size), np.arange(size))
+        rec = (xx_kern - radius) ** 2 + (yy_kern - radius) ** 2 <= radius ** 2
+        kern_array[0, yy_kern[rec], xx_kern[rec]] = 1
+        kern = kernels.CustomKernel(kern_array)
+
+        # tic = time.perf_counter()
+
+        bar = progressbar.ProgressBar(max_value=len(all_extensions_brt)).start()
+        for neb_index, cur_ext in enumerate(all_extensions_brt):
+            cur_neb_in_mask = np.zeros_like(xx_sub)
+            y0 = self.content[cur_ext].header.get("Y0")
+            x0 = self.content[cur_ext].header.get("X0")
+            nx = self.content[cur_ext].header['NAXIS1']
+            ny = self.content[cur_ext].header['NAXIS2']
+            cur_neb_in_mask[(xx_sub >= (x0 - xstart)) & (xx_sub <= (x0 + nx - xstart)) &
+                            (yy_sub >= (y0 - ystart)) & (yy_sub <= (y0 + ny - ystart))] = True
+            cur_neb_in_mask_ap = cur_neb_in_mask * (aperture_mask_sub > 0)
+            if not np.sum(cur_neb_in_mask_ap):
+                bar.update(neb_index + 1)
+                continue
+            cur_mask_in_neb = np.zeros(shape=self.content[cur_ext].data.shape, dtype=bool)
+            xx_neb, yy_neb = np.meshgrid(np.arange(self.content[cur_ext].data.shape[1]),
+                                         np.arange(self.content[cur_ext].data.shape[0]))
+            cur_mask_in_neb[(xx_neb >= (xstart - x0)) & (xx_neb <= (xfin - x0)) &
+                            (yy_neb >= (ystart - y0)) & (yy_neb <= (yfin - y0))] = True
+            xstart_neb = np.min(xx_neb[cur_mask_in_neb])
+            ystart_neb = np.min(yy_neb[cur_mask_in_neb])
+            xfin_neb = np.max(xx_neb[cur_mask_in_neb])
+            yfin_neb = np.max(yy_neb[cur_mask_in_neb])
+
+            selected_apertures = np.flatnonzero((aperture_centers[:, 0] >= x0) & (aperture_centers[:, 0] <= (x0 + nx)) &
+                                                (aperture_centers[:, 1] >= y0) & (aperture_centers[:, 1] <= (y0 + ny)))
+
+
+            if self.content[cur_ext].header.get("DARK"):
+                # !!! ADD TREATEMENT OF EXTINCTION !!!
+                # for xy in zip(xx[cur_neb_ap].ravel(), yy[cur_neb_ap].ravel()):
+                #   self._spectrum[:, xy[1], xy[0]] = self._spectrum[:, xy[1], xy[0]] * \
+                #                             self.calc_extinction(wl_logscale_highres, xy[0], xy[1],
+                #                                                  extinction_name=cur_ext, logscale=True)
+                bar.update(neb_index + 1)
+                continue
+            my_comp = "_".join(cur_ext.split("_")[:2])
+
+            if self.content[cur_ext].header.get("LINERAT") == 'Variable':
+                all_wavelength = np.array([extname.split("_")[-1] for extname in all_extensions
+                                           if extname is not None and (my_comp + "_FLUX_" in extname)])
+            else:
+                all_wavelength = self.content[my_comp + "_FLUXRATIOS"].data[0, :]
+
+            if self.content[cur_ext].header.get("LINERAT") == 'Variable':
+                all_fluxes = np.array([self.content[my_comp + "_FLUX_" + wl].data[
+                                           cur_mask_in_neb].reshape((yfin_neb - ystart_neb + 1,
+                                                                     xfin_neb - xstart_neb + 1))
+                                       for wl in all_wavelength])
+                all_wavelength = all_wavelength.astype(float)
+            else:
+                all_fluxes = self.content[cur_ext].data[cur_mask_in_neb].reshape((1, yfin_neb - ystart_neb + 1,
+                                                                                  xfin_neb - xstart_neb + 1))
+
+            if my_comp + "_LINEPROFILE" in self.content:
+                lsf = self.content[my_comp+"_LINEPROFILE"].data[
+                      :, cur_mask_in_neb].reshape((len(self.vel_grid), yfin_neb - ystart_neb + 1,
+                                                   xfin_neb - xstart_neb + 1))
+            else:
+                if my_comp + "_VEL" in self.content:
+                    vel = self.content[my_comp + "_VEL"].data[cur_mask_in_neb].reshape((yfin_neb - ystart_neb + 1,
+                                                                                        xfin_neb - xstart_neb + 1))
+                else:
+                    vel = np.zeros(shape=(yfin_neb - ystart_neb + 1, xfin_neb - xstart_neb + 1),
+                                   dtype=float) + self.sys_velocity.value
+                if my_comp + "_DISP" in self.content:
+                    disp = self.content[my_comp + "_DISP"].data[
+                        cur_mask_in_neb].reshape((yfin_neb - ystart_neb + 1, xfin_neb - xstart_neb + 1))
+                else:
+                    disp = np.zeros(shape=(yfin_neb - ystart_neb + 1, xfin_neb - xstart_neb + 1),
+                                    dtype=float) + self.turbulent_sigma.value
+                lsf = np.exp(-np.power((self.vel_grid.value[:, None, None] - vel[None, :, :]) / disp[
+                                                                                                None, :, :], 2.) / 2)
+                lsf = lsf / np.sum(lsf)
+            data_in_apertures = np.array([convolve_fft(lsf * line_data[None, :, :], kern, normalize_kernel=False)[:,
+                                          aperture_centers[selected_apertures, 1] - ystart_neb - y0,
+                                          aperture_centers[selected_apertures, 0] - xstart_neb - x0]
+                                          for line_data in all_fluxes])
+
+            data_in_apertures = np.moveaxis(data_in_apertures, 2, 0)
+            if data_in_apertures.shape[1] > 1:
+                prf_index = np.flatnonzero(all_wavelength == 6562.81)
+            else:
+                prf_index = 0
+            flux_norm_in_apertures = data_in_apertures.sum(axis=2)
+            line_prf_in_apertures = data_in_apertures[
+                                    :, prf_index, :].reshape(
+                (data_in_apertures.shape[0], data_in_apertures.shape[2])) / flux_norm_in_apertures[
+                                                                            :, prf_index].reshape(
+                data_in_apertures.shape[0], 1)
+
+            wl_logscale_lsf = np.log(self.vel_grid.value / 2.9979e5 + 1)
+            wl_logscale_lsf_highres = np.arange(np.round((wl_logscale_lsf[-1] - wl_logscale_lsf[0]) * 1e6
+                                                         ).astype(int)) * 1e-6 + wl_logscale_lsf[0]
+            p = interp1d(wl_logscale_lsf, line_prf_in_apertures, axis=1, assume_sorted=True)
+            line_highres_log = p(wl_logscale_lsf_highres)
+            line_highres_log = line_highres_log / np.sum(line_highres_log, axis=1)[:, None]
+            if flux_norm_in_apertures.shape[1] == 1:
+                flux_norm_in_apertures = flux_norm_in_apertures * \
+                                    self.content[my_comp + "_FLUXRATIOS"].data[1, None, :]
+
+            wl_indexes = np.round((np.log(all_wavelength) - wl_logscale_highres[0]) * 1e6).astype(int)
+            rec = (wl_indexes > 0) & (wl_indexes < len(wl_logscale_highres))
+            spectrum_highres_log = np.zeros(shape=(len(selected_apertures), len(wl_logscale_highres)), dtype=float)
+            win = (len(wl_logscale_lsf_highres) - 1) // 2
+            for ind, r in enumerate(rec):
+                if r:
+                    spectrum_highres_log[:, wl_indexes[ind] - win: wl_indexes[ind] + win + 1] += \
+                        line_highres_log[:, :] * flux_norm_in_apertures[:, ind].reshape((len(selected_apertures), 1))
+            p = interp1d(wl_logscale_highres, spectrum_highres_log, axis=1, assume_sorted=True)
+            spectrum[selected_apertures, :] += (p(wl_logscale) * delta_lr * 1e6)
+            # print(np.sum(flux_norm_in_apertures, axis=1), np.sum((p(wl_logscale) * delta_lr * 1e6), axis=1))
+            bar.update(neb_index + 1)
+        bar.finish()
+        # toc = time.perf_counter()
+        # log.info("ISM Spectrum created in {:.0f}s".format(toc - tic))
+
+        return spectrum * fluxunit
 
 #
 #
