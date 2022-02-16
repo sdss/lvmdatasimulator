@@ -116,3 +116,4 @@ ENV/
 
 # huge data directory
 data/*
+run/*

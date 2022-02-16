@@ -235,10 +235,10 @@ class LVMField:
         """
         Create ISM object related to this LVMField
         """
-        return ISM(self.wcs, width=self.npixels, height=self.npixels,
-                       distance=distance, spec_resolution=spec_resolution, sys_velocity=sys_velocity)
+        return ISM(self.wcs, width=self.npixels, height=self.npixels, turbulent_sigma=turbulent_sigma,
+                   distance=distance, spec_resolution=spec_resolution, sys_velocity=sys_velocity)
 
-    def add_nebulae(self, list_of_nebulae=None, load_from_file=None):
+    def add_nebulae(self, list_of_nebulae=None, load_from_file=None, save_nebulae=None):
         """
         Add nebulae to the LVMField.
 
@@ -262,7 +262,10 @@ class LVMField:
                                 'linerat_constant': False #  if True -> lines ratios doesn't vary across Cloud/Bubble
                                 }]
             load_from_file: path (asbolute or relative to work_dir) to the file with previously calculated ISM part
-                (preferred if both arguments present)
+                (preferred if both load_from_file and list_of_nebulae are present)
+            save_nebulae: path (asbolute or relative to work_dir) where to save fits with calculated ISM
+                (only used if list_of_nebulae is present and load_from_file is not)
+
         """
         loaded = False
         if load_from_file is not None:
@@ -285,6 +288,10 @@ class LVMField:
             loaded = self.ism.generate(list_of_nebulae)
             if loaded and self.ism_map is not None:
                 self._get_ism_map()
+            if loaded and save_nebulae is not None:
+                if not (save_nebulae.startswith('/') or save_nebulae.startswith(r'\\')):
+                    save_nebulae = os.path.join(WORK_DIR, save_nebulae)
+                self.ism.save_ism(save_nebulae)
         if not loaded:
             log.warning("Cannot load the nebulae! Check input parameters.")
             return None
@@ -311,7 +318,7 @@ class LVMField:
         """
         if type(apertures) not in [list, tuple]:
             apertures = [apertures]
-        spectrum = np.zeros(shape=(len(apertures), len(wl_grid))) * fluxunit
+        spectrum = np.zeros(shape=(len(apertures), len(wl_grid))) * fluxunit * u.arcsec ** 2
         dl = (wl_grid[1] - wl_grid[0]).to(u.AA)
         xx, yy = np.meshgrid(np.arange(self.npixels), np.arange(self.npixels))
         aperture_mask = np.zeros(shape=(self.npixels, self.npixels), dtype=int)
@@ -329,7 +336,7 @@ class LVMField:
                              aperture['Height'].to(u.degree) / 2.]) / self.spaxel.to(u.degree)).value
 
             if (xc - s) < 0 or ((xc + s) >= self.npixels) or ((yc - s) < 0) or ((yc + s) >= self.npixels):
-                log.warning('Aperture #{0} for spectra extraction is outside the LVM field'.format(ap_index + 1))
+                log.warning('Aperture #{0} for spectra extraction is outside of the LVM field'.format(ap_index + 1))
                 continue
 
             if 'Radius' in aperture:
@@ -348,23 +355,52 @@ class LVMField:
                 for star_id in stars_id:
                     p = interp1d(self.starlist.wave.to(u.AA).value, self.starlist.spectra[star_id])
                     # !!! APPLY EXTINCTION BY DARK NEBULAE TO STARS !!!
-                    spectrum[ap_index, :] += (p(wl_grid.value) * dl.value * fluxunit)
+                    spectrum[ap_index, :] += (p(wl_grid.value) * dl.value * fluxunit * u.arcsec ** 2)
         log.info("Start extracting nebular spectra")
         spectrum_ism = self.ism.get_spectrum(wl_grid.to(u.AA), aperture_mask)
         if spectrum_ism is not None:
-            spectrum += spectrum_ism
+            spectrum[: len(spectrum_ism), :] += spectrum_ism
         return spectrum
 
 
 def run_test(ra=10., dec=-10., spaxel=1/3600., size=1000/60.):
+    # my_nebulae = [
+    #         {"type": 'Bubble', 'expansion_velocity': 45 * u.km/u.s,
+    #          'turbulent_sigma': 20 * u.km/u.s,
+    #          'radius': 10 * u.pc,
+    #          'max_brightness': 3e-16 * u.erg / u.cm**2 / u.s / u.arcsec ** 2,
+    #          'RA': '00h39m40s', 'DEC': "-10d02m13s",
+    #          'cloudy_params': {'Z': 0.3, 'qH': 50., 'nH': 30, 'Teff': 50000, 'Rin': 10},
+    #          },  # 'perturb_amplitude': 0.1, 'perturb_order': 8},
+    #         {"type": 'Bubble', 'expansion_velocity': 25 * u.km/u.s,
+    #          'turbulent_sigma': 20 * u.km/u.s,
+    #          'radius': 25 * u.pc,
+    #          'max_brightness': 1e-16 * u.erg / u.cm**2 / u.s / u.arcsec ** 2,
+    #          'RA': "00h40m10s", 'DEC': "-10d05m10s",
+    #          'cloudy_params': {'Z': 0.7, 'qH': 49., 'nH': 30, 'Teff': 30000, 'Rin': 10},
+    #          'perturb_amplitude': 0.4, 'perturb_order': 8},
+    #         {"type": 'Bubble', 'expansion_velocity': 55 * u.km / u.s,
+    #          'turbulent_sigma': 20 * u.km / u.s,
+    #          'radius': 15 * u.pc,
+    #          'max_brightness': 2e-16 * u.erg / u.cm ** 2 / u.s / u.arcsec ** 2,
+    #          'RA': "00h40m00s", 'DEC': "-09d56m00s",
+    #          'cloudy_params': {'Z': 0.7, 'qH': 50., 'nH': 30, 'Teff': 70000, 'Rin': 10},
+    #          'perturb_amplitude': 0.1, 'perturb_order': 8},
+    #         {"type": 'DIG', 'max_brightness': 1e-17 * u.erg / u.cm ** 2 / u.s / u.arcsec ** 2,
+    #          'perturb_amplitude': 0.1, 'perturb_scale': 200 * u.pc}
+    #         ]
+
     my_lvmfield = LVMField(ra=ra, dec=dec, size=size, spaxel=spaxel, unit_ra=u.degree, unit_dec=u.degree,
                            unit_size=u.arcmin, unit_spaxel=u.degree)
-    my_lvmfield.add_nebulae(load_from_file="/Users/mors/Science/LVM/testneb.fits")
+    # my_lvmfield.add_nebulae(my_nebulae, save_nebulae="/Users/mors/Science/LVM/testneb_v1.fits")
+    my_lvmfield.add_nebulae(load_from_file="/Users/mors/Science/LVM/testneb_v1.fits")
     my_lvmfield.generate_gaia_stars()
 
-    apertures = [{"RA": 10.017*u.degree, "DEC": -10.058*u.degree, "Radius": 30*u.arcsec},
-                 {"RA": 10.007 * u.degree, "DEC": -10.05 * u.degree, "Radius": 30 * u.arcsec},
-                 {"RA": 09.995 * u.degree, "DEC": -10.0 * u.degree, "Radius": 30 * u.arcsec}]
+    apertures = [{"RA": 10.021 * u.degree, "DEC": -10.053 * u.degree, "Radius": 30 * u.arcsec},
+                 # {"RA": 10.007 * u.degree, "DEC": -10.05 * u.degree, "Radius": 30 * u.arcsec},
+                 # {"RA": 09.995 * u.degree, "DEC": -10.0 * u.degree, "Radius": 30 * u.arcsec},
+                 # {"RA": 09.985 * u.degree, "DEC": -9.95 * u.degree, "Radius": 30 * u.arcsec},
+                 ]
 
     my_lvmfield.show(apertures=apertures)
 
@@ -376,11 +412,17 @@ def run_test(ra=10., dec=-10., spaxel=1/3600., size=1000/60.):
 
     spec = my_lvmfield.extract_spectra(apertures, wl_grid)
     if spec is not None:
-        fig, ax = plt.subplots(figsize=(15, 5))
-        ax.plot(wl_grid, spec[0], 'k', lw=0.7)
-        ax.set_xlabel(r"Wavelength, $'\AA$", fontsize=14)
-        ax.set_ylabel(r"Intensity, erg s$^{-1}$ cm$^{-2}$", fontsize=14)
-        ax.set_xlim(6550, 6590)
+        fig = plt.figure(figsize=(12, 10))
+        for i in range(2):
+            ax = plt.subplot(211+i)
+            ax.plot(wl_grid, spec[0], 'k', lw=0.7)
+            ax.set_xlabel(r"Wavelength, $'\AA$", fontsize=14)
+            ax.set_ylabel(r"Intensity, erg s$^{-1}$ cm$^{-2}$", fontsize=14)
+            if i == 0:
+                ax.set_xlim(6500, 6600)
+            else:
+                ax.set_xlim(3700, 9600)
+
     plt.show()
 
 
