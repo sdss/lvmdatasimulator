@@ -25,7 +25,7 @@ class Branch:
 
     name: str
     wavecoord: w.WaveCoord
-    lsf_fwhm: u.A = 0.5 * u.A
+    lsf_fwhm: u.AA = 0.5 * u.AA
     gain: u.electron / u.adu = 1.0 * u.electron / u.adu
     ron: u.electron = 5.0 * u.electron / u.pix
     dark: u.electron / u.s = 0.001 * u.electron / u.s / u.pix
@@ -74,4 +74,3 @@ class LVMSpectrograph(Spectrograph):
         return [Branch(name='blue', wavecoord=w.BlueWave()),
                 Branch(name='red', wavecoord=w.RedWave()),
                 Branch(name='ir', wavecoord=w.IRWave())]
-

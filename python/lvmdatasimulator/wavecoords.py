@@ -59,7 +59,7 @@ class LinearWave(WaveCoord):
         filename = f'{ROOT_DIR}/data/instrument/linear_wave.dat'
         data = np.genfromtxt(filename, skip_header=1, unpack=True)
 
-        return np.arange(data[0], data[1] + data[2], data[2]) * u.A
+        return np.arange(data[0], data[1] + data[2], data[2]) * u.AA
 
     @cached_property
     def start(self):
