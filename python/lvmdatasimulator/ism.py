@@ -9,7 +9,6 @@
 # import scipy.optimize
 # import sys
 import os.path
-
 from astropy import units as u
 from astropy import constants as c
 import numpy as np
@@ -18,7 +17,6 @@ from astropy.io import fits
 # from scipy.integrate import nquad
 # import tqdm
 # from multiprocessing import Pool
-# import multiprocessing
 from scipy.special import sph_harm
 from astropy.wcs import WCS
 from astropy.wcs.utils import proj_plane_pixel_scales
@@ -30,7 +28,10 @@ from scipy.interpolate import interp1d
 # from typing import List
 import lvmdatasimulator
 from lvmdatasimulator import log
+import progressbar
 from joblib import Parallel, delayed
+# import time
+from astropy.convolution import convolve_fft, kernels
 
 fluxunit = u.erg / (u.cm ** 2 * u.s * u.arcsec ** 2)
 velunit = u.km / u.s
@@ -136,6 +137,10 @@ def find_model_id(file=lvmdatasimulator.CLOUDY_MODELS,
     return extension_index, check_id
 
 
+def convolve_cube(cube, kernel, selected_points_y, selected_points_x):
+    return convolve_fft(cube, kernel, normalize_kernel=False)[:, selected_points_y, selected_points_x]
+
+
 @dataclass
 class Nebula:
     """
@@ -197,8 +202,7 @@ class Nebula:
             perturb = np.random.uniform(-1, 1, (self.height, self.width)) * self.perturb_amplitude / self._npix_los
             xx, yy = np.meshgrid(np.arange(self.width), np.arange(self.height))
             f = np.exp(-2 * (xx ** 2 + yy ** 2) / pertscale)
-            perturb = 4 / np.sqrt(np.pi) / pertscale * \
-                np.fft.ifft2(np.fft.fft2(perturb) * np.fft.fft2(f)).real
+            perturb = 4 / np.sqrt(np.pi) / pertscale * np.fft.ifft2(np.fft.fft2(perturb) * np.fft.fft2(f)).real
             brt += (perturb[:, :, None] - np.median(perturb))
         return brt
 
@@ -265,11 +269,13 @@ class Filament(Nebula):
     width: u.pc = 0.1 * u.pc  # full width (diameter) of the filament
     vel_gradient: (velunit / u.pc) = 0  # velocity gradient along the filament (to be added)
     _theta_bins: int = 50
-    _rad_bins: int = 10
+    _rad_bins: int = 0
     _h_bins: int = 2
     _npix_los: int = 101
 
     def __post_init__(self):
+        if self._rad_bins == 0:
+            self._rad_bins = np.ceil(self.width.to(u.pc).value / self.pxscale.to(u.pc).value * 5).astype(int)
         if (self.xc is not None) and (self.yc is not None):
             self.x0 = self.xc - np.round((len(self._cartesian_y_grid) - 1) / 2).astype(int)
             self.y0 = self.yc - np.round((len(self._cartesian_z_grid) - 1) / 2).astype(int)
@@ -375,12 +381,14 @@ class Cloud(Nebula):
     thickness: float = 1.0
     perturb_degree: int = 0  # Degree of perturbations (max. degree of spherical harmonics for cloud)
     linerat_constant: bool = False  # True if the ratio of line fluxes shouldn't change across the nebula
-    _phi_bins: int = 180
-    _theta_bins: int = 180
-    _rad_bins: int = 100
+    _phi_bins: int = 90
+    _theta_bins: int = 90
+    _rad_bins: int = 0
     _npix_los: int = 100
 
     def __post_init__(self):
+        if self._rad_bins == 0:
+            self._rad_bins = np.ceil(self.radius.to(u.pc).value / self.pxscale.to(u.pc).value * 3).astype(int)
         delta = np.round((len(self._cartesian_y_grid) - 1) / 2).astype(int)
         if (self.xc is not None) and (self.yc is not None):
             self.x0 = self.xc - delta
@@ -516,8 +524,10 @@ class Bubble(Cloud):
         rho, theta, phi = np.meshgrid(self._rad_grid, self._theta_grid, self._phi_grid, indexing='ij')
         vel_cube = np.zeros_like(self._brightness_3d_spherical)
         rec = (rho <= self.radius) & (rho >= (self.radius * (1 - self.thickness)))
-        vel_cube[rec] = np.sin(theta[rec]) * np.cos(phi[rec]) * self.expansion_velocity / \
-            self._brightness_3d_spherical[rec] * \
+        vel_cube[rec] = \
+            np.sin(theta[rec]) * \
+            np.cos(phi[rec]) * \
+            self.expansion_velocity / self._brightness_3d_spherical[rec] * \
             np.median(self._brightness_3d_spherical[self._brightness_3d_spherical > 0])
         return vel_cube
 
@@ -537,8 +547,8 @@ class Bubble(Cloud):
 
     def _d_spectrum_cartesian(self, velocity: velunit):
         """Returns local spectrum, per pc**3 of area"""
-        return (self._brightness_3d_cartesian[:, :, :, None] * (fluxunit / u.pc ** 3)
-                * self._turbulent_lsf(velocity)).to(fluxunit / velunit / u.pc ** 3)
+        return (self._brightness_3d_cartesian[:, :, :, None] * (
+                fluxunit / u.pc ** 3) * self._turbulent_lsf(velocity)).to(fluxunit / velunit / u.pc ** 3)
 
     @functools.cached_property
     def vel_field(self) -> (fluxunit / velunit):
@@ -551,10 +561,10 @@ class Bubble(Cloud):
                                     self._cartesian_x_grid,
                                     vel_axis, indexing='ij')
         spectrum = (
-                np.sum(self._d_spectrum_cartesian(vels), axis=2).T
-                * (self._cartesian_x_grid[1] - self._cartesian_x_grid[0])
-                * (self._cartesian_y_grid[1] - self._cartesian_y_grid[0])
-                * (self._cartesian_z_grid[1] - self._cartesian_z_grid[0])
+                np.sum(self._d_spectrum_cartesian(vels), axis=2
+                       ).T * (self._cartesian_x_grid[1] - self._cartesian_x_grid[0]
+                              ) * (self._cartesian_y_grid[1] - self._cartesian_y_grid[0]
+                                   ) * (self._cartesian_z_grid[1] - self._cartesian_z_grid[0])
         )
         return spectrum / np.sum(spectrum, axis=0)
 
@@ -573,14 +583,15 @@ class ISM:
     sys_velocity: velunit = 0 * velunit  # Systemic velocity to center the vel.grid on
     vel_amplitude: velunit = 100 * velunit  # Maximal deviation from the systemic velocity to setup vel.grid
     turbulent_sigma: velunit = 10. * velunit  # turbulence vel. disp. to be used for every nebula unless other specified
+
     # last_id: int = 0
-    ext_eps: u.mag = 0.01 * u.mag
-    brt_eps: fluxunit = 1e-20 * fluxunit
-    vel_contrib_eps: float = 1e-3
+    # ext_eps: u.mag = 0.01 * u.mag
+    # brt_eps: fluxunit = 1e-20 * fluxunit
+    # vel_contrib_eps: float = 1e-3
 
     def __post_init__(self):
         self.content = fits.HDUList()
-        self.content.append(fits.PrimaryHDU(header=self.wcs.to_header()))
+        self.content.append(fits.PrimaryHDU(header=self.wcs.to_header(), data=np.zeros(shape=(2, 2), dtype=int)))
         self.vel_grid = np.linspace(-self.vel_amplitude + self.sys_velocity,
                                     self.vel_amplitude + self.sys_velocity,
                                     np.ceil(self.vel_amplitude / self.vel_resolution).astype(int) * 2 + 1)
@@ -598,34 +609,38 @@ class ISM:
     def vel_resolution(self):
         return (self.spec_resolution / self.npix_line / (10000 * u.Angstrom) * c.c).to(velunit)
 
-    def _add_fits_extension(self, name, value, obj_to_add, zorder=0, cur_wavelength=0, add_fits_kw=None):
+    def _add_fits_extension(self, name, value, obj_to_add, zorder=0, cur_wavelength=0, add_fits_kw=None,
+                            add_counter=False):
         self.content.append(fits.ImageHDU(value, name=name))
-        self.content[-1].header['Nebtype'] = type(obj_to_add).__name__
-        self.content[-1].header['Dark'] = (obj_to_add.max_brightness <= 0)
-        self.content[-1].header['X0'] = obj_to_add.x0
-        self.content[-1].header['Y0'] = obj_to_add.y0
-        self.content[-1].header['Zorder'] = zorder
+        self.content[-1].header['Nebtype'] = (type(obj_to_add).__name__, "Type of the nebula")
+        self.content[-1].header['Dark'] = ((obj_to_add.max_brightness <= 0), " Emitting or absorbing nebula?")
+        self.content[-1].header['X0'] = (obj_to_add.x0, "Position in the field of view")
+        self.content[-1].header['Y0'] = (obj_to_add.y0, "Position in the field of view")
+        self.content[-1].header['Zorder'] = (zorder, "Z-order in the field of view")
         if type(obj_to_add) in [Bubble, Cloud]:
-            self.content[-1].header['Radius'] = obj_to_add.radius.to_value(u.pc)
-            self.content[-1].header['PertOrd'] = obj_to_add.perturb_degree
-            self.content[-1].header['PertAmp'] = obj_to_add.perturb_amplitude
+            self.content[-1].header['Radius'] = (obj_to_add.radius.to_value(u.pc), "Radius of the nebula, pc")
+            self.content[-1].header['PertOrd'] = (obj_to_add.perturb_degree, "Degree to produce random perturbations")
+            self.content[-1].header['PertAmp'] = (obj_to_add.perturb_amplitude, "Max amplitude of random perturb.")
         if type(obj_to_add) in [Filament]:
-            self.content[-1].header['Width'] = obj_to_add.width.to_value(u.pc)
+            self.content[-1].header['Width'] = (obj_to_add.width.to_value(u.pc), 'Width of the filament, pc')
         if obj_to_add.max_brightness <= 0:
-            self.content[-1].header['MaxExt'] = obj_to_add.max_extinction.value
+            self.content[-1].header['MaxExt'] = (obj_to_add.max_extinction.value, "Max extinction, mag/pix")
         else:
-            self.content[-1].header['MaxBrt'] = obj_to_add.max_brightness.value  # .to_value(fluxunit / u.arcsec ** 2)
+            self.content[-1].header['MaxBrt'] = (obj_to_add.max_brightness.value, "Max brightness, erg/s/cm^2/arcsec^2")
         if type(obj_to_add) == Bubble:
-            self.content[-1].header['Vexp'] = obj_to_add.expansion_velocity.to_value(velunit)
-        self.content[-1].header['SysVel'] = obj_to_add.sys_velocity.to_value(velunit)
-        self.content[-1].header['TurbVel'] = obj_to_add.turbulent_sigma.to_value(velunit)
-        self.content[-1].header['SpecID'] = obj_to_add.spectrum_id
+            self.content[-1].header['Vexp'] = (obj_to_add.expansion_velocity.to_value(velunit),
+                                               'Expansion velocity, km/s')
+        self.content[-1].header['SysVel'] = (obj_to_add.sys_velocity.to_value(velunit), "Systemic velocity, km/s")
+        self.content[-1].header['TurbVel'] = (obj_to_add.turbulent_sigma.to_value(velunit),
+                                              "ISM Velocity dispersion, km/s")
+        self.content[-1].header['SpecID'] = (obj_to_add.spectrum_id, "Ref. spectrum ID in model grid")
         if cur_wavelength:
-            self.content[-1].header['Lambda'] = cur_wavelength
+            self.content[-1].header['Lambda'] = (cur_wavelength, "Current line wavelength")
         if add_fits_kw is not None:
             for kw in add_fits_kw:
                 self.content[-1].header[kw] = add_fits_kw[kw]
-        self.content[0].header['Nobj'] += 1
+        if add_counter:
+            self.content[0].header['Nobj'] = (self.content[0].header['Nobj'] + 1, "Total number of nebulae")
 
     def add_nebula(self, obj_to_add, obj_id=0, zorder=0, add_fits_kw=None):
         """
@@ -649,7 +664,7 @@ class ISM:
             brt_4d = None
 
         self._add_fits_extension(name="Comp_{0}_Brightness".format(obj_id), value=brt,
-                                 obj_to_add=obj_to_add, zorder=zorder, add_fits_kw=add_fits_kw)
+                                 obj_to_add=obj_to_add, zorder=zorder, add_fits_kw=add_fits_kw, add_counter=True)
         if obj_to_add.max_brightness > 0:
             if brt_4d is not None:
                 with fits.open(lvmdatasimulator.CLOUDY_MODELS) as hdu:
@@ -687,7 +702,7 @@ class ISM:
                                 expansion_velocity: 30 * u.km/u.s,
                                 turbulent_sigma: 10 * u.km/u.s,
                                 radius: 5 * u.pc,
-                                max_brightness: 1e-13 * u.erg / u.cm**2 / u.s,
+                                max_brightness: 1e-16 * u.erg / u.cm**2 / u.s / u.arcsec ** 2,
                                 RA: "08h12m13s",
                                 DEC: "-20d14m13s",
                                 'perturb_degree': 8, # max. order of spherical harmonics to generate inhomogeneities
@@ -699,16 +714,20 @@ class ISM:
                                 'linerat_constant': False #  if True -> lines ratios doesn't vary across Cloud/Bubble
                                 }]
         """
+        if type(all_objects) is dict:
+            all_objects = [all_objects]
         if type(all_objects) not in [list, tuple]:
             log.warning('Cannot generate nebulae as the input is not a list or tuple')
-            return
+            return None
         all_objects = [cobj for cobj in all_objects if cobj.get('type') in ['Nebula', 'Bubble',
                                                                             'Filament', 'DIG', 'Cloud']]
         n_objects = len(all_objects)
         log.info("Start generating {} nebulae".format(n_objects))
-
+        bar = progressbar.ProgressBar(max_value=n_objects).start()
         obj_id = self.content[0].header['Nobj']
+        obj_id_ini = self.content[0].header['Nobj']
         for ind_obj, cur_obj in enumerate(all_objects):
+            bar.update(ind_obj)
             # Setup default parameters for missing keywords
             for k, v in zip(['max_brightness', 'max_extinction', 'thickness',
                              'expansion_velocity', 'sys_velocity',
@@ -785,7 +804,9 @@ class ISM:
 
                 if not (cur_obj.get('X') and cur_obj.get('Y')):
                     radec = SkyCoord(ra=cur_obj.get('RA'), dec=cur_obj.get('DEC'))
-                    x, y = self.wcs.all_world2pix(radec)
+                    x, y = self.wcs.world_to_pixel(radec)
+                    x = np.round(x).astype(int)
+                    y = np.round(y).astype(int)
                 else:
                     x, y = [cur_obj.get('X'), cur_obj.get('Y')]
 
@@ -861,6 +882,11 @@ class ISM:
                 add_fits_kw = None
             self.add_nebula(generated_object, obj_id=obj_id, zorder=cur_obj.get('zorder'), add_fits_kw=add_fits_kw)
             obj_id += 1
+        bar.finish()
+        if (obj_id - obj_id_ini) == 0:
+            return None
+        else:
+            return True
 
     def load_nebulae(self, file):
         """
@@ -873,7 +899,9 @@ class ISM:
         else:
             with fits.open(file) as hdu:
                 wcs = WCS(hdu[0].header)
-                check = ~np.isclose(wcs.proj_plane_pixel_scales(), self.wcs.proj_plane_pixel_scales())
+                cdelt_file = [cdelt.to(u.degree).value for cdelt in wcs.proj_plane_pixel_scales()]
+                cdelt_ism = [cdelt.to(u.degree).value for cdelt in self.wcs.proj_plane_pixel_scales()]
+                check = ~np.isclose(cdelt_file, cdelt_ism)
                 check = np.append(check, ~np.isclose(wcs.wcs.crval, self.wcs.wcs.crval))
                 check = np.append(check, ~np.isclose(hdu[0].header.get("VELRES"), self.vel_resolution.value))
                 if any(check):
@@ -886,15 +914,23 @@ class ISM:
                     else:
                         self.content.append(fits.ImageHDU(header=hh.header, data=hh.data,
                                                           name=hh.header.get('EXTNAME')))
+                return True
 
-    def calc_extinction(self, wavelength=6562.81, x0=0, y0=0, xs=None, ys=None):
+    def calc_extinction(self, wavelength=6562.81, x0=0, y0=0, xs=None, ys=None, extinction_name=None, logscale=False):
         """
         Calculate coefficient to reduce flux due to extinction at given wavelength(s)
 
-        x0, y0: start pixels in the field of view for calculations
-        xs, ys: size (in pixels) of the area for calculations (if None => then just pixel x0,y0 is considered; xs=ys=1)
-        wavelength: in angstrom, particular wavelength or (wavelengths) at which the calculations should be performed
-        Return: None (if no any dark nebula at particular location) or np.array of (nlines, ys, xs) shape
+        Args:
+            x0: start x-coordinate in the field of view for calculations
+            y0: start x-coordinate in the field of view for calculations
+            xs: x-size (in pixels) of the area for calculations (if None => then just pixel x0,y0 is considered; xs=1)
+            ys: y-size (in pixels) of the area for calculations (if None => then just pixel x0,y0 is considered; ys=1)
+            wavelength: in angstrom, particular wavelength (or wavelengths)
+                at which the calculations should be performed
+            extinction_name (str): name of the extension for current dark nebula
+            logscale: True if the wavelength is np.log(wavelength)
+        Returns:
+            None (if no any dark nebula at particular location) or np.array of (nlines, ys, xs) shape
         """
         if self.content[0].header['Nobj'] == 0 or (x0 > self.width) or (y0 > self.height):
             return None
@@ -913,11 +949,20 @@ class ISM:
             else:
                 return True
 
-        all_dark_nebulae = [hdu.header.get('EXTNAME') for hdu in self.content
-                            if hdu.header.get('EXTNAME') is not None and ("BRIGHTNESS" in hdu.header.get('EXTNAME'))
-                            and hdu.header.get('DARK')
-                            and check_in_region(hdu.header.get('X0'), hdu.header.get('Y0'),
+        if extinction_name is None:
+            all_dark_nebulae = [hdu.header.get('EXTNAME') for hdu in self.content if
+                                hdu.header.get('EXTNAME') is not None and
+                                ("BRIGHTNESS" in hdu.header.get('EXTNAME')) and
+                                hdu.header.get('DARK') and
+                                check_in_region(hdu.header.get('X0'), hdu.header.get('Y0'),
                                                 hdu.header.get('NAXIS1'), hdu.header.get('NAXIS2'))]
+        else:
+            if not check_in_region(self.content[extinction_name].header.get('X0'),
+                                   self.content[extinction_name].header.get('Y0'),
+                                   self.content[extinction_name].header.get('NAXIS1'),
+                                   self.content[extinction_name].header.get('NAXIS2')):
+                return None
+            all_dark_nebulae = [extinction_name]
         if len(all_dark_nebulae) == 0:
             return None
         if type(wavelength) in [float, int]:
@@ -932,14 +977,16 @@ class ISM:
     def get_map(self, wavelength=6562.81):
         """
         Method to produce 2D map of all ISM nebulae in the selected line
+        Args:
+            wavelength (float): exact wavelength (in Angstrom) according to the lines list
         """
         if self.content[0].header['Nobj'] == 0:
             log.warning("ISM doesn't contain any nebula")
             return None
         all_extensions = [hdu.header.get('EXTNAME') for hdu in self.content]
-        all_extensions_brt = [extname for extname in all_extensions
-                              if extname is not None and ("BRIGHTNESS" in extname)]
-        all_extensions_brt = np.array(all_extensions_brt)
+        all_extensions_brt = np.array([extname for extname in all_extensions
+                                       if extname is not None and ("BRIGHTNESS" in extname)])
+
         if all([self.content[cur_ext].header.get("DARK") for cur_ext in all_extensions_brt]):
             log.warning("ISM doesn't contain any emission nebula")
             return None
@@ -953,12 +1000,15 @@ class ISM:
             if self.content[cur_ext].header.get("DARK"):
                 if map_2d is None:
                     continue
-                map_2d = map_2d * self.calc_extinction(wavelength=wavelength, xs=self.width, ys=self.height)[0]
+                ext_map = self.calc_extinction(wavelength=wavelength, xs=self.width, ys=self.height,
+                                               extinction_name=cur_ext)
+                if ext_map is not None:
+                    map_2d = map_2d * ext_map[0]
                 continue
             my_comp = "_".join(cur_ext.split("_")[:2])
             flux_ext = [extname for extname in all_extensions
-                        if extname is not None and (my_comp in extname
-                                                    and "FLUX_{0}".format(np.round(wavelength, 2)) in extname)]
+                        if extname is not None and (my_comp in extname and
+                                                    "FLUX_{0}".format(np.round(wavelength, 2)) in extname)]
             if len(flux_ext) == 0:
                 fluxrat_ext = [extname for extname in all_extensions
                                if extname is not None and (my_comp in extname and "FLUXRATIOS" in extname)]
@@ -976,65 +1026,181 @@ class ISM:
 
             if map_2d is None:
                 map_2d = np.zeros(shape=(self.height, self.width), dtype=float)
-            # print(map_2d.shape, add_emission.shape,self.content[cur_ext].header['Y0'],
-            #        self.content[cur_ext].header['Y0'] + self.content[cur_ext].header['NAXIS2'],
-            #        self.content[cur_ext].header['X0'],
-            #        self.content[cur_ext].header['X0'] + self.content[cur_ext].header['NAXIS1'])
             map_2d[self.content[cur_ext].header['Y0']:
                    self.content[cur_ext].header['Y0'] + self.content[cur_ext].header['NAXIS2'],
                    self.content[cur_ext].header['X0']:
                    self.content[cur_ext].header['X0'] + self.content[cur_ext].header['NAXIS1']] += add_emission
-        return map_2d
+        return map_2d * (proj_plane_pixel_scales(self.wcs)[0] * 3600) ** 2
 
-#
-#
-# if __name__ == '__main__':
-#     # velocities = np.linspace(-70, 70, 25) << velunit
-#
-#     header = fits.Header()
-#     header['CDELT1'] = 1/3600
-#     header['CDELT2'] = 1 / 3600
-#     header['CRVAL1'] = 10.
-#     header['CRVAL2'] = -10.
-#     header['CRPIX1'] = 1
-#     header['CRPIX2'] = 1
-#     wcs = WCS(header)
-#     ism = ISM(wcs, width=1000, height=1000)
-#
-#     ism.generate([{"type": 'Bubble', 'expansion_velocity': 30 * u.km/u.s,
-#                                 'turbulent_sigma': 10 * u.km/u.s,
-#                                 'radius': 5 * u.pc,
-#                                 'max_brightness': 1e-13 * u.erg / u.cm**2 / u.s,
-#                                 'X': 600,
-#                                 'Y': 400, },
-#                   {"type": 'Filament',
-#                    'max_extinction': 2 * u.mag,
-#                    'X': 100,
-#                    'Y': 400, 'zorder': 2, 'length': 17 * u.pc, 'width': 3 * u.pc, 'PA': -30 * u.degree }
-#                   ])
+    def get_spectrum(self, wl_grid=None, aperture_mask=None):
+        if aperture_mask is None or (np.sum(aperture_mask) == 0) or (self.content[0].header['Nobj'] == 0):
+            return None
+        all_extensions = [hdu.header.get('EXTNAME') for hdu in self.content]
+        all_extensions_brt = np.array([extname for extname in all_extensions
+                                       if extname is not None and ("BRIGHTNESS" in extname)])
+        if all([self.content[cur_ext].header.get("DARK") for cur_ext in all_extensions_brt]):
+            return None
+        all_extensions_brt = all_extensions_brt[np.argsort([self.content[cur_ext].header.get('ZORDER')
+                                                            for cur_ext in all_extensions_brt])]
 
-# print(ism.content['Brightness'])
-# n = Bubble()
-# print(ism.add_nebula(n))
-# mxdeg = 8
-# bbl = Bubble(max_brightness=1e-15 * fluxunit, thickness=1, turbulent_sigma=0.1 * velunit,
-#              spectral_axis=velocities, expansion_velocity=25 * velunit, harm_maxdegree=mxdeg, harm_amplitude=0.3)
-# brt_2d = bbl.brightness_skyplane
-# # print(np.max(bbl.brightness_skyplane))
-# fig, ax = plt.subplots()
-# plt.imshow(brt_2d, origin='lower')
-# plt.colorbar()
-#
-# # fig, ax = plt.subplots()
-# # plt.imshow(np.argmax(bbl.vel_field,0), origin='lower')
-#
-# fig, ax = plt.subplots()
-# print(bbl.vel_field.shape)
-# plt.plot(velocities, bbl.vel_field[:, 102, 102])
-# plt.plot(velocities, bbl.vel_field[:, 102, 25])
-# # plt.plot(velocities, np.sum(bbl.vel_field(),(0,1)))
-# from astropy.io import fits
-# # hdu = fits.PrimaryHDU(bbl.vel_field)
-# # hdul = [hdu]
-# fits.writeto("/Users/mors/Science/LVM/test.fits", data=bbl._velocity_3d_cartesian, overwrite=True)
-# plt.show()
+        wl_logscale = np.log(wl_grid.value)
+        wl_logscale_highres = np.arange((np.round(wl_logscale[-1] - wl_logscale[0]) * 1e6
+                                         ).astype(int)) * 1e-6 + np.round(wl_logscale[0], 6)
+        # delta_lr = np.roll(wl_grid.value, -1) - wl_grid.value
+        # delta_lr[-1] = delta_lr[-2]
+        # wl_highres = np.exp(wl_logscale_highres)
+        # delta_hr = np.roll(wl_highres, -1) - wl_highres
+        # delta_hr[-1] = delta_hr[-2]
+        # p = interp1d(wl_highres, delta_hr, assume_sorted=True)
+        # delta_hr = p(wl_grid.value)
+        delta_lr = np.roll(wl_logscale, -1) - wl_logscale
+        delta_lr[-1] = delta_lr[-2]
+
+        xx, yy = np.meshgrid(np.arange(aperture_mask.shape[1]), np.arange(aperture_mask.shape[0]))
+        pix_in_apertures = aperture_mask > 0
+        xstart = np.min(xx[pix_in_apertures])
+        ystart = np.min(yy[pix_in_apertures])
+        xfin = np.max(xx[pix_in_apertures])
+        yfin = np.max(yy[pix_in_apertures])
+        aperture_mask_sub = aperture_mask[ystart: yfin + 1, xstart: xfin + 1]
+        xx_sub, yy_sub = np.meshgrid(np.arange(xfin - xstart + 1), np.arange(yfin - ystart + 1))
+        n_apertures = np.max(aperture_mask)
+        aperture_centers = np.array([(np.round(np.mean(xx[aperture_mask == (ap_ind + 1)])).astype(int),
+                                     np.round(np.mean(yy[aperture_mask == (ap_ind + 1)])).astype(int))
+                                     for ap_ind in range(n_apertures)])
+        spectrum = np.zeros(shape=(n_apertures, len(wl_grid)), dtype=float)
+
+        radius = np.round(np.sqrt(np.sum(aperture_mask == n_apertures) / np.pi)).astype(int)
+        size = 2 * radius + 1
+        if size % 2 == 0:
+            size += 1
+        kern_array = np.zeros(shape=(1, size, size), dtype=int)
+        xx_kern, yy_kern = np.meshgrid(np.arange(size), np.arange(size))
+        rec = (xx_kern - radius) ** 2 + (yy_kern - radius) ** 2 <= radius ** 2
+        kern_array[0, yy_kern[rec], xx_kern[rec]] = 1
+        kern = kernels.CustomKernel(kern_array)
+
+        bar = progressbar.ProgressBar(max_value=len(all_extensions_brt)).start()
+        for neb_index, cur_ext in enumerate(all_extensions_brt):
+            cur_neb_in_mask = np.zeros_like(xx_sub)
+            y0 = self.content[cur_ext].header.get("Y0")
+            x0 = self.content[cur_ext].header.get("X0")
+            nx = self.content[cur_ext].header['NAXIS1']
+            ny = self.content[cur_ext].header['NAXIS2']
+            cur_neb_in_mask[(xx_sub >= (x0 - xstart)) & (xx_sub <= (x0 + nx - xstart)) &
+                            (yy_sub >= (y0 - ystart)) & (yy_sub <= (y0 + ny - ystart))] = True
+            cur_neb_in_mask_ap = cur_neb_in_mask * (aperture_mask_sub > 0)
+            if not np.sum(cur_neb_in_mask_ap):
+                bar.update(neb_index + 1)
+                continue
+            cur_mask_in_neb = np.zeros(shape=self.content[cur_ext].data.shape, dtype=bool)
+            xx_neb, yy_neb = np.meshgrid(np.arange(self.content[cur_ext].data.shape[1]),
+                                         np.arange(self.content[cur_ext].data.shape[0]))
+            cur_mask_in_neb[(xx_neb >= (xstart - x0)) & (xx_neb <= (xfin - x0)) &
+                            (yy_neb >= (ystart - y0)) & (yy_neb <= (yfin - y0))] = True
+            xstart_neb = np.min(xx_neb[cur_mask_in_neb])
+            ystart_neb = np.min(yy_neb[cur_mask_in_neb])
+            xfin_neb = np.max(xx_neb[cur_mask_in_neb])
+            yfin_neb = np.max(yy_neb[cur_mask_in_neb])
+
+            selected_apertures = np.flatnonzero((aperture_centers[:, 0] >= x0) & (aperture_centers[:, 0] <= (x0 + nx)) &
+                                                (aperture_centers[:, 1] >= y0) & (aperture_centers[:, 1] <= (y0 + ny)))
+
+            if self.content[cur_ext].header.get("DARK"):
+                # !!! ADD TREATEMENT OF EXTINCTION !!!
+                # for xy in zip(xx[cur_neb_ap].ravel(), yy[cur_neb_ap].ravel()):
+                #   self._spectrum[:, xy[1], xy[0]] = self._spectrum[:, xy[1], xy[0]] * \
+                #                             self.calc_extinction(wl_logscale_highres, xy[0], xy[1],
+                #                                                  extinction_name=cur_ext, logscale=True)
+                bar.update(neb_index + 1)
+                continue
+            my_comp = "_".join(cur_ext.split("_")[:2])
+
+            if self.content[cur_ext].header.get("LINERAT") == 'Variable':
+                all_wavelength = np.array([extname.split("_")[-1] for extname in all_extensions
+                                           if extname is not None and (my_comp + "_FLUX_" in extname)])
+            else:
+                all_wavelength = self.content[my_comp + "_FLUXRATIOS"].data[0, :]
+
+            if self.content[cur_ext].header.get("LINERAT") == 'Variable':
+                all_fluxes = np.array([self.content[my_comp + "_FLUX_" + wl].data[
+                                           cur_mask_in_neb].reshape((yfin_neb - ystart_neb + 1,
+                                                                     xfin_neb - xstart_neb + 1))
+                                       for wl in all_wavelength])
+                all_wavelength = all_wavelength.astype(float)
+            else:
+                all_fluxes = self.content[cur_ext].data[cur_mask_in_neb].reshape((1, yfin_neb - ystart_neb + 1,
+                                                                                  xfin_neb - xstart_neb + 1))
+
+            if my_comp + "_LINEPROFILE" in self.content:
+                lsf = self.content[my_comp + "_LINEPROFILE"].data[
+                      :, cur_mask_in_neb].reshape((len(self.vel_grid), yfin_neb - ystart_neb + 1,
+                                                   xfin_neb - xstart_neb + 1))
+            else:
+                if my_comp + "_VEL" in self.content:
+                    vel = self.content[my_comp + "_VEL"].data[cur_mask_in_neb].reshape((yfin_neb - ystart_neb + 1,
+                                                                                        xfin_neb - xstart_neb + 1))
+                else:
+                    vel = np.zeros(shape=(yfin_neb - ystart_neb + 1, xfin_neb - xstart_neb + 1),
+                                   dtype=float) + self.sys_velocity.value
+                if my_comp + "_DISP" in self.content:
+                    disp = self.content[my_comp + "_DISP"].data[
+                        cur_mask_in_neb].reshape((yfin_neb - ystart_neb + 1, xfin_neb - xstart_neb + 1))
+                else:
+                    disp = np.zeros(shape=(yfin_neb - ystart_neb + 1, xfin_neb - xstart_neb + 1),
+                                    dtype=float) + self.turbulent_sigma.value
+                lsf = np.exp(-np.power((self.vel_grid.value[:, None, None] - vel[None, :, :]) / disp[
+                                                                                                None, :, :], 2.) / 2)
+                lsf = lsf / np.sum(lsf)
+
+            if all_fluxes.shape[0] == 1:
+                data_in_apertures = \
+                    convolve_fft(lsf * all_fluxes[0][None, :, :], kern,
+                                 normalize_kernel=False)[:,
+                                                         aperture_centers[selected_apertures, 1] - ystart_neb - y0,
+                                                         aperture_centers[selected_apertures, 0] - xstart_neb - x0]
+                data_in_apertures = data_in_apertures.reshape((1, data_in_apertures.shape[0],
+                                                               data_in_apertures.shape[1]))
+            else:
+                data_in_apertures = Parallel(n_jobs=lvmdatasimulator.n_process)(
+                    delayed(convolve_cube)(lsf * line_data[None, :, :], kern,
+                                           aperture_centers[selected_apertures, 1] - ystart_neb - y0,
+                                           aperture_centers[selected_apertures, 0] - xstart_neb - x0)
+                    for line_data in all_fluxes)
+                data_in_apertures = np.array(data_in_apertures)
+            data_in_apertures = np.moveaxis(data_in_apertures, 2, 0)
+            if data_in_apertures.shape[1] > 1:
+                prf_index = np.flatnonzero(all_wavelength == 6562.81)
+            else:
+                prf_index = 0
+            flux_norm_in_apertures = data_in_apertures.sum(axis=2)
+            line_prf_in_apertures = data_in_apertures[
+                                    :, prf_index, :].reshape(
+                (data_in_apertures.shape[0], data_in_apertures.shape[2])) / flux_norm_in_apertures[
+                                                                            :, prf_index].reshape(
+                data_in_apertures.shape[0], 1)
+
+            wl_logscale_lsf = np.log(self.vel_grid.value / 2.9979e5 + 1)
+            wl_logscale_lsf_highres = np.arange(np.round((wl_logscale_lsf[-1] - wl_logscale_lsf[0]) * 1e6
+                                                         ).astype(int)) * 1e-6 + wl_logscale_lsf[0]
+            p = interp1d(wl_logscale_lsf, line_prf_in_apertures, axis=1, assume_sorted=True)
+            line_highres_log = p(wl_logscale_lsf_highres)
+            line_highres_log = line_highres_log / np.sum(line_highres_log, axis=1)[:, None]
+            if flux_norm_in_apertures.shape[1] == 1:
+                flux_norm_in_apertures = flux_norm_in_apertures * \
+                                    self.content[my_comp + "_FLUXRATIOS"].data[1, None, :]
+
+            wl_indexes = np.round((np.log(all_wavelength) - wl_logscale_highres[0]) * 1e6).astype(int)
+            rec = (wl_indexes > 0) & (wl_indexes < len(wl_logscale_highres))
+            spectrum_highres_log = np.zeros(shape=(len(selected_apertures), len(wl_logscale_highres)), dtype=float)
+            win = (len(wl_logscale_lsf_highres) - 1) // 2
+            for ind, r in enumerate(rec):
+                if r:
+                    spectrum_highres_log[:, wl_indexes[ind] - win: wl_indexes[ind] + win + 1] += \
+                        line_highres_log[:, :] * flux_norm_in_apertures[:, ind].reshape((len(selected_apertures), 1))
+            p = interp1d(wl_logscale_highres, spectrum_highres_log, axis=1, assume_sorted=True)
+            spectrum[selected_apertures, :] += (p(wl_logscale) * delta_lr * 1e6)
+            # print(np.sum(flux_norm_in_apertures, axis=1), np.sum((p(wl_logscale) * delta_lr * 1e6), axis=1))
+            bar.update(neb_index + 1)
+        bar.finish()
+        return spectrum * (proj_plane_pixel_scales(self.wcs)[0] * 3600) ** 2 * fluxunit * u.arcsec ** 2

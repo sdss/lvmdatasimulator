@@ -7,7 +7,7 @@ import warnings
 NAME = 'sdss-lvmdatasimulator'
 
 # Loads config. config name is the package name.
-config = get_config('lvmdatasimulator')
+config = get_config('lvmdatasimulator', config_envvar="LVMDSIM_CONFIG")
 
 # Inits the logging system as NAME. Only shell logging, and exception and warning catching.
 # File logging can be started by calling log.start_file_logger(path).  Filename can be different
@@ -18,15 +18,24 @@ log = get_logger(NAME)
 ROOT_DIR = os.path.realpath(os.path.join(os.path.dirname(__file__), '..', '..'))
 
 # maximal number of processes for parallelization
-n_process = 8
+n_process = config.get('nprocess')
 
 # path to the Cloudy models and some default parameters
-CLOUDY_MODELS = os.path.join(os.path.join(ROOT_DIR, 'data'), 'LVM_cloudy_sphere_models.fits')
+if config.get('data_dir').startswith("/") or config.get('data_dir').startswith("\\"):
+    CLOUDY_MODELS = os.path.join(config.get('data_dir'), config.get('cloudy_models_name'))
+else:
+    CLOUDY_MODELS = os.path.join(os.path.join(ROOT_DIR, config.get('data_dir')), config.get('cloudy_models_name'))
 if not os.path.isfile(CLOUDY_MODELS):
     log.warning("Pre-computed grid of Cloudy models ({}) is not found. "
                 "Flux distribution in different lines will be unavailable".format(CLOUDY_MODELS))
     CLOUDY_MODELS = None
-CLOUDY_SPEC_DEFAULTS = {'id': 901, 'Z': 0.3, 'qH': 49., 'Teff': 70000., 'nH': 30., 'Rin': 10.01}
+CLOUDY_SPEC_DEFAULTS = config.get('cloudy_default_params')
+
+# path to the directory where all computational results will be saved
+if config.get('run_dir').startswith("/") or config.get('run_dir').startswith("\\"):
+    WORK_DIR = config.get('run_dir')
+else:
+    WORK_DIR = os.path.join(ROOT_DIR, config.get('run_dir'))
 
 warnings.filterwarnings('ignore', r'divide by zero encountered in')
 warnings.filterwarnings('ignore', r'invalid value encountered in ')
