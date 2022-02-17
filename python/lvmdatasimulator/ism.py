@@ -389,7 +389,6 @@ class Cloud(Nebula):
     def __post_init__(self):
         if self._rad_bins == 0:
             self._rad_bins = np.ceil(self.radius.to(u.pc).value / self.pxscale.to(u.pc).value * 3).astype(int)
-            print(self._rad_bins)
         delta = np.round((len(self._cartesian_y_grid) - 1) / 2).astype(int)
         if (self.xc is not None) and (self.yc is not None):
             self.x0 = self.xc - delta
@@ -807,7 +806,7 @@ class ISM:
                     radec = SkyCoord(ra=cur_obj.get('RA'), dec=cur_obj.get('DEC'))
                     x, y = self.wcs.world_to_pixel(radec)
                     x = np.round(x).astype(int)
-                    y = np.round(x).astype(int)
+                    y = np.round(y).astype(int)
                 else:
                     x, y = [cur_obj.get('X'), cur_obj.get('Y')]
 
@@ -1001,8 +1000,10 @@ class ISM:
             if self.content[cur_ext].header.get("DARK"):
                 if map_2d is None:
                     continue
-                map_2d = map_2d * self.calc_extinction(wavelength=wavelength, xs=self.width, ys=self.height,
-                                                       extinction_name=cur_ext)[0]
+                ext_map = self.calc_extinction(wavelength=wavelength, xs=self.width, ys=self.height,
+                                               extinction_name=cur_ext)
+                if ext_map is not None:
+                    map_2d = map_2d * ext_map[0]
                 continue
             my_comp = "_".join(cur_ext.split("_")[:2])
             flux_ext = [extname for extname in all_extensions

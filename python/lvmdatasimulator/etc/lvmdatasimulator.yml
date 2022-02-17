@@ -6,12 +6,12 @@ cloudy_models_name: 'LVM_cloudy_sphere_models.fits'  # Name for the pre-computed
                                                     # (should be stored in 'data' directory)
 
 cloudy_default_params:  # parameters for the Cloudy model to be used by default
-    id: 901
-    Z: 0.3
-    qH: 49.
-    Teff: 70000.
-    nH: 30.
-    Rin: 10.01
+    id: 983
+    Z: 0.4
+    qH: 50.
+    Teff: 50000.
+    nH: 100.
+    Rin: 0.01
 
 data_dir: "data"  # Path to the model grids etc. (relative to the ROOT of package unless it begins with /)
 

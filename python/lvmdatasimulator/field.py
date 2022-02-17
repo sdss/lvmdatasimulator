@@ -370,21 +370,30 @@ def run_test(ra=10., dec=-10., spaxel=1 / 3600., size=1000 / 60.):
     #          'radius': 10 * u.pc,
     #          'max_brightness': 3e-16 * u.erg / u.cm**2 / u.s / u.arcsec ** 2,
     #          'RA': '00h39m40s', 'DEC': "-10d02m13s",
-    #          'cloudy_params': {'Z': 0.3, 'qH': 50., 'nH': 30, 'Teff': 50000, 'Rin': 10},
+    #          'cloudy_params': {'Z': 0.4, 'qH': 50., 'nH': 30, 'Teff': 50000, 'Rin': 0},
     #          },  # 'perturb_amplitude': 0.1, 'perturb_order': 8},
+    #         {"type": 'Cloud',
+    #          'radius': 12 * u.pc,
+    #          'max_extinction': 0.6 * u.mag,
+    #          'RA': "00h39m10s", 'DEC': "-10d00m00s", 'zorder': 2},
+    #         {"type": 'Filament',
+    #          'length': 50 * u.pc, 'width': 1. * u.pc, 'PA': -35 * u.degree,
+    #          'max_brightness': 3e-17 * u.erg / u.cm**2 / u.s / u.arcsec ** 2,
+    #          'cloudy_params': {'Z': 0.2, 'qH': 48., 'nH': 30, 'Teff': 30000, 'Rin': 0},
+    #          'RA': "00h40m10s", 'DEC': "-10d01m20s", 'zorder': 3},
     #         {"type": 'Bubble', 'expansion_velocity': 25 * u.km/u.s,
     #          'turbulent_sigma': 20 * u.km/u.s,
     #          'radius': 25 * u.pc,
     #          'max_brightness': 1e-16 * u.erg / u.cm**2 / u.s / u.arcsec ** 2,
-    #          'RA': "00h40m10s", 'DEC': "-10d05m10s",
-    #          'cloudy_params': {'Z': 0.7, 'qH': 49., 'nH': 30, 'Teff': 30000, 'Rin': 10},
+    #          'RA': "00h40m05s", 'DEC': "-10d04m00s",
+    #          'cloudy_params': {'Z': 0.6, 'qH': 49., 'nH': 30, 'Teff': 30000, 'Rin': 0},
     #          'perturb_amplitude': 0.4, 'perturb_order': 8},
     #         {"type": 'Bubble', 'expansion_velocity': 55 * u.km / u.s,
     #          'turbulent_sigma': 20 * u.km / u.s,
     #          'radius': 15 * u.pc,
     #          'max_brightness': 2e-16 * u.erg / u.cm ** 2 / u.s / u.arcsec ** 2,
     #          'RA': "00h40m00s", 'DEC': "-09d56m00s",
-    #          'cloudy_params': {'Z': 0.7, 'qH': 50., 'nH': 30, 'Teff': 70000, 'Rin': 10},
+    #          'cloudy_params': {'Z': 0.4, 'qH': 50., 'nH': 30, 'Teff': 70000, 'Rin': 0},
     #          'perturb_amplitude': 0.1, 'perturb_order': 8},
     #         {"type": 'DIG', 'max_brightness': 1e-17 * u.erg / u.cm ** 2 / u.s / u.arcsec ** 2,
     #          'perturb_amplitude': 0.1, 'perturb_scale': 200 * u.pc}
@@ -392,11 +401,11 @@ def run_test(ra=10., dec=-10., spaxel=1 / 3600., size=1000 / 60.):
 
     my_lvmfield = LVMField(ra=ra, dec=dec, size=size, spaxel=spaxel, unit_ra=u.degree, unit_dec=u.degree,
                            unit_size=u.arcmin, unit_spaxel=u.degree)
-    # my_lvmfield.add_nebulae(my_nebulae, save_nebulae="/Users/mors/Science/LVM/testneb_v1.fits")
-    my_lvmfield.add_nebulae(load_from_file="/Users/mors/Science/LVM/testneb_v1.fits")
+    # my_lvmfield.add_nebulae(my_nebulae, save_nebulae="/Users/mors/Science/LVM/testneb_v2.fits")
+    my_lvmfield.add_nebulae(load_from_file="/Users/mors/Science/LVM/testneb_v2.fits")
     my_lvmfield.generate_gaia_stars()
 
-    apertures = [{"RA": 10.021 * u.degree, "DEC": -10.053 * u.degree, "Radius": 30 * u.arcsec},
+    apertures = [{"RA": 10.018 * u.degree, "DEC": -10.059 * u.degree, "Radius": 30 * u.arcsec},
                  # {"RA": 10.007 * u.degree, "DEC": -10.05 * u.degree, "Radius": 30 * u.arcsec},
                  # {"RA": 09.995 * u.degree, "DEC": -10.0 * u.degree, "Radius": 30 * u.arcsec},
                  # {"RA": 09.985 * u.degree, "DEC": -9.95 * u.degree, "Radius": 30 * u.arcsec},
