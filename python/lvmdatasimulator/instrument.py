@@ -16,7 +16,7 @@ from astropy.io import ascii
 from scipy.interpolate import interp1d
 
 
-from lvmdatasimulator import ROOT_DIR, fibers
+from lvmdatasimulator import ROOT_DIR
 from abc import ABC, abstractmethod
 
 
@@ -53,11 +53,6 @@ class Spectrograph(ABC):
     def branches(self):
         pass
 
-    @property
-    @abstractmethod
-    def bundle(self):
-        pass
-
 
 class LinearSpectrograph(Spectrograph):
 
@@ -67,10 +62,6 @@ class LinearSpectrograph(Spectrograph):
     @functools.cached_property
     def branches(self):
         return [Branch(name='linear', wavecoord=w.LinearWave())]
-
-    @functools.cached_property
-    def bundle(self):
-        return fibers.FiberBundle(self.bundle_name)
 
 
 class LVMSpectrograph(Spectrograph):
@@ -84,6 +75,3 @@ class LVMSpectrograph(Spectrograph):
                 Branch(name='red', wavecoord=w.RedWave()),
                 Branch(name='ir', wavecoord=w.IRWave())]
 
-    @functools.cached_property
-    def bundle(self):
-        return fibers.FiberBundle(self.bundle_name)
