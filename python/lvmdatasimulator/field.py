@@ -12,7 +12,6 @@ import astropy.units as u
 from astropy.coordinates import SkyCoord
 from astropy.visualization import ImageNormalize, PercentileInterval, AsinhStretch
 import matplotlib.pyplot as plt
-from matplotlib.patches import Rectangle
 from astropy.visualization.wcsaxes import SphericalCircle
 from astropy.wcs import WCS
 from lvmdatasimulator.stars import StarsList
@@ -77,10 +76,12 @@ class LVMField:
         self.name = name
         self.ra = ra * unit_ra
         self.dec = dec * unit_dec
+        self.coord = SkyCoord(self.ra, self.dec)
         self.size = size * unit_size
         self.radius = self.size / 2  # to generate the star list
         self.spaxel = spaxel * unit_spaxel
-        self.npixels = np.round((self.size.to(u.arcsec) / self.spaxel.to(u.arcsec)).value).astype(int)
+        self.npixels = np.round((self.size.to(u.arcsec) /
+                                 self.spaxel.to(u.arcsec)).value).astype(int)
 
         self.wcs = self._create_wcs()
         self.ism = self._create_ism()
@@ -163,7 +164,7 @@ class LVMField:
 
         self.starlist = StarsList(filename=filename, dir=directory)
 
-    def show(self, subplots_kw=None, scatter_kw=None, apertures=None):
+    def show(self, subplots_kw=None, scatter_kw=None, fibers=None):
         """
         Display the LVM field with overlaid apertures (if needed). This is a work in progress.
 
@@ -172,16 +173,15 @@ class LVMField:
                 keyword arguments to be passed to plt.subplots. Defaults to None.
             scatter_kw (dict, optional):
                 keyword arguments to be passed to plt.scatter. Defaults to None.
-            apertures (dict or list of dicts, optional):
-                structure defining the position and size of aperture(s) for spectra extraction, values in astropy units
-                ({'RA', 'DEC', 'Radius', 'Width', 'Height', 'PA'};
-                'Width', 'Height' and 'PA' are ignored if 'Radius' is set)
+            fibers (dict or list of fibers, optional):
+                structure defining the position and size of aperture(s) for spectra extraction.
         """
 
         fig, ax = plt.subplots(1, 1, subplot_kw=dict(projection=self.wcs))
         if self.ism_map is None:
             self._get_ism_map()
-        norm = ImageNormalize(self.ism_map, interval=PercentileInterval(94), stretch=AsinhStretch())
+        norm = ImageNormalize(self.ism_map, interval=PercentileInterval(94),
+                              stretch=AsinhStretch())
         img = ax.imshow(self.ism_map, norm=norm, cmap=plt.cm.Oranges)
         if self.starlist is not None:
             self._plot_stars(ax=ax)
@@ -190,29 +190,12 @@ class LVMField:
         ax.set_xlabel('RA (J2000)', fontsize=15)
         ax.set_ylabel('Dec (J2000)', fontsize=15)
 
-        if type(apertures) in [dict, list, tuple]:
-            if type(apertures) == dict:
-                apertures = [apertures]
-            for ap in apertures:
-                if 'RA' not in ap or 'DEC' not in ap or ('Radius' not in ap and
-                                                         ('Width' not in ap or 'Height' not in ap)):
-                    continue
-                if 'Radius' in ap:
-                    p = SphericalCircle((ap['RA'], ap['DEC']), ap['Radius'],
-                                        edgecolor='green', facecolor='none',
-                                        transform=ax.get_transform('fk5'))
-                else:
-                    if 'PA' not in ap:
-                        pa = 0 * u.degree
-                    else:
-                        pa = ap['PA']
-                    # !!! TO BE CORRECTED ('RA' and 'DEC' should correspond to the center, and correct for declination)
-                    p = Rectangle((ap['RA'].to(u.degree).value, ap['DEC'].to(u.degree).value),
-                                  ap['Width'].to(u.degree).value, ap['Height'].to(u.degree).value,
-                                  pa.to(u.degree).value,
-                                  edgecolor='green', facecolor='none',
-                                  transform=ax.get_transform('fk5'))
-                ax.add_patch(p)
+        for fiber in fibers:
+            fiber_coord = self.coord.spherical_offsets_by(fiber.x, fiber.y)
+            p = SphericalCircle((fiber_coord.ra, fiber_coord.dec), fiber.diameter / 2,
+                                edgecolor='green', facecolor='none',
+                                transform=ax.get_transform('fk5'))
+            ax.add_patch(p)
         plt.show()
 
     def _plot_stars(self, ax):
@@ -235,8 +218,13 @@ class LVMField:
         """
         Create ISM object related to this LVMField
         """
-        return ISM(self.wcs, width=self.npixels, height=self.npixels, turbulent_sigma=turbulent_sigma,
-                   distance=distance, spec_resolution=spec_resolution, sys_velocity=sys_velocity)
+        return ISM(self.wcs,
+                   width=self.npixels,
+                   height=self.npixels,
+                   turbulent_sigma=turbulent_sigma,
+                   distance=distance,
+                   spec_resolution=spec_resolution,
+                   sys_velocity=sys_velocity)
 
     def add_nebulae(self, list_of_nebulae=None, load_from_file=None, save_nebulae=None):
         """
@@ -253,18 +241,28 @@ class LVMField:
                                 max_brightness: 1e-13 * u.erg / u.cm**2 / u.s,
                                 RA: "08h12m13s",
                                 DEC: "-20d14m13s",
-                                'perturb_degree': 8, # max. order of spherical harmonics to generate inhomogeneities
-                                'perturb_amplitude': 0.1, # relative max. amplitude of inhomogeneities,
-                                'perturb_scale': 200 * u.pc,  # spatial scale to generate inhomogeneities (DIG only)
+                                'perturb_degree': 8, # max. order of spherical harmonics
+                                                       to generate inhomogeneities
+                                'perturb_amplitude': 0.1, # relative max.
+                                                            amplitude of inhomogeneities,
+                                'perturb_scale': 200 * u.pc,  # spatial scale to generate
+                                                                inhomogeneities (DIG only)
                                 'cloudy_id': None,  # id of pre-generated Cloudy model
-                                'cloudy_params': {'Z': 0.5, 'qH': 49., 'nH': 10, 'Teff': 30000, 'Rin': 0},  #
-                                    parameters defining the pre-generated Cloudy model (used if spectrum_id is None)
-                                'linerat_constant': False #  if True -> lines ratios doesn't vary across Cloud/Bubble
+                                'cloudy_params': {'Z': 0.5,
+                                                  'qH': 49.,
+                                                  'nH': 10,
+                                                  'Teff': 30000,
+                                                  'Rin': 0},  # parameters defining the
+                                        pre-generated Cloudy model (used if spectrum_id is None)
+                                'linerat_constant': False #  if True -> lines ratios doesn't
+                                                                vary across Cloud/Bubble
                                 }]
-            load_from_file: path (asbolute or relative to work_dir) to the file with previously calculated ISM part
-                (preferred if both load_from_file and list_of_nebulae are present)
-            save_nebulae: path (asbolute or relative to work_dir) where to save fits with calculated ISM
-                (only used if list_of_nebulae is present and load_from_file is not)
+            load_from_file: path (asbolute or relative to work_dir) to the file with previously
+                            calculated ISM part (preferred if both load_from_file and
+                            list_of_nebulae are present)
+            save_nebulae: path (asbolute or relative to work_dir) where to save fits with
+                          calculated ISM (only used if list_of_nebulae is present and
+                          load_from_file is not)
 
         """
         loaded = False
@@ -305,62 +303,52 @@ class LVMField:
         else:
             self.ism_map = np.zeros(shape=(self.npixels, self.npixels), dtype=float)
 
-    def extract_spectra(self, apertures, wl_grid):
+    def extract_spectra(self, fibers, wl_grid):
         """
         Perform spectra extraction within the given aperture.
 
         Args:
-            apertures (list or tuple of dict, TO BE CHANGED TO APERTURE BUNDLE):
-                structure defining the position and size of aperture for spectra extraction, values in astropy units
-                ({'RA', 'DEC', 'Radius', 'Width', 'Height', 'PA'};
-                'Width', 'Height' and 'PA' are ignored if 'Radius' is set)
+            fibers (list or tuple fiber objects):
+                structure defining the position and size of aperture for spectra extraction
             wl_grid (numpy.array): wavelength grid for the resulting spectrum
         """
-        if type(apertures) not in [list, tuple]:
-            apertures = [apertures]
-        spectrum = np.zeros(shape=(len(apertures), len(wl_grid))) * fluxunit * u.arcsec ** 2
+
+        spectrum = np.zeros(shape=(len(fibers), len(wl_grid))) * fluxunit * u.arcsec ** 2
+        fiber_id = []
         dl = (wl_grid[1] - wl_grid[0]).to(u.AA)
         xx, yy = np.meshgrid(np.arange(self.npixels), np.arange(self.npixels))
         aperture_mask = np.zeros(shape=(self.npixels, self.npixels), dtype=int)
-        for ap_index, aperture in enumerate(apertures):
-            if 'RA' not in aperture or 'DEC' not in aperture or ('Radius' not in aperture and
-                                                                 ('Width' not in aperture or 'Height' not in aperture)):
-                log.warning('Incorrect parameters for aperture #{0}'.format(ap_index + 1))
+        for index, fiber in enumerate(fibers):
+            fiber_id.append(fiber.id)
+            # I have to check this holds
+            fiber_coord = self.coord.spherical_offsets_by(fiber.x, fiber.y)
+            xc, yc = self.wcs.world_to_pixel(fiber_coord)
+
+            s = (fiber.diameter.to(u.degree) / self.spaxel.to(u.degree)).value / 2
+
+            if (xc - s) < 0 or ((xc + s) >= self.npixels) \
+                    or ((yc - s) < 0) or ((yc + s) >= self.npixels):
+
+                log.warning('Aperture #{0} for spectra extraction is outside of the LVM field'
+                            .format(index + 1))
                 continue
 
-            xc, yc = self.wcs.world_to_pixel(SkyCoord(ra=aperture['RA'], dec=aperture['DEC']))
-            if 'Radius' in aperture:
-                s = (aperture['Radius'].to(u.degree) / self.spaxel.to(u.degree)).value
-            else:
-                s = (np.max([aperture['Width'].to(u.degree) / 2.,
-                             aperture['Height'].to(u.degree) / 2.]) / self.spaxel.to(u.degree)).value
-
-            if (xc - s) < 0 or ((xc + s) >= self.npixels) or ((yc - s) < 0) or ((yc + s) >= self.npixels):
-                log.warning('Aperture #{0} for spectra extraction is outside of the LVM field'.format(ap_index + 1))
-                continue
-
-            if 'Radius' in aperture:
-                rec = ((xx - xc) ** 2 + (yy - yc) ** 2) <= (s ** 2)
-            else:
-                w = (aperture['Width'] / 2. / self.spaxel).value
-                h = (aperture['Height'] / 2. / self.spaxel).value
-                rec = (xx >= (xc - w)) & (xx <= (xc + w)) & (yy >= (yc - h)) & (yy <= (yc + h))
-                # !!!!! ADD ROTATION !!!!
-            aperture_mask[rec] = ap_index + 1
+            rec = ((xx - xc) ** 2 + (yy - yc) ** 2) <= (s ** 2)
+            aperture_mask[rec] = index + 1
 
             if self.starlist is not None:
                 xc_stars = np.round(self.starlist.stars_table['x']).astype(int)
                 yc_stars = np.round(self.starlist.stars_table['y']).astype(int)
-                stars_id = np.flatnonzero(aperture_mask[yc_stars, xc_stars] == (ap_index + 1))
+                stars_id = np.flatnonzero(aperture_mask[yc_stars, xc_stars] == (index + 1))
                 for star_id in stars_id:
                     p = interp1d(self.starlist.wave.to(u.AA).value, self.starlist.spectra[star_id])
                     # !!! APPLY EXTINCTION BY DARK NEBULAE TO STARS !!!
-                    spectrum[ap_index, :] += (p(wl_grid.value) * dl.value * fluxunit * u.arcsec ** 2)
+                    spectrum[index, :] += (p(wl_grid.value) * dl.value * fluxunit * u.arcsec ** 2)
         log.info("Start extracting nebular spectra")
         spectrum_ism = self.ism.get_spectrum(wl_grid.to(u.AA), aperture_mask)
         if spectrum_ism is not None:
             spectrum[: len(spectrum_ism), :] += spectrum_ism
-        return spectrum
+        return np.array(fiber_id), spectrum
 
 
 def run_test(ra=10., dec=-10., spaxel=1 / 3600., size=1000 / 60.):
@@ -399,8 +387,8 @@ def run_test(ra=10., dec=-10., spaxel=1 / 3600., size=1000 / 60.):
     #          'perturb_amplitude': 0.1, 'perturb_scale': 200 * u.pc}
     #         ]
 
-    my_lvmfield = LVMField(ra=ra, dec=dec, size=size, spaxel=spaxel, unit_ra=u.degree, unit_dec=u.degree,
-                           unit_size=u.arcmin, unit_spaxel=u.degree)
+    my_lvmfield = LVMField(ra=ra, dec=dec, size=size, spaxel=spaxel, unit_ra=u.degree,
+                           unit_dec=u.degree, unit_size=u.arcmin, unit_spaxel=u.degree)
     # my_lvmfield.add_nebulae(my_nebulae, save_nebulae="/Users/mors/Science/LVM/testneb_v2.fits")
     my_lvmfield.add_nebulae(load_from_file="/Users/mors/Science/LVM/testneb_v2.fits")
     my_lvmfield.generate_gaia_stars()
@@ -411,7 +399,7 @@ def run_test(ra=10., dec=-10., spaxel=1 / 3600., size=1000 / 60.):
                  # {"RA": 09.985 * u.degree, "DEC": -9.95 * u.degree, "Radius": 30 * u.arcsec},
                  ]
 
-    my_lvmfield.show(apertures=apertures)
+    my_lvmfield.show(fibers=apertures)
 
     dlam = 0.06
     l0 = 3650.
@@ -443,5 +431,5 @@ if __name__ == '__main__':
     #         stats = Stats(pr, stream=stream)
     #         stats.strip_dirs()
     #         stats.sort_stats('time')
-    #         stats.dump_stats('.prof_stats')  # the name of this file is what you have to give to snakeviz
+    #         stats.dump_stats('.prof_stats')  # the name you have to give to snakeviz
     #         stats.print_stats()

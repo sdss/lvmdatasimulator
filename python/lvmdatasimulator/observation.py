@@ -8,11 +8,17 @@
 
 import functools
 import astropy.units as u
+import numpy as np
 
 from dataclasses import dataclass
 from astropy.time import Time
 from astropy.coordinates import get_body, EarthLocation, AltAz, SkyCoord
 from astroplan import moon_illumination
+
+import matplotlib.pyplot as plt
+from astropy.visualization import astropy_mpl_style, quantity_support
+plt.style.use(astropy_mpl_style)
+quantity_support()
 
 
 @dataclass
@@ -21,6 +27,8 @@ class Observation:
     This class contains the principal informations on the observations to be simulated.
 
     Parameters:
+        name (str):
+            Name of the field. Defaults to 'LVM_field'
         time (str, optional):
             date and time of the observations in the following format:
             'YYYY-MM-DDTHH:MM:SS.SS'. Defaults to '2022-01-01T00:00:00.00'.
@@ -62,6 +70,7 @@ class Observation:
 
     """
 
+    name: str = 'LVM_field'
     ra: u.deg = 0.0 * u.deg
     dec: u.deg = 0.0 * u.deg
     time: str = '2022-01-01T00:00:00.00'  # UT time of observations
@@ -143,4 +152,59 @@ class Observation:
     @functools.cached_property
     def moon_illumination(self):
         '''get moon illumination'''
-        return round(moon_illumination(self.time), 2)
+        return round(moon_illumination(self.time), 3)
+
+    @functools.cached_property
+    def days_from_new_moon(self):
+        '''This is greatly approximated'''
+        conversion = np.array([0, 0.01, 0.05, 0.11, 0.19, 0.27, 0.36, 0.46, 0.55,
+                               0.65, 0.73, 0.81, 0.88, 0.93, 1])
+        diff = np.abs(conversion - self.moon_illumination)
+        return np.argmin(diff)
+
+    @functools.cached_property
+    def airmass(self):
+        '''get airmass of target from coordinates'''
+        return self.target_coords_altaz.secz.value
+
+    def plot_visibilities(self, dir='.', show=False):
+
+        # preparing the plot for the full day
+        delta_midnight = np.linspace(-12, 12, 100) * u.hour
+        midnight = Time(self.time.value[:10] + 'T00:00:00', format='isot', scale='utc')
+        times = midnight + delta_midnight
+        frames = AltAz(obstime=times, location=self.location)
+        sun_altaz = self.sun_coords.transform_to(frames)
+        moon_altaz = self.moon_coords.transform_to(frames)
+        target_altaz = self.target_coords.transform_to(frames)
+
+        print(moon_altaz.alt)
+        print(delta_midnight)
+
+        deltaobs = np.arange(0, self.total_time.value, 120) * u.s
+        delta_time = self.time - midnight
+        offset = delta_time.value * 24 * u.hour + deltaobs
+        obstime = self.time + deltaobs
+        obsframe = AltAz(obstime=obstime, location=self.location)
+        obs_altaz = self.target_coords.transform_to(obsframe)
+
+        fig, ax = plt.subplots(1, 1)
+        ax.plot(delta_midnight, sun_altaz.alt, color='gold', label='Sun')
+        # ax.plot(delta_midnight, moon_altaz.alt, color='silver', ls='--', label='Moon')
+        ax.plot(delta_midnight, target_altaz.alt, color='red', ls=':', label=self.name)
+        ax.scatter(offset, obs_altaz.alt, lw=2, s=8, color='red', zorder=100)
+        ax.fill_between(delta_midnight, 0 * u.deg, 90 * u.deg,
+                        sun_altaz.alt < -0 * u.deg, color='0.5', alpha=0.5, zorder=0)
+        ax.fill_between(delta_midnight, 0 * u.deg, 90 * u.deg,
+                        sun_altaz.alt < -18 * u.deg, color='k', alpha=0.5, zorder=0)
+        ax.legend(loc='upper left')
+        ax.set_xlim(-12 * u.hour, 12 * u.hour)
+        ax.set_xticks((np.arange(13) * 2 - 12) * u.hour)
+        ax.set_ylim(0 * u.deg, 90 * u.deg)
+        ax.set_xlabel('Hours from UT Midnight')
+        ax.set_ylabel('Altitude [deg]')
+        fig.savefig(f'{dir}/{self.name}_visibility.png')
+        if show:
+            plt.show()
+        else:
+            plt.close()
