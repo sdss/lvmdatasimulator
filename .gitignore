@@ -115,5 +115,5 @@ ENV/
 *.swo
 
 # huge data directory
-data/*
+data/*.fits
 run/*
