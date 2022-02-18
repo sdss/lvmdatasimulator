@@ -63,7 +63,9 @@ class FiberBundle:
             fiber1 = self._read_fiber_file('slit1')
             fiber2 = self._read_fiber_file('slit2')
             fiber3 = self._read_fiber_file('slit3')
+            # fibers = self._read_fiber_file('test_slit')
             return fiber1 + fiber2 + fiber3
+            # return fibers
 
         else:
             log.info(f'Creating only {self.bundle_type}.')
