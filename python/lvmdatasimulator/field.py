@@ -348,7 +348,7 @@ class LVMField:
         spectrum_ism = self.ism.get_spectrum(wl_grid.to(u.AA), aperture_mask)
         if spectrum_ism is not None:
             spectrum[: len(spectrum_ism), :] += spectrum_ism
-        return np.array(fiber_id), spectrum
+        return np.array(fiber_id), spectrum / dl.value / u.AA
 
 
 def run_test(ra=10., dec=-10., spaxel=1 / 3600., size=1000 / 60.):
