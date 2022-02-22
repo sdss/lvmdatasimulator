@@ -23,7 +23,7 @@ class Fiber:
     id: str = 'central'
     x: u.arcsec = 0 * u.arcsec
     y: u.arcsec = 0 * u.arcsec
-    diameter: u.arcsec = 37 * u.arcsec
+    diameter: u.arcsec = 35.3 * u.arcsec
     dispersion: u.pix = 3 * u.pix
 
     def __post_init__(self):
