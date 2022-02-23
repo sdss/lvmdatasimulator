@@ -419,7 +419,8 @@ class Simulator:
 
         hdul = fits.HDUList([primary, signal_hdu, noise_hdu, sky_hdu, wave_hdu, ids_hdu])
 
-        filename = f"{self.outdir}/{self.source.name}_{branch.name}_exposure.fits"
+        filename = f"{self.outdir}/{self.source.name}_{branch.name}_{self.bundle.bundle_type}" +\
+                    "_input.fits"
         hdul.writeto(filename, overwrite=True)
         log.info(f'{filename} saved.')
 
@@ -459,7 +460,8 @@ class Simulator:
         hdul = fits.HDUList([primary, target_hdu, total_hdu, noise_hdu, stn_hdu, sky_hdu,
                              wave_hdu, ids_hdu])
 
-        filename = f"{self.outdir}/{self.source.name}_{branch.name}_exposure_electron.fits"
+        filename = f"{self.outdir}/{self.source.name}_{branch.name}_{self.bundle.bundle_type}" +\
+                    "_realization.fits"
         hdul.writeto(filename, overwrite=True)
         log.info(f'{filename} saved.')
 
