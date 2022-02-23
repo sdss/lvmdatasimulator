@@ -319,14 +319,15 @@ class LVMField:
         dl = (wl_grid[1] - wl_grid[0]).to(u.AA)
         xx, yy = np.meshgrid(np.arange(self.npixels), np.arange(self.npixels))
         aperture_mask = np.zeros(shape=(self.npixels, self.npixels), dtype=int)
+        fibers_coords = np.zeros(shape=(len(fibers), 3), dtype=float)
         for index, fiber in enumerate(fibers):
             fiber_id.append(fiber.id)
             # I have to check this holds
-            fiber_coord = self.coord.spherical_offsets_by(fiber.x, fiber.y)
-            xc, yc = self.wcs.world_to_pixel(fiber_coord)
+            cur_fiber_coord = self.coord.spherical_offsets_by(fiber.x, fiber.y)
+            xc, yc = self.wcs.world_to_pixel(cur_fiber_coord)
 
             s = (fiber.diameter.to(u.degree) / self.spaxel.to(u.degree)).value / 2
-
+            fibers_coords[index, :] = [xc, yc, s]
             if (xc - s) < 0 or ((xc + s) >= self.npixels) \
                     or ((yc - s) < 0) or ((yc + s) >= self.npixels):
 
@@ -345,13 +346,15 @@ class LVMField:
                     p = interp1d(self.starlist.wave.to(u.AA).value, self.starlist.spectra[star_id])
                     # !!! APPLY EXTINCTION BY DARK NEBULAE TO STARS !!!
                     spectrum[index, :] += (p(wl_grid.value) * dl.value * fluxunit * u.arcsec ** 2)
+        if np.max(aperture_mask) < fibers_coords.shape[0]:
+            fibers_coords = fibers_coords[:np.max(aperture_mask), :]
         log.info("Start extracting nebular spectra")
-        spectrum_ism = self.ism.get_spectrum(wl_grid.to(u.AA), aperture_mask)
+        spectrum_ism = self.ism.get_spectrum(wl_grid.to(u.AA), aperture_mask, fibers_coords)
         if spectrum_ism is not None:
             spectrum[: len(spectrum_ism), :] += spectrum_ism
         return np.array(fiber_id), spectrum / dl.value / u.AA
 
-
+      
 def run_test(ra=10., dec=-10., spaxel=1 / 3600., size=1000 / 60.):
     # my_nebulae = [
     #         {"type": 'Bubble', 'expansion_velocity': 45 * u.km/u.s,
@@ -434,3 +437,4 @@ if __name__ == '__main__':
     #         stats.sort_stats('time')
     #         stats.dump_stats('.prof_stats')  # the name you have to give to snakeviz
     #         stats.print_stats()
+
