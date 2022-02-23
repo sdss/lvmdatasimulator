@@ -190,12 +190,13 @@ class LVMField:
         ax.set_xlabel('RA (J2000)', fontsize=15)
         ax.set_ylabel('Dec (J2000)', fontsize=15)
 
-        for fiber in fibers:
-            fiber_coord = self.coord.spherical_offsets_by(fiber.x, fiber.y)
-            p = SphericalCircle((fiber_coord.ra, fiber_coord.dec), fiber.diameter / 2,
-                                edgecolor='green', facecolor='none',
-                                transform=ax.get_transform('fk5'))
-            ax.add_patch(p)
+        if fibers is not None:
+            for fiber in fibers:
+                fiber_coord = self.coord.spherical_offsets_by(fiber.x, fiber.y)
+                p = SphericalCircle((fiber_coord.ra, fiber_coord.dec), fiber.diameter / 2,
+                                    edgecolor='green', facecolor='none',
+                                    transform=ax.get_transform('fk5'))
+                ax.add_patch(p)
         plt.show()
 
     def _plot_stars(self, ax):
@@ -352,3 +353,88 @@ class LVMField:
         if spectrum_ism is not None:
             spectrum[: len(spectrum_ism), :] += spectrum_ism
         return np.array(fiber_id), spectrum / dl.value / u.AA
+
+      
+def run_test(ra=10., dec=-10., spaxel=1 / 3600., size=1000 / 60.):
+    # my_nebulae = [
+    #         {"type": 'Bubble', 'expansion_velocity': 45 * u.km/u.s,
+    #          'turbulent_sigma': 20 * u.km/u.s,
+    #          'radius': 10 * u.pc,
+    #          'max_brightness': 3e-16 * u.erg / u.cm**2 / u.s / u.arcsec ** 2,
+    #          'RA': '00h39m40s', 'DEC': "-10d02m13s",
+    #          'cloudy_params': {'Z': 0.4, 'qH': 50., 'nH': 30, 'Teff': 50000, 'Rin': 0},
+    #          },  # 'perturb_amplitude': 0.1, 'perturb_order': 8},
+    #         {"type": 'Cloud',
+    #          'radius': 12 * u.pc,
+    #          'max_extinction': 0.6 * u.mag,
+    #          'RA': "00h39m10s", 'DEC': "-10d00m00s", 'zorder': 2},
+    #         {"type": 'Filament',
+    #          'length': 50 * u.pc, 'width': 1. * u.pc, 'PA': -35 * u.degree,
+    #          'max_brightness': 3e-17 * u.erg / u.cm**2 / u.s / u.arcsec ** 2,
+    #          'cloudy_params': {'Z': 0.2, 'qH': 48., 'nH': 30, 'Teff': 30000, 'Rin': 0},
+    #          'RA': "00h40m10s", 'DEC': "-10d01m20s", 'zorder': 3},
+    #         {"type": 'Bubble', 'expansion_velocity': 25 * u.km/u.s,
+    #          'turbulent_sigma': 20 * u.km/u.s,
+    #          'radius': 25 * u.pc,
+    #          'max_brightness': 1e-16 * u.erg / u.cm**2 / u.s / u.arcsec ** 2,
+    #          'RA': "00h40m05s", 'DEC': "-10d04m00s",
+    #          'cloudy_params': {'Z': 0.6, 'qH': 49., 'nH': 30, 'Teff': 30000, 'Rin': 0},
+    #          'perturb_amplitude': 0.4, 'perturb_order': 8},
+    #         {"type": 'Bubble', 'expansion_velocity': 55 * u.km / u.s,
+    #          'turbulent_sigma': 20 * u.km / u.s,
+    #          'radius': 15 * u.pc,
+    #          'max_brightness': 2e-16 * u.erg / u.cm ** 2 / u.s / u.arcsec ** 2,
+    #          'RA': "00h40m00s", 'DEC': "-09d56m00s",
+    #          'cloudy_params': {'Z': 0.4, 'qH': 50., 'nH': 30, 'Teff': 70000, 'Rin': 0},
+    #          'perturb_amplitude': 0.1, 'perturb_order': 8},
+    #         {"type": 'DIG', 'max_brightness': 1e-17 * u.erg / u.cm ** 2 / u.s / u.arcsec ** 2,
+    #          'perturb_amplitude': 0.1, 'perturb_scale': 200 * u.pc}
+    #         ]
+
+    my_lvmfield = LVMField(ra=ra, dec=dec, size=size, spaxel=spaxel, unit_ra=u.degree,
+                           unit_dec=u.degree, unit_size=u.arcmin, unit_spaxel=u.degree)
+    # my_lvmfield.add_nebulae(my_nebulae, save_nebulae="/Users/mors/Science/LVM/testneb_v2.fits")
+    my_lvmfield.add_nebulae(load_from_file="/Users/mors/Science/LVM/testneb_v2.fits")
+    my_lvmfield.generate_gaia_stars()
+
+    apertures = [{"RA": 10.018 * u.degree, "DEC": -10.059 * u.degree, "Radius": 30 * u.arcsec},
+                 # {"RA": 10.007 * u.degree, "DEC": -10.05 * u.degree, "Radius": 30 * u.arcsec},
+                 # {"RA": 09.995 * u.degree, "DEC": -10.0 * u.degree, "Radius": 30 * u.arcsec},
+                 # {"RA": 09.985 * u.degree, "DEC": -9.95 * u.degree, "Radius": 30 * u.arcsec},
+                 ]
+
+    my_lvmfield.show(fibers=apertures)
+
+    dlam = 0.06
+    l0 = 3650.
+    l1 = 9850.
+    npix = np.round((l1 - l0) / dlam).astype(int)
+    wl_grid = (np.arange(npix) * dlam + l0) * u.AA
+
+    spec = my_lvmfield.extract_spectra(apertures, wl_grid)
+    if spec is not None:
+        _ = plt.figure(figsize=(12, 10))
+        for i in range(2):
+            ax = plt.subplot(211 + i)
+            ax.plot(wl_grid, spec[0], 'k', lw=0.7)
+            ax.set_xlabel(r"Wavelength, $'\AA$", fontsize=14)
+            ax.set_ylabel(r"Intensity, erg s$^{-1}$ cm$^{-2}$", fontsize=14)
+            if i == 0:
+                ax.set_xlim(6500, 6600)
+            else:
+                ax.set_xlim(3700, 9600)
+
+    plt.show()
+
+
+if __name__ == '__main__':
+    run_test()
+    # with cProfile.Profile() as pr:
+    #     run_test()
+    #     with open('/Users/mors/Science/LVM/profiling_stats.prof', 'w') as stream:
+    #         stats = Stats(pr, stream=stream)
+    #         stats.strip_dirs()
+    #         stats.sort_stats('time')
+    #         stats.dump_stats('.prof_stats')  # the name you have to give to snakeviz
+    #         stats.print_stats()
+

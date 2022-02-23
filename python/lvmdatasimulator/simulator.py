@@ -257,7 +257,8 @@ class Simulator:
 
         days_moon = self.observation.days_from_new_moon
         sky_file = f"{ROOT_DIR}/data/sky/LVM_{self.telescope.name}_SKY_{days_moon}.dat"
-        data = ascii.read(sky_file)
+        area_fiber = np.pi * (self.bundlefibers[0].diameter / 2)**2
+        data = ascii.read(sky_file) * area_fiber  # from Sbrightness to FLUX
 
         return self._resample_and_convolve(data["col1"], data["col2"],
                                            u.erg / (u.cm ** 2 * u.s * u.AA))
@@ -314,18 +315,15 @@ class Simulator:
         """Extract spectra of the terget from the field object"""
 
         obj_spec = OrderedDict()
-        wl_grid = np.arange(3650, 9900, 0.06) * u.AA
+        wl_grid = np.arange(3650, 9900.01, 0.06) * u.AA
         index, spectra = self.source.extract_spectra(self.bundle.fibers, wl_grid)
         log.info('Recovering target spectra.')
         for fiber in self.bundle.fibers:
 
+            original = spectra[index == fiber.id, :][0]
             # from here, this is a replica of _resample_and_convolve()
             # I cannot use the method directly because I cannot use the same spectra for all fibers
             disp0 = np.median(wl_grid[1:-1] - wl_grid[0:-2])
-            tmp_lam = np.arange(np.amin(wl_grid.value), np.amax(wl_grid.value), disp0.value)
-
-            resampled_v0 = resample_spectrum(tmp_lam, wl_grid.value,
-                                             spectra[index == fiber.id, :][0])
 
             fiber_spec = OrderedDict()
 
@@ -335,8 +333,9 @@ class Simulator:
                 dfib_lam = fiber.dispersion * branch.wavecoord.step / disp0
                 fwhm = np.sqrt((lsf_fwhm) ** 2 + (dfib_lam) ** 2)
 
-                convolved = convolve_for_gaussian(resampled_v0, fwhm, boundary="extend")
-                resampled_v1 = resample_spectrum(branch.wavecoord.wave.value, tmp_lam, convolved)
+                convolved = convolve_for_gaussian(original, fwhm, boundary="extend")
+                resampled_v1 = resample_spectrum(branch.wavecoord.wave.value,
+                                                 wl_grid.value, convolved)
 
                 fiber_spec[branch.name] = resampled_v1 * (u.erg / (u.cm ** 2 * u.s * u.AA))
             obj_spec[fiber.id] = fiber_spec
