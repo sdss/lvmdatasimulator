@@ -640,7 +640,6 @@ class Simulator:
         noise_el = np.zeros((nfibers, branch.wavecoord.npix))
         snr = np.zeros((nfibers, branch.wavecoord.npix))
 
-
         for i, (fiber_id, spectra) in enumerate(self.output_exposure_noise.items()):
             fib_id.append(fiber_id)
             target_w_noise[i, :] = spectra["target"][branch.name]
@@ -687,7 +686,7 @@ class Simulator:
             constant = self.observation.exptime * branch.efficiency * self.telescope.aperture_area
             # constant2 = self.extinction[fiber_id][branch.name] * self.observation.airmass
             # applying telluric correction to noise
-            tmp_noise = exposure['noise'][branch.name] / (constant) # * 10 ** (-0.4 * constant2))
+            tmp_noise = exposure['noise'][branch.name] / (constant)  # * 10 ** (-0.4 * constant2))
 
             nout[branch.name] = epp2flam(branch.wavecoord.wave, tmp_noise, branch.wavecoord.step)
             stnout[branch.name] = exposure['snr'][branch.name]
