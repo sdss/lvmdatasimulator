@@ -24,7 +24,7 @@ from astropy.coordinates import SkyCoord
 from dataclasses import dataclass
 import functools
 from scipy.ndimage.interpolation import map_coordinates
-from scipy.interpolate import interp1d
+from scipy.interpolate import interp1d, interp2d
 # from typing import List
 import lvmdatasimulator
 from lvmdatasimulator import log
@@ -598,7 +598,7 @@ class ISM:
         self.pxscale = proj_plane_pixel_scales(self.wcs)[0] * 3600 * self.distance.to(u.pc) / 206265.
         self.content[0].header['width'] = (self.width, "Width of field of view, px")
         self.content[0].header['height'] = (self.height, "Height of field of view, px")
-        self.content[0].header['PhysRes'] = (self.pxscale.value, "Physical resolution, pc/arcsec")
+        self.content[0].header['PhysRes'] = (self.pxscale.value, "Physical resolution, pc/px")
         self.content[0].header['Dist'] = (self.distance.value, "Distance, kpc")
         self.content[0].header['Vsys'] = (self.distance.value, "Systemic Velocity, km/s")
         self.content[0].header['VelRes'] = (self.vel_resolution.value, "Velocity resolution, km/s/px")
@@ -708,6 +708,7 @@ class ISM:
                                 'perturb_degree': 8, # max. order of spherical harmonics to generate inhomogeneities
                                 'perturb_amplitude': 0.1, # relative max. amplitude of inhomogeneities,
                                 'perturb_scale': 200 * u.pc,  # spatial scale to generate inhomogeneities (DIG only)
+                                'distance': 50 * u.kpc,  # distance to the nebula (default is from ISM)
                                 'cloudy_id': None,  # id of pre-generated Cloudy model
                                 'cloudy_params': {'Z': 0.5, 'qH': 49., 'nH': 10, 'Teff': 30000, 'Rin': 0},  #
                                     parameters defining the pre-generated Cloudy model (used if spectrum_id is None)
@@ -732,8 +733,8 @@ class ISM:
             for k, v in zip(['max_brightness', 'max_extinction', 'thickness',
                              'expansion_velocity', 'sys_velocity',
                              'turbulent_sigma', 'perturb_degree',
-                             'perturb_amplitude', 'perturb_scale', 'radius'],
-                            [0, 0, 1., 0, self.sys_velocity, self.turbulent_sigma, 0, 0.1, 0, 0]):
+                             'perturb_amplitude', 'perturb_scale', 'radius', 'distance'],
+                            [0, 0, 1., 0, self.sys_velocity, self.turbulent_sigma, 0, 0.1, 0, 0, self.distance]):
                 set_default_dict_values(cur_obj, k, v)
             for k in ['max_brightness', 'max_extinction', 'radius']:
                 if cur_obj[k] < 0:
@@ -782,7 +783,7 @@ class ISM:
                                        sys_velocity=cur_obj['sys_velocity'],
                                        vel_gradient=0,
                                        spectrum_id=cloudy_model_index,
-                                       pxscale=self.pxscale,
+                                       pxscale=self.pxscale * (cur_obj['distance'].to(u.pc) / self.distance.to(u.pc)),
                                        perturb_scale=cur_obj['perturb_scale'],
                                        perturb_amplitude=cur_obj['perturb_amplitude'],
                                        width=self.width, height=self.height,
@@ -834,26 +835,30 @@ class ISM:
                                               spectral_axis=self.vel_grid,
                                               expansion_velocity=cur_obj.get('expansion_velocity'),
                                               thickness=cur_obj['thickness'],
-                                              radius=cur_obj['radius'], pxscale=self.pxscale,
+                                              radius=cur_obj['radius'],
+                                              pxscale=self.pxscale * (cur_obj['distance'].to(u.pc) /
+                                                                      self.distance.to(u.pc)),
                                               perturb_degree=cur_obj['perturb_degree'],
                                               perturb_amplitude=cur_obj['perturb_amplitude'],
                                               turbulent_sigma=cur_obj['turbulent_sigma'],
                                               sys_velocity=cur_obj['sys_velocity'],
                                               spectrum_id=cloudy_model_index,
-                                              linerat_constant=cur_obj['linerat_constant']
+                                              linerat_constant=cur_obj['linerat_constant'],
                                               )
                 elif cur_obj['type'] == "Cloud":
                     generated_object = Cloud(xc=x, yc=y,
                                              max_brightness=cur_obj.get('max_brightness'),
                                              max_extinction=cur_obj.get('max_extinction'),
                                              thickness=cur_obj['thickness'],
-                                             radius=cur_obj['radius'], pxscale=self.pxscale,
+                                             radius=cur_obj['radius'],
+                                             pxscale=self.pxscale * (cur_obj['distance'].to(u.pc) /
+                                                                     self.distance.to(u.pc)),
                                              perturb_degree=cur_obj['perturb_degree'],
                                              perturb_amplitude=cur_obj['perturb_amplitude'],
                                              spectrum_id=cloudy_model_index,
                                              turbulent_sigma=cur_obj['turbulent_sigma'],
                                              sys_velocity=cur_obj['sys_velocity'],
-                                             linerat_constant=cur_obj['linerat_constant']
+                                             linerat_constant=cur_obj['linerat_constant'],
                                              )
 
                 elif cur_obj['type'] == "Filament":
@@ -867,7 +872,8 @@ class ISM:
                                                 spectrum_id=cloudy_model_index,
                                                 turbulent_sigma=cur_obj['turbulent_sigma'],
                                                 sys_velocity=cur_obj['sys_velocity'],
-                                                pxscale=self.pxscale,
+                                                pxscale=self.pxscale * (cur_obj['distance'].to(u.pc) /
+                                                                        self.distance.to(u.pc)),
                                                 )
                 else:
                     log.warning("Unexpected type of the nebula #{0}: skip this one".format(ind_obj))
@@ -1032,7 +1038,7 @@ class ISM:
                    self.content[cur_ext].header['X0'] + self.content[cur_ext].header['NAXIS1']] += add_emission
         return map_2d * (proj_plane_pixel_scales(self.wcs)[0] * 3600) ** 2
 
-    def get_spectrum(self, wl_grid=None, aperture_mask=None):
+    def get_spectrum(self, wl_grid=None, aperture_mask=None, fibers_coords=None):
         if aperture_mask is None or (np.sum(aperture_mask) == 0) or (self.content[0].header['Nobj'] == 0):
             return None
         all_extensions = [hdu.header.get('EXTNAME') for hdu in self.content]
@@ -1046,13 +1052,6 @@ class ISM:
         wl_logscale = np.log(wl_grid.value)
         wl_logscale_highres = np.arange((np.round(wl_logscale[-1] - wl_logscale[0]) * 1e6
                                          ).astype(int)) * 1e-6 + np.round(wl_logscale[0], 6)
-        # delta_lr = np.roll(wl_grid.value, -1) - wl_grid.value
-        # delta_lr[-1] = delta_lr[-2]
-        # wl_highres = np.exp(wl_logscale_highres)
-        # delta_hr = np.roll(wl_highres, -1) - wl_highres
-        # delta_hr[-1] = delta_hr[-2]
-        # p = interp1d(wl_highres, delta_hr, assume_sorted=True)
-        # delta_hr = p(wl_grid.value)
         delta_lr = np.roll(wl_logscale, -1) - wl_logscale
         delta_lr[-1] = delta_lr[-2]
 
@@ -1065,15 +1064,19 @@ class ISM:
         aperture_mask_sub = aperture_mask[ystart: yfin + 1, xstart: xfin + 1]
         xx_sub, yy_sub = np.meshgrid(np.arange(xfin - xstart + 1), np.arange(yfin - ystart + 1))
         n_apertures = np.max(aperture_mask)
-        aperture_centers = np.array([(np.round(np.mean(xx[aperture_mask == (ap_ind + 1)])).astype(int),
-                                     np.round(np.mean(yy[aperture_mask == (ap_ind + 1)])).astype(int))
-                                     for ap_ind in range(n_apertures)])
+        # aperture_centers = np.array([(np.round(np.mean(xx[aperture_mask == (ap_ind + 1)])).astype(int),
+        #                              np.round(np.mean(yy[aperture_mask == (ap_ind + 1)])).astype(int))
+        #                              for ap_ind in range(n_apertures)])
         spectrum = np.zeros(shape=(n_apertures, len(wl_grid)), dtype=float)
 
-        radius = np.round(np.sqrt(np.sum(aperture_mask == n_apertures) / np.pi)).astype(int)
-        size = 2 * radius + 1
+        radius = fibers_coords[0, 2]
+        size = np.round(2 * radius).astype(int)
         if size % 2 == 0:
             size += 1
+        # radius = np.round(np.sqrt(np.sum(aperture_mask == n_apertures) / np.pi)).astype(int)
+        # size = 2 * radius + 1
+        # if size % 2 == 0:
+        #     size += 1
         kern_array = np.zeros(shape=(1, size, size), dtype=int)
         xx_kern, yy_kern = np.meshgrid(np.arange(size), np.arange(size))
         rec = (xx_kern - radius) ** 2 + (yy_kern - radius) ** 2 <= radius ** 2
@@ -1098,13 +1101,13 @@ class ISM:
                                          np.arange(self.content[cur_ext].data.shape[0]))
             cur_mask_in_neb[(xx_neb >= (xstart - x0)) & (xx_neb <= (xfin - x0)) &
                             (yy_neb >= (ystart - y0)) & (yy_neb <= (yfin - y0))] = True
-            xstart_neb = np.min(xx_neb[cur_mask_in_neb])
-            ystart_neb = np.min(yy_neb[cur_mask_in_neb])
-            xfin_neb = np.max(xx_neb[cur_mask_in_neb])
-            yfin_neb = np.max(yy_neb[cur_mask_in_neb])
+            xstart_neb = np.min(xx_neb[cur_mask_in_neb])  # np.clip(np.min(xx_neb[cur_mask_in_neb]) - 2, 0, nx - 1)
+            ystart_neb = np.min(yy_neb[cur_mask_in_neb])  # np.clip(np.min(yy_neb[cur_mask_in_neb]) - 2, 0, ny - 1)
+            xfin_neb = np.max(xx_neb[cur_mask_in_neb])  # np.clip(np.max(xx_neb[cur_mask_in_neb]) + 2, 0, nx - 1)
+            yfin_neb = np.max(yy_neb[cur_mask_in_neb])  # np.clip(np.max(yy_neb[cur_mask_in_neb]) + 2, 0, ny - 1)
 
-            selected_apertures = np.flatnonzero((aperture_centers[:, 0] >= x0) & (aperture_centers[:, 0] <= (x0 + nx)) &
-                                                (aperture_centers[:, 1] >= y0) & (aperture_centers[:, 1] <= (y0 + ny)))
+            selected_apertures = np.flatnonzero((fibers_coords[:, 0] >= x0) & (fibers_coords[:, 0] <= (x0 + nx)) &
+                                                (fibers_coords[:, 1] >= y0) & (fibers_coords[:, 1] <= (y0 + ny)))
 
             if self.content[cur_ext].header.get("DARK"):
                 # !!! ADD TREATEMENT OF EXTINCTION !!!
@@ -1151,8 +1154,9 @@ class ISM:
                                     dtype=float) + self.turbulent_sigma.value
                 lsf = np.exp(-np.power((self.vel_grid.value[:, None, None] - vel[None, :, :]) / disp[
                                                                                                 None, :, :], 2.) / 2)
-                lsf = lsf / np.sum(lsf)
+                lsf = lsf / np.sum(lsf, axis=0)
 
+            aperture_centers = np.round(fibers_coords).astype(int)
             if all_fluxes.shape[0] == 1:
                 data_in_apertures = \
                     convolve_fft(lsf * all_fluxes[0][None, :, :], kern,
@@ -1161,6 +1165,21 @@ class ISM:
                                                          aperture_centers[selected_apertures, 0] - xstart_neb - x0]
                 data_in_apertures = data_in_apertures.reshape((1, data_in_apertures.shape[0],
                                                                data_in_apertures.shape[1]))
+
+                # data_convolved = \
+                #     convolve_fft(lsf * all_fluxes[0][None, :, :], kern,
+                #                  normalize_kernel=False)
+                # data_in_apertures = np.zeros(shape=(1, data_convolved.shape[0],
+                #                                     len(selected_apertures)), dtype=float)
+                # rec_neb = (xx_neb >= xstart_neb) & (xx_neb <= xfin_neb) & (yy_neb >= ystart_neb) & (yy_neb <= yfin_neb)
+                # xx_neb_sub = xx_neb[rec_neb]
+                # yy_neb_sub = yy_neb[rec_neb]
+                # for ind in range(data_in_apertures.shape[1]):
+                #     p = interp2d(xx_neb_sub, yy_neb_sub, data_convolved[ind, :, :])
+                #     data_in_apertures[0, ind, :] = p(fibers_coords[selected_apertures, 0] - xstart_neb - x0,
+                #                                      fibers_coords[selected_apertures, 1] - ystart_neb - y0)
+
+
             else:
                 data_in_apertures = Parallel(n_jobs=lvmdatasimulator.n_process)(
                     delayed(convolve_cube)(lsf * line_data[None, :, :], kern,
@@ -1187,9 +1206,10 @@ class ISM:
             line_highres_log = p(wl_logscale_lsf_highres)
             line_highres_log = line_highres_log / np.sum(line_highres_log, axis=1)[:, None]
             if flux_norm_in_apertures.shape[1] == 1:
+                print(flux_norm_in_apertures)
+
                 flux_norm_in_apertures = flux_norm_in_apertures * \
                                     self.content[my_comp + "_FLUXRATIOS"].data[1, None, :]
-
             wl_indexes = np.round((np.log(all_wavelength) - wl_logscale_highres[0]) * 1e6).astype(int)
             rec = (wl_indexes > 0) & (wl_indexes < len(wl_logscale_highres))
             spectrum_highres_log = np.zeros(shape=(len(selected_apertures), len(wl_logscale_highres)), dtype=float)

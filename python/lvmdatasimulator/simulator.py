@@ -27,6 +27,7 @@ from astropy.io import ascii, fits
 from dataclasses import dataclass
 from astropy.convolution import Gaussian1DKernel, convolve
 
+import lvmdatasimulator
 from lvmdatasimulator.instrument import Spectrograph
 from lvmdatasimulator.field import LVMField
 from lvmdatasimulator.fibers import FiberBundle
@@ -34,7 +35,7 @@ from lvmdatasimulator.observation import Observation
 from lvmdatasimulator.telescope import Telescope
 from lvmdatasimulator import log, ROOT_DIR
 from lvmdatasimulator.utils import round_up_to_odd
-
+from joblib import Parallel, delayed
 import os
 import sys
 
@@ -341,6 +342,29 @@ class Simulator:
             obj_spec[fiber.id] = fiber_spec
         return obj_spec
 
+    def _simulate_observations_single_fiber(self, fiber):
+        spectrum = self.target_spectra[fiber.id]
+
+        # convert spectra to electrons
+        tmp_target = self._obj_to_electrons(spectrum, fiber.id)  # from units to electrons
+        tmp_sky = self._sky_to_electrons(self.sky[fiber.id])
+
+        # create 2D spectra
+        tmp_target_2d = self._to_2d(fiber, tmp_target)
+        tmp_sky_2d = self._to_2d(fiber, tmp_sky)
+        tmp_noise_2d = self._make_noise(tmp_target_2d, tmp_sky_2d)
+
+        # extract apertures
+        single_exposure = self._extract_aperture(tmp_target_2d, tmp_noise_2d, tmp_sky_2d)
+
+        # flux calibrate 1D spectra
+        calibrated = self._flux_calibration(single_exposure)
+        self.output_exposure[fiber.id] = calibrated
+
+        # create a realistic spectrum with noise
+        self.output_exposure_noise[fiber.id] = self._add_noise(single_exposure)
+        return
+
     def simulate_observations(self):
         """
         Main function of the simulators. It takes everything we have done before, and simulate
@@ -348,28 +372,11 @@ class Simulator:
         """
         log.info('Simulating observations.')
 
-        for fiber in self.bundle.fibers:
-            spectrum = self.target_spectra[fiber.id]
-
-            # convert spectra to electrons
-            tmp_target = self._obj_to_electrons(spectrum, fiber.id)  # from units to electrons
-            tmp_sky = self._sky_to_electrons(self.sky[fiber.id])
-
-            # create 2D spectra
-            tmp_target_2d = self._to_2d(fiber, tmp_target)
-            tmp_sky_2d = self._to_2d(fiber, tmp_sky)
-            tmp_noise_2d = self._make_noise(tmp_target_2d, tmp_sky_2d)
-
-            # extract apertures
-            single_exposure = self._extract_aperture(tmp_target_2d, tmp_noise_2d, tmp_sky_2d)
-
-            # flux calibrate 1D spectra
-            calibrated = self._flux_calibration(single_exposure)
-            self.output_exposure[fiber.id] = calibrated
-
-            # create a realistic spectrum with noise
-            self.output_exposure_noise[fiber.id] = self._add_noise(single_exposure)
-
+        if len(self.bundle.fibers) < 3:
+            _ = [self._simulate_observations_single_fiber(fiber) for fiber in self.bundle.fibers]
+        else:
+            _ = Parallel(n_jobs=lvmdatasimulator.n_process)(delayed(self._simulate_observations_single_fiber)(fiber)
+                                                            for fiber in self.bundle.fibers)
         return
 
     def save_outputs(self):
