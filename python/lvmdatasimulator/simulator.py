@@ -256,7 +256,8 @@ class Simulator:
 
         days_moon = self.observation.days_from_new_moon
         sky_file = f"{ROOT_DIR}/data/sky/LVM_{self.telescope.name}_SKY_{days_moon}.dat"
-        data = ascii.read(sky_file)
+        area_fiber = np.pi * (self.bundlefibers[0].diameter / 2)**2
+        data = ascii.read(sky_file) * area_fiber  # from Sbrightness to FLUX
 
         return self._resample_and_convolve(data["col1"], data["col2"],
                                            u.erg / (u.cm ** 2 * u.s * u.AA))
