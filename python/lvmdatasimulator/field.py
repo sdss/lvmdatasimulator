@@ -190,12 +190,13 @@ class LVMField:
         ax.set_xlabel('RA (J2000)', fontsize=15)
         ax.set_ylabel('Dec (J2000)', fontsize=15)
 
-        for fiber in fibers:
-            fiber_coord = self.coord.spherical_offsets_by(fiber.x, fiber.y)
-            p = SphericalCircle((fiber_coord.ra, fiber_coord.dec), fiber.diameter / 2,
-                                edgecolor='green', facecolor='none',
-                                transform=ax.get_transform('fk5'))
-            ax.add_patch(p)
+        if fibers is not None:
+            for fiber in fibers:
+                fiber_coord = self.coord.spherical_offsets_by(fiber.x, fiber.y)
+                p = SphericalCircle((fiber_coord.ra, fiber_coord.dec), fiber.diameter / 2,
+                                    edgecolor='green', facecolor='none',
+                                    transform=ax.get_transform('fk5'))
+                ax.add_patch(p)
         plt.show()
 
     def _plot_stars(self, ax):
