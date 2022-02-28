@@ -354,7 +354,7 @@ class LVMField:
             spectrum[: len(spectrum_ism), :] += spectrum_ism
         return np.array(fiber_id), spectrum / dl.value / u.AA
 
-      
+
 def run_test(ra=10., dec=-10., spaxel=1 / 3600., size=1000 / 60.):
     # my_nebulae = [
     #         {"type": 'Bubble', 'expansion_velocity': 45 * u.km/u.s,
@@ -437,4 +437,3 @@ if __name__ == '__main__':
     #         stats.sort_stats('time')
     #         stats.dump_stats('.prof_stats')  # the name you have to give to snakeviz
     #         stats.print_stats()
-
