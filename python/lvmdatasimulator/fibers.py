@@ -37,15 +37,9 @@ class Fiber:
 
 class FiberBundle:
 
-    def __init__(self, bundle_type='central'):
+    def __init__(self, bundle_name='central'):
 
-        if bundle_type not in ['central', 'slit1', 'slit2', 'slit3', 'full']:
-            error = f'{bundle_type} is not an accepted bundle.' + \
-                    'Allowed values: central, slit1, slit2, slit3, full.'
-            log.error(error)
-            raise ValueError(error)
-
-        self.bundle_type = bundle_type
+        self.bundle_name = bundle_name
 
         self.fibers = self.build_bundle()
 
@@ -53,24 +47,14 @@ class FiberBundle:
 
     def build_bundle(self):
 
-        if self.bundle_type == 'central':
+        if self.bundle_name == 'central':
             fiber = Fiber()
             log.info('Creating only the central fiber')
             return [fiber]
-
-        elif self.bundle_type == 'full':
-            log.info('Creating the full fiber bundle')
-            fiber1 = self._read_fiber_file('slit1')
-            fiber2 = self._read_fiber_file('slit2')
-            fiber3 = self._read_fiber_file('slit3')
-            # fibers = self._read_fiber_file('test_slit')
-            return fiber1 + fiber2 + fiber3
-            # return fibers
-
         else:
-            log.info(f'Creating only {self.bundle_type}.')
+            log.info(f'Creating {self.bundle_name} bundle.')
 
-            return self._read_fiber_file(self.bundle_type)
+            return self._read_fiber_file(self.bundle_name)
 
     @staticmethod
     def _read_fiber_file(slit):
