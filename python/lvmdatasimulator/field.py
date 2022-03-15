@@ -180,7 +180,7 @@ class LVMField:
         fig, ax = plt.subplots(1, 1, subplot_kw=dict(projection=self.wcs))
         if self.ism_map is None:
             self._get_ism_map()
-        norm = ImageNormalize(self.ism_map, interval=PercentileInterval(94),
+        norm = ImageNormalize(self.ism_map, interval=PercentileInterval(97),
                               stretch=AsinhStretch())
         img = ax.imshow(self.ism_map, norm=norm, cmap=plt.cm.Oranges)
         if self.starlist is not None:
@@ -343,7 +343,8 @@ class LVMField:
                 yc_stars = np.round(self.starlist.stars_table['y']).astype(int)
                 stars_id = np.flatnonzero(aperture_mask[yc_stars, xc_stars] == (index + 1))
                 for star_id in stars_id:
-                    p = interp1d(self.starlist.wave.to(u.AA).value, self.starlist.spectra[star_id])
+                    p = interp1d(self.starlist.wave.to(u.AA).value, self.starlist.spectra[star_id], bounds_error=False,
+                                 fill_value='extrapolate')
                     # !!! APPLY EXTINCTION BY DARK NEBULAE TO STARS !!!
                     spectrum[index, :] += (p(wl_grid.value) * dl.value * fluxunit * u.arcsec ** 2)
         if np.max(aperture_mask) < fibers_coords.shape[0]:

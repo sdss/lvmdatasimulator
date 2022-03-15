@@ -6,31 +6,24 @@
 # @License: BSD 3-Clause
 # @Copyright: Oleg Egorov, Enrico Congiu
 
-# import scipy.optimize
-# import sys
 import os.path
 from astropy import units as u
 from astropy import constants as c
 import numpy as np
-from astropy.io import fits
-# from matplotlib import pyplot as plt
-# from scipy.integrate import nquad
-# import tqdm
-# from multiprocessing import Pool
+from astropy.io import fits, ascii
 from scipy.special import sph_harm
 from astropy.wcs import WCS
 from astropy.wcs.utils import proj_plane_pixel_scales
 from astropy.coordinates import SkyCoord
+from astropy.modeling.models import Sersic2D
 from dataclasses import dataclass
 import functools
 from scipy.ndimage.interpolation import map_coordinates
 from scipy.interpolate import interp1d, interp2d
-# from typing import List
 import lvmdatasimulator
 from lvmdatasimulator import log
 import progressbar
 from joblib import Parallel, delayed
-# import time
 from astropy.convolution import convolve_fft, kernels
 
 fluxunit = u.erg / (u.cm ** 2 * u.s * u.arcsec ** 2)
@@ -138,7 +131,7 @@ def find_model_id(file=lvmdatasimulator.CLOUDY_MODELS,
 
 
 def convolve_cube(cube, kernel, selected_points_y, selected_points_x):
-    return convolve_fft(cube, kernel, normalize_kernel=False)[:, selected_points_y, selected_points_x]
+    return convolve_fft(cube, kernel, normalize_kernel=False, allow_huge=True)[:, selected_points_y, selected_points_x]
 
 
 @dataclass
@@ -156,7 +149,7 @@ class Nebula:
     width: int = 101  # full width of cartesian grid, pix (should be odd)
     height: int = 101  # full height of cartesian grid, pix (should be odd)
     pxscale: u.pc = 0.01 * u.pc  # pixel size in pc
-    spectrum_id: int = None  # ID of a template Cloudy spectrum for this nebula
+    spectrum_id: int = None  # ID of a template Cloudy emission spectrum for this nebula
     sys_velocity: velunit = 0 * velunit  # Systemic velocity
     turbulent_sigma: velunit = 10 * velunit  # Velocity dispersion due to turbulence; included in calculations of LSF
     max_brightness: fluxunit = 1e-15 * fluxunit
@@ -224,14 +217,28 @@ class Nebula:
 
     @functools.cached_property
     def brightness_skyplane(self):
+        """
+        Project the 3D nebula onto sky plane (for emission or continuum sources)
+        """
+        # if self.max_brightness > 0:
+        #     map2d = np.nansum(self._brightness_3d_cartesian, 2)
+        #     return map2d / np.max(map2d) * self.max_brightness
+        # else:
+        #     return None
         if self.max_brightness > 0:
-            map2d = np.nansum(self._brightness_3d_cartesian, 2)
-            return map2d / np.max(map2d) * self.max_brightness
+            norm_max = self.max_brightness
         else:
-            return None
+            norm_max = 1
+        map2d = np.nansum(self._brightness_3d_cartesian, 2)
+        return map2d / np.max(map2d) * norm_max
+        # else:
+        #     return None
 
     @functools.cached_property
     def brightness_skyplane_lines(self):
+        """
+        Project the 3D emission nebula line onto sky plane (return images in each emission line)
+        """
         if self.max_brightness > 0:
             map2d = np.nansum(self._brightness_4d_cartesian, 3)
             return map2d / np.max(map2d[self._ref_line_id, :, :]) * self.max_brightness
@@ -240,6 +247,9 @@ class Nebula:
 
     @functools.cached_property
     def extinction_skyplane(self):
+        """
+        Project the 3D nebula onto sky plane (for dark clouds)
+        """
         if self.max_extinction > 0:
             map2d = np.nansum(self._brightness_3d_cartesian, 2)
             return map2d / np.max(map2d) * self._max_density / (1.8e21 / (u.cm ** 2 * u.mag))
@@ -360,6 +370,48 @@ class Filament(Nebula):
         return cart_data.reshape([len(self._cartesian_x_grid),
                                   len(self._cartesian_y_grid),
                                   len(self._cartesian_z_grid)]).T
+
+
+@dataclass
+class Galaxy(Nebula):
+    """
+    Class defining the galaxy object (set up it as Sersic2D profile assuming it has continuum and emission components)
+    """
+    PA: u.degree = 90 * u.degree  # position angle of the major axis
+    ax_ratio: float = 0.7  # ratio of minor/major axes
+    r_eff: u.kpc = 1 * u.kpc  # Effective radius in kpc
+    rad_lim: float = 3.  # Maximum radius for calculations (in R_eff)
+    n: float = 1.  # Sersic index
+    vel_rot: velunit = 0 * velunit  # Rotational velocity (not implemented yet)
+
+    def __post_init__(self):
+        self._npix_los = 1
+        self.r_max = self.r_eff.to(u.pc).value / self.pxscale.to(u.pc).value * self.rad_lim
+        self.width = (np.round(np.abs(self.r_max * np.sin(self.PA)) +
+                               np.abs(self.r_max * self.ax_ratio * np.cos(self.PA))).astype(int) * 2 + 1).value
+        self.height = (np.round(np.abs(self.r_max * np.cos(self.PA)) +
+                                np.abs(self.r_max * self.ax_ratio * np.sin(self.PA))).astype(int) * 2 + 1).value
+        if (self.xc is not None) and (self.yc is not None):
+            self.x0 = (self.xc - np.round((self.width - 1) / 2)).astype(int)
+            self.y0 = (self.yc - np.round((self.height - 1) / 2)).astype(int)
+        elif (self.x0 is not None) and (self.y0 is not None):
+            self.xc = (self.x0 + np.round((self.width - 1) / 2)).astype(int)
+            self.yc = (self.y0 + np.round((self.height - 1) / 2)).astype(int)
+        self._ref_line_id = 0
+        self.linerat_constant = True  # True if the ratio of line fluxes shouldn't change across the nebula
+
+    @functools.cached_property
+    def _brightness_3d_cartesian(self):
+        """
+        Method to obtain the brightness (or density) distribution of the nebula in cartesian coordinates
+        """
+        xx, yy = np.meshgrid(np.arange(self.width), np.arange(self.height))
+        mod = Sersic2D(amplitude=1, r_eff=(self.r_eff.to(u.pc) / self.pxscale.to(u.pc)).value,
+                       n=self.n, x_0=(self.width - 1) / 2, y_0=(self.height - 1) / 2,
+                       ellip=1 - self.ax_ratio, theta=(self.PA + 90 * u.degree).to(u.radian).value)
+        brt = mod(xx, yy)
+        brt = brt.reshape(self.height, self.width, 1)
+        return brt
 
 
 @dataclass
@@ -609,11 +661,58 @@ class ISM:
     def vel_resolution(self):
         return (self.spec_resolution / self.npix_line / (10000 * u.Angstrom) * c.c).to(velunit)
 
+    def _get_continuum(self, my_comp, wl_grid):
+        """
+        Properly extracts continuum for current nebula taking into account its shape and surface brightness
+        :param my_comp:
+        :param wl_grid:
+        :return: continuum
+        """
+        cont_type = self.content[my_comp + "_CONTINUUM"].header.get("CONTTYPE")
+        continuum = self.content[my_comp + "_CONTINUUM"].data
+        cont_norm = self.content[my_comp + "_CONTINUUM"].header.get("CONTFLUX")
+        cont_norm_wl = self.content[my_comp + "_CONTINUUM"].header.get("CONTWL")
+        if cont_type.lower() == 'model':
+            p = interp1d(continuum[0, :], continuum[1, :], assume_sorted=True,
+                         bounds_error=False, fill_value='extrapolate')
+            continuum = p(wl_grid)
+        elif cont_type.lower() == 'poly':
+            p = np.poly1d(continuum)
+            continuum = p(wl_grid)
+        elif cont_type.lower() == 'bb':
+            continuum = 1 / wl_grid ** 5 / (np.exp(6.63e-27 * 3e10 / wl_grid / 1e-8 / continuum / 1.38e-16) - 1)
+
+        t_filter = None
+        if type(cont_norm_wl) == str:
+            file_filter = os.path.join(lvmdatasimulator.ROOT_DIR, 'data', 'instrument', 'filters', cont_norm_wl+".dat")
+            if not os.path.isfile(file_filter):
+                log.warning("Cannot find filter {0}. "
+                            "Default Wavelength = 5500A will be used for continuum normalization".format(cont_norm_wl))
+                cont_norm_wl = 5500.
+                t_filter = None
+            else:
+                t_filter = ascii.read(file_filter, names=['lambda', 'transmission'])
+                cont_norm_wl = np.sum(t_filter['lambda'] * t_filter['transmission']) / np.sum(t_filter['transmission'])
+        if t_filter is None:
+            cont_model_max = continuum[np.argmin(abs(wl_grid - cont_norm_wl))]
+        else:
+            dl = np.roll(t_filter['lambda'], -1) - t_filter['lambda']
+            dl[-1] = dl[-2]
+            w_filter = np.sum(dl * t_filter['transmission'])/np.max(t_filter['transmission'])
+            p = interp1d(t_filter['lambda'], t_filter['transmission'], assume_sorted=True,
+                         fill_value=0, bounds_error=False)
+            cont_model_max = np.sum(continuum * p(wl_grid)) / w_filter
+        if ~np.isfinite(cont_norm) or cont_norm <= 0:
+            cont_norm = self.content[my_comp + "_CONTINUUM"].header.get("CONTMAG") * u.ABmag
+            cont_norm = cont_norm.to(u.STmag, u.spectral_density(cont_norm_wl * u.AA)).to(u.erg/u.s/u.cm**2/u.AA).value
+        return continuum / cont_model_max * cont_norm * (wl_grid[1] - wl_grid[0])
+
     def _add_fits_extension(self, name, value, obj_to_add, zorder=0, cur_wavelength=0, add_fits_kw=None,
                             add_counter=False):
-        self.content.append(fits.ImageHDU(value, name=name))
+        self.content.append(fits.ImageHDU(np.atleast_1d(value), name=name))
         self.content[-1].header['Nebtype'] = (type(obj_to_add).__name__, "Type of the nebula")
-        self.content[-1].header['Dark'] = ((obj_to_add.max_brightness <= 0), " Emitting or absorbing nebula?")
+        is_dark = ((obj_to_add.max_brightness <= 0) and (obj_to_add.max_extinction > 0))
+        self.content[-1].header['Dark'] = (is_dark, " Emitting or absorbing nebula?")
         self.content[-1].header['X0'] = (obj_to_add.x0, "Position in the field of view")
         self.content[-1].header['Y0'] = (obj_to_add.y0, "Position in the field of view")
         self.content[-1].header['Zorder'] = (zorder, "Z-order in the field of view")
@@ -623,9 +722,9 @@ class ISM:
             self.content[-1].header['PertAmp'] = (obj_to_add.perturb_amplitude, "Max amplitude of random perturb.")
         if type(obj_to_add) in [Filament]:
             self.content[-1].header['Width'] = (obj_to_add.width.to_value(u.pc), 'Width of the filament, pc')
-        if obj_to_add.max_brightness <= 0:
+        if (obj_to_add.max_brightness <= 0) and (obj_to_add.max_extinction > 0):
             self.content[-1].header['MaxExt'] = (obj_to_add.max_extinction.value, "Max extinction, mag/pix")
-        else:
+        elif obj_to_add.max_brightness > 0:
             self.content[-1].header['MaxBrt'] = (obj_to_add.max_brightness.value, "Max brightness, erg/s/cm^2/arcsec^2")
         if type(obj_to_add) == Bubble:
             self.content[-1].header['Vexp'] = (obj_to_add.expansion_velocity.to_value(velunit),
@@ -642,15 +741,15 @@ class ISM:
         if add_counter:
             self.content[0].header['Nobj'] = (self.content[0].header['Nobj'] + 1, "Total number of nebulae")
 
-    def add_nebula(self, obj_to_add, obj_id=0, zorder=0, add_fits_kw=None):
+    def add_nebula(self, obj_to_add, obj_id=0, zorder=0, add_fits_kw=None, continuum=None):
         """
         Method to add the particular nebula to the ISM object and to the output multi-extensions fits file
         """
-        if type(obj_to_add) not in [Nebula, Bubble, Filament, DIG, Cloud]:
+        if type(obj_to_add) not in [Nebula, Bubble, Filament, DIG, Cloud, Galaxy]:
             log.warning('Skip nebula of wrong type ({0})'.format(type(obj_to_add)))
             return
 
-        if (obj_to_add.max_brightness <= 0) and (obj_to_add.max_extinction <= 0):
+        if (obj_to_add.max_brightness <= 0) and (obj_to_add.max_extinction <= 0) and (continuum is None):
             log.warning('Skip nebula with zero extinction and brightness')
             return
         if obj_to_add.max_brightness > 0:
@@ -659,8 +758,11 @@ class ISM:
                 brt_4d = obj_to_add.brightness_skyplane_lines.value
             else:
                 brt_4d = None
-        else:
+        elif obj_to_add.max_extinction > 0:
             brt = obj_to_add.extinction_skyplane.value
+            brt_4d = None
+        elif continuum is not None:
+            brt = obj_to_add.brightness_skyplane
             brt_4d = None
 
         self._add_fits_extension(name="Comp_{0}_Brightness".format(obj_id), value=brt,
@@ -683,7 +785,10 @@ class ISM:
         if type(obj_to_add) == Bubble:
             self._add_fits_extension(name="Comp_{0}_LineProfile".format(obj_id), value=obj_to_add.vel_field.value,
                                      obj_to_add=obj_to_add, zorder=zorder, add_fits_kw=add_fits_kw)
-        # self.last_id += 1
+
+        if continuum is not None:
+            self._add_fits_extension(name="Comp_{0}_Continuum".format(obj_id), value=continuum,
+                                     obj_to_add=obj_to_add, zorder=zorder, add_fits_kw=add_fits_kw)
         return self.content
 
     def save_ism(self, filename):
@@ -706,13 +811,18 @@ class ISM:
                                 RA: "08h12m13s",
                                 DEC: "-20d14m13s",
                                 'perturb_degree': 8, # max. order of spherical harmonics to generate inhomogeneities
-                                'perturb_amplitude': 0.1, # relative max. amplitude of inhomogeneities,
+                                'p  erturb_amplitude': 0.1, # relative max. amplitude of inhomogeneities,
                                 'perturb_scale': 200 * u.pc,  # spatial scale to generate inhomogeneities (DIG only)
                                 'distance': 50 * u.kpc,  # distance to the nebula (default is from ISM)
                                 'cloudy_id': None,  # id of pre-generated Cloudy model
                                 'cloudy_params': {'Z': 0.5, 'qH': 49., 'nH': 10, 'Teff': 30000, 'Rin': 0},  #
                                     parameters defining the pre-generated Cloudy model (used if spectrum_id is None)
-                                'linerat_constant': False #  if True -> lines ratios doesn't vary across Cloud/Bubble
+                                'linerat_constant': False #  if True -> lines ratios don't vary across Cloud/Bubble
+                                'continuum_type': 'BB' or 'Model' or 'Poly' # type of the continuum model
+                                'continuum_data': model_id or [poly_coefficients] or Teff # value defining cont. shape
+                                'continuum_flux': 1e-16 * u.erg / u.cm ** 2 / u.s / u.arcsec **2 / u.AA,
+                                'continuum_mag': 22 * u.mag,
+                                'continuum_wl': 5500, # could be also R, V, B
                                 }]
         """
         if type(all_objects) is dict:
@@ -720,7 +830,7 @@ class ISM:
         if type(all_objects) not in [list, tuple]:
             log.warning('Cannot generate nebulae as the input is not a list or tuple')
             return None
-        all_objects = [cobj for cobj in all_objects if cobj.get('type') in ['Nebula', 'Bubble',
+        all_objects = [cobj for cobj in all_objects if cobj.get('type') in ['Nebula', 'Bubble', 'Galaxy',
                                                                             'Filament', 'DIG', 'Cloud']]
         n_objects = len(all_objects)
         log.info("Start generating {} nebulae".format(n_objects))
@@ -733,14 +843,18 @@ class ISM:
             for k, v in zip(['max_brightness', 'max_extinction', 'thickness',
                              'expansion_velocity', 'sys_velocity',
                              'turbulent_sigma', 'perturb_degree',
-                             'perturb_amplitude', 'perturb_scale', 'radius', 'distance'],
-                            [0, 0, 1., 0, self.sys_velocity, self.turbulent_sigma, 0, 0.1, 0, 0, self.distance]):
+                             'perturb_amplitude', 'perturb_scale', 'radius', 'distance',
+                             'continuum_type', 'continuum_data', 'continuum_flux', 'continuum_mag', 'continuum_wl'],
+                            [0, 0, 1., 0, self.sys_velocity, self.turbulent_sigma, 0, 0.1, 0, 0, self.distance,
+                             None, None, 0, None, 5500.]):
                 set_default_dict_values(cur_obj, k, v)
-            for k in ['max_brightness', 'max_extinction', 'radius']:
+            for k in ['max_brightness', 'max_extinction', 'radius', 'continuum_flux']:
                 if cur_obj[k] < 0:
                     cur_obj[k] = 0
 
-            if (cur_obj['max_brightness'] == 0) and (cur_obj['max_extinction'] == 0):
+            if (cur_obj['max_brightness'] == 0) and (cur_obj['max_extinction'] == 0) and \
+                    (((cur_obj['continuum_mag'] is None) and (cur_obj['continuum_flux'] == 0)) or
+                     (cur_obj['continuum_data'] is None) or (cur_obj['continuum_type'] is None)):
                 log.warning("Wrong set of parameters for the nebula #{0}: skip this one".format(ind_obj))
                 continue
 
@@ -775,7 +889,8 @@ class ISM:
                 if not cur_obj.get('max_brightness'):
                     log.warning("Wrong set of parameters for the nebula #{0}: skip this one".format(ind_obj))
                     continue
-                cur_obj['zorder'] = -1
+                if not cur_obj.get('zorder'):
+                    cur_obj['zorder'] = -1
                 if cur_obj['perturb_scale'] < 0:
                     cur_obj['perturb_scale'] = 0
                 generated_object = DIG(max_brightness=cur_obj.get('max_brightness'),
@@ -802,6 +917,16 @@ class ISM:
                 if cur_obj['type'] == 'Filament' and not (('length' in cur_obj) and ('PA' in cur_obj)):
                     log.warning("Wrong set of parameters for the nebula #{0}: skip this one".format(ind_obj))
                     continue
+                if cur_obj['type'] == 'Galaxy' and not (('r_eff' in cur_obj) and ('PA' in cur_obj) and
+                                                        ('ax_ratio' in cur_obj)):
+                    log.warning("Wrong set of parameters for the nebula #{0}: skip this one".format(ind_obj))
+                    continue
+                if cur_obj['type'] == 'Galaxy':
+                    if 'n' not in cur_obj:
+                        log.warning("Set default Sersic index n=1 for the nebula #{0}".format(ind_obj))
+                        cur_obj['n'] = 1
+                    if 'rad_lim' not in cur_obj:
+                        cur_obj['rad_lim'] = 3.
 
                 if not (cur_obj.get('X') and cur_obj.get('Y')):
                     radec = SkyCoord(ra=cur_obj.get('RA'), dec=cur_obj.get('DEC'))
@@ -825,6 +950,7 @@ class ISM:
                         cur_obj['perturb_degree'] = 0
 
                 elif cur_obj['type'] == 'Filament' and ('width' not in cur_obj):
+                    log.warning("Set default width of the filament 0.1 pc for the nebula #{0}".format(ind_obj))
                     cur_obj['width'] = 0.1 * u.pc
 
                 # ==== Start calculations of different nebulae
@@ -875,6 +1001,23 @@ class ISM:
                                                 pxscale=self.pxscale * (cur_obj['distance'].to(u.pc) /
                                                                         self.distance.to(u.pc)),
                                                 )
+
+                elif cur_obj['type'] == "Galaxy":
+                    generated_object = Galaxy(xc=x, yc=y,
+                                              max_brightness=cur_obj.get('max_brightness'),
+                                              max_extinction=cur_obj.get('max_extinction'),
+                                              r_eff=cur_obj['r_eff'],
+                                              rad_lim=cur_obj['rad_lim'],
+                                              ax_ratio=cur_obj['ax_ratio'],
+                                              PA=cur_obj['PA'],
+                                              n=cur_obj['n'],
+                                              vel_rot=0,
+                                              spectrum_id=cloudy_model_index,
+                                              turbulent_sigma=cur_obj['turbulent_sigma'],
+                                              sys_velocity=cur_obj['sys_velocity'],
+                                              pxscale=self.pxscale * (cur_obj['distance'].to(u.pc) /
+                                                                      self.distance.to(u.pc)),
+                                              )
                 else:
                     log.warning("Unexpected type of the nebula #{0}: skip this one".format(ind_obj))
                     continue
@@ -886,7 +1029,40 @@ class ISM:
                 add_fits_kw = {"Model_ID": cloudy_model_id, "LineRat": lr}
             else:
                 add_fits_kw = None
-            self.add_nebula(generated_object, obj_id=obj_id, zorder=cur_obj.get('zorder'), add_fits_kw=add_fits_kw)
+
+            continuum = None
+            if cur_obj['continuum_type'] is not None and cur_obj['continuum_data'] is not None \
+                    and cur_obj['continuum_type'].lower() in ['bb', 'poly', 'model']:
+
+                if cur_obj['continuum_type'].lower() == 'model' and lvmdatasimulator.CONTINUUM_MODELS is not None:
+                    with fits.open(lvmdatasimulator.CONTINUUM_MODELS) as hdu:
+                        if cur_obj['continuum_data'] >= hdu[0].data.shape[0]:
+                            log.warning("Wrong continuum model ID for nebula #{0}".format(obj_id))
+                        else:
+                            wlscale = (np.arange(hdu[0].data.shape[1]) - hdu[0].header['CRPIX1'] + 1
+                                       ) * hdu[0].header['CDELT1'] + hdu[0].header['CRVAL1']
+                            continuum = np.vstack(wlscale, hdu[0].data[cur_obj['continuum_data']])
+                elif cur_obj['continuum_type'].lower() in ['poly', 'bb']:
+                    continuum = cur_obj['continuum_data']
+            if continuum is not None:
+                if add_fits_kw is None:
+                    add_fits_kw = {}
+                add_fits_kw['CONTTYPE'] = (cur_obj['continuum_type'], "Type of the continuum")
+                if cur_obj['continuum_flux'] > 0:
+                    contflux = cur_obj['continuum_flux'].to(u.erg / u.cm ** 2 / u.s / u.arcsec ** 2 / u.AA).value
+                else:
+                    contflux = 0
+                add_fits_kw['CONTFLUX'] = (contflux,
+                                           "Continuum brightness (in erg/s/cm^2/asec^2/AA) at ref. wl/Filter")
+                if cur_obj['continuum_mag'] is not None:
+                    contmag = cur_obj['continuum_mag'].value
+                else:
+                    contmag = None
+                add_fits_kw['CONTMAG'] = (contmag,
+                                          "Continuum brightness (in mag/asec^2) at ref. wl/Filter")
+                add_fits_kw['CONTWL'] = (cur_obj['continuum_wl'], 'Reference wavelength/filter for cont. flux/mag')
+            self.add_nebula(generated_object, obj_id=obj_id, zorder=cur_obj.get('zorder'), add_fits_kw=add_fits_kw,
+                            continuum=continuum)
             obj_id += 1
         bar.finish()
         if (obj_id - obj_id_ini) == 0:
@@ -1064,9 +1240,7 @@ class ISM:
         aperture_mask_sub = aperture_mask[ystart: yfin + 1, xstart: xfin + 1]
         xx_sub, yy_sub = np.meshgrid(np.arange(xfin - xstart + 1), np.arange(yfin - ystart + 1))
         n_apertures = np.max(aperture_mask)
-        # aperture_centers = np.array([(np.round(np.mean(xx[aperture_mask == (ap_ind + 1)])).astype(int),
-        #                              np.round(np.mean(yy[aperture_mask == (ap_ind + 1)])).astype(int))
-        #                              for ap_ind in range(n_apertures)])
+        aperture_centers = np.round(fibers_coords).astype(int)
         spectrum = np.zeros(shape=(n_apertures, len(wl_grid)), dtype=float)
 
         radius = fibers_coords[0, 2]
@@ -1119,108 +1293,129 @@ class ISM:
                 continue
             my_comp = "_".join(cur_ext.split("_")[:2])
 
-            if self.content[cur_ext].header.get("LINERAT") == 'Variable':
-                all_wavelength = np.array([extname.split("_")[-1] for extname in all_extensions
-                                           if extname is not None and (my_comp + "_FLUX_" in extname)])
-            else:
-                all_wavelength = self.content[my_comp + "_FLUXRATIOS"].data[0, :]
-
-            if self.content[cur_ext].header.get("LINERAT") == 'Variable':
-                all_fluxes = np.array([self.content[my_comp + "_FLUX_" + wl].data[
-                                           cur_mask_in_neb].reshape((yfin_neb - ystart_neb + 1,
-                                                                     xfin_neb - xstart_neb + 1))
-                                       for wl in all_wavelength])
-                all_wavelength = all_wavelength.astype(float)
-            else:
-                all_fluxes = self.content[cur_ext].data[cur_mask_in_neb].reshape((1, yfin_neb - ystart_neb + 1,
-                                                                                  xfin_neb - xstart_neb + 1))
-
-            if my_comp + "_LINEPROFILE" in self.content:
-                lsf = self.content[my_comp + "_LINEPROFILE"].data[
-                      :, cur_mask_in_neb].reshape((len(self.vel_grid), yfin_neb - ystart_neb + 1,
-                                                   xfin_neb - xstart_neb + 1))
-            else:
-                if my_comp + "_VEL" in self.content:
-                    vel = self.content[my_comp + "_VEL"].data[cur_mask_in_neb].reshape((yfin_neb - ystart_neb + 1,
-                                                                                        xfin_neb - xstart_neb + 1))
+            if self.content[cur_ext].header.get('MAXBRT'):
+                if self.content[cur_ext].header.get("LINERAT") == 'Variable':
+                    all_wavelength = np.array([extname.split("_")[-1] for extname in all_extensions
+                                               if extname is not None and (my_comp + "_FLUX_" in extname)])
                 else:
-                    vel = np.zeros(shape=(yfin_neb - ystart_neb + 1, xfin_neb - xstart_neb + 1),
-                                   dtype=float) + self.sys_velocity.value
-                if my_comp + "_DISP" in self.content:
-                    disp = self.content[my_comp + "_DISP"].data[
-                        cur_mask_in_neb].reshape((yfin_neb - ystart_neb + 1, xfin_neb - xstart_neb + 1))
+                    all_wavelength = self.content[my_comp + "_FLUXRATIOS"].data[0, :]
+
+                if self.content[cur_ext].header.get("LINERAT") == 'Variable':
+                    all_fluxes = np.array([self.content[my_comp + "_FLUX_" + wl].data[
+                                               cur_mask_in_neb].reshape((yfin_neb - ystart_neb + 1,
+                                                                         xfin_neb - xstart_neb + 1))
+                                           for wl in all_wavelength])
+                    all_wavelength = all_wavelength.astype(float)
                 else:
-                    disp = np.zeros(shape=(yfin_neb - ystart_neb + 1, xfin_neb - xstart_neb + 1),
-                                    dtype=float) + self.turbulent_sigma.value
-                lsf = np.exp(-np.power((self.vel_grid.value[:, None, None] - vel[None, :, :]) / disp[
-                                                                                                None, :, :], 2.) / 2)
-                lsf = lsf / np.sum(lsf, axis=0)
+                    all_fluxes = self.content[cur_ext].data[cur_mask_in_neb].reshape((1, yfin_neb - ystart_neb + 1,
+                                                                                      xfin_neb - xstart_neb + 1))
 
-            aperture_centers = np.round(fibers_coords).astype(int)
-            if all_fluxes.shape[0] == 1:
-                data_in_apertures = \
-                    convolve_fft(lsf * all_fluxes[0][None, :, :], kern,
-                                 normalize_kernel=False)[:,
-                                                         aperture_centers[selected_apertures, 1] - ystart_neb - y0,
-                                                         aperture_centers[selected_apertures, 0] - xstart_neb - x0]
-                data_in_apertures = data_in_apertures.reshape((1, data_in_apertures.shape[0],
-                                                               data_in_apertures.shape[1]))
+                if my_comp + "_LINEPROFILE" in self.content:
+                    lsf = self.content[my_comp + "_LINEPROFILE"].data[
+                          :, cur_mask_in_neb].reshape((len(self.vel_grid), yfin_neb - ystart_neb + 1,
+                                                       xfin_neb - xstart_neb + 1))
+                else:
+                    if my_comp + "_VEL" in self.content:
+                        vel = self.content[my_comp + "_VEL"].data[cur_mask_in_neb].reshape((yfin_neb - ystart_neb + 1,
+                                                                                            xfin_neb - xstart_neb + 1))
+                    else:
+                        vel = np.zeros(shape=(yfin_neb - ystart_neb + 1, xfin_neb - xstart_neb + 1),
+                                       dtype=float) + self.sys_velocity.value
+                    if my_comp + "_DISP" in self.content:
+                        disp = self.content[my_comp + "_DISP"].data[
+                            cur_mask_in_neb].reshape((yfin_neb - ystart_neb + 1, xfin_neb - xstart_neb + 1))
+                    else:
+                        disp = np.zeros(shape=(yfin_neb - ystart_neb + 1, xfin_neb - xstart_neb + 1),
+                                        dtype=float) + self.turbulent_sigma.value
+                    lsf = np.exp(-np.power(
+                        (self.vel_grid.value[:, None, None] - vel[None, :, :]) / disp[None, :, :], 2.) / 2)
+                    lsf = lsf / np.sum(lsf, axis=0)
 
-                # data_convolved = \
-                #     convolve_fft(lsf * all_fluxes[0][None, :, :], kern,
-                #                  normalize_kernel=False)
-                # data_in_apertures = np.zeros(shape=(1, data_convolved.shape[0],
-                #                                     len(selected_apertures)), dtype=float)
-                # rec_neb = (xx_neb >= xstart_neb) & (xx_neb <= xfin_neb) & (yy_neb >= ystart_neb) & (yy_neb <= yfin_neb)
-                # xx_neb_sub = xx_neb[rec_neb]
-                # yy_neb_sub = yy_neb[rec_neb]
-                # for ind in range(data_in_apertures.shape[1]):
-                #     p = interp2d(xx_neb_sub, yy_neb_sub, data_convolved[ind, :, :])
-                #     data_in_apertures[0, ind, :] = p(fibers_coords[selected_apertures, 0] - xstart_neb - x0,
-                #                                      fibers_coords[selected_apertures, 1] - ystart_neb - y0)
+                if all_fluxes.shape[0] == 1:
+                    data_in_apertures = \
+                        convolve_fft(lsf * all_fluxes[0][None, :, :], kern,
+                                     allow_huge=True,
+                                     normalize_kernel=False)[:,
+                                                             aperture_centers[selected_apertures, 1] - ystart_neb - y0,
+                                                             aperture_centers[selected_apertures, 0] - xstart_neb - x0]
+                    data_in_apertures = data_in_apertures.reshape((1, data_in_apertures.shape[0],
+                                                                   data_in_apertures.shape[1]))
 
+                    # data_convolved = \
+                    #     convolve_fft(lsf * all_fluxes[0][None, :, :], kern,
+                    #                  normalize_kernel=False)
+                    # data_in_apertures = np.zeros(shape=(1, data_convolved.shape[0],
+                    #                                     len(selected_apertures)), dtype=float)
+                    # rec_neb = (xx_neb >= xstart_neb) & (xx_neb <= xfin_neb) &
+                    # (yy_neb >= ystart_neb) & (yy_neb <= yfin_neb)
+                    # xx_neb_sub = xx_neb[rec_neb]
+                    # yy_neb_sub = yy_neb[rec_neb]
+                    # for ind in range(data_in_apertures.shape[1]):
+                    #     p = interp2d(xx_neb_sub, yy_neb_sub, data_convolved[ind, :, :])
+                    #     data_in_apertures[0, ind, :] = p(fibers_coords[selected_apertures, 0] - xstart_neb - x0,
+                    #                                      fibers_coords[selected_apertures, 1] - ystart_neb - y0)
 
-            else:
-                data_in_apertures = Parallel(n_jobs=lvmdatasimulator.n_process)(
-                    delayed(convolve_cube)(lsf * line_data[None, :, :], kern,
-                                           aperture_centers[selected_apertures, 1] - ystart_neb - y0,
-                                           aperture_centers[selected_apertures, 0] - xstart_neb - x0)
-                    for line_data in all_fluxes)
-                data_in_apertures = np.array(data_in_apertures)
-            data_in_apertures = np.moveaxis(data_in_apertures, 2, 0)
-            if data_in_apertures.shape[1] > 1:
-                prf_index = np.flatnonzero(all_wavelength == 6562.81)
-            else:
-                prf_index = 0
-            flux_norm_in_apertures = data_in_apertures.sum(axis=2)
-            line_prf_in_apertures = data_in_apertures[
-                                    :, prf_index, :].reshape(
-                (data_in_apertures.shape[0], data_in_apertures.shape[2])) / flux_norm_in_apertures[
-                                                                            :, prf_index].reshape(
-                data_in_apertures.shape[0], 1)
+                else:
+                    data_in_apertures = Parallel(n_jobs=lvmdatasimulator.n_process)(
+                        delayed(convolve_cube)(lsf * line_data[None, :, :], kern,
+                                               aperture_centers[selected_apertures, 1] - ystart_neb - y0,
+                                               aperture_centers[selected_apertures, 0] - xstart_neb - x0)
+                        for line_data in all_fluxes)
+                    data_in_apertures = np.array(data_in_apertures)
+                data_in_apertures = np.moveaxis(data_in_apertures, 2, 0)
+                if data_in_apertures.shape[1] > 1:
+                    prf_index = np.flatnonzero(all_wavelength == 6562.81)
+                else:
+                    prf_index = 0
+                flux_norm_in_apertures = data_in_apertures.sum(axis=2)
+                line_prf_in_apertures = data_in_apertures[
+                                        :, prf_index, :].reshape(
+                    (data_in_apertures.shape[0], data_in_apertures.shape[2])) / flux_norm_in_apertures[
+                                                                                :, prf_index].reshape(
+                    data_in_apertures.shape[0], 1)
 
-            wl_logscale_lsf = np.log(self.vel_grid.value / 2.9979e5 + 1)
-            wl_logscale_lsf_highres = np.arange(np.round((wl_logscale_lsf[-1] - wl_logscale_lsf[0]) * 1e6
-                                                         ).astype(int)) * 1e-6 + wl_logscale_lsf[0]
-            p = interp1d(wl_logscale_lsf, line_prf_in_apertures, axis=1, assume_sorted=True)
-            line_highres_log = p(wl_logscale_lsf_highres)
-            line_highres_log = line_highres_log / np.sum(line_highres_log, axis=1)[:, None]
-            if flux_norm_in_apertures.shape[1] == 1:
-                print(flux_norm_in_apertures)
+                wl_logscale_lsf = np.log(self.vel_grid.value / 2.9979e5 + 1)
+                wl_logscale_lsf_highres = np.arange(np.round((wl_logscale_lsf[-1] - wl_logscale_lsf[0]) * 1e6
+                                                             ).astype(int)) * 1e-6 + wl_logscale_lsf[0]
+                p = interp1d(wl_logscale_lsf, line_prf_in_apertures, axis=1, assume_sorted=True)
+                line_highres_log = p(wl_logscale_lsf_highres)
+                line_highres_log = line_highres_log / np.sum(line_highres_log, axis=1)[:, None]
+                if flux_norm_in_apertures.shape[1] == 1:
+                    flux_norm_in_apertures = flux_norm_in_apertures * \
+                                        self.content[my_comp + "_FLUXRATIOS"].data[1, None, :]
+                wl_indexes = np.round((np.log(all_wavelength) - wl_logscale_highres[0]) * 1e6).astype(int)
+                rec = (wl_indexes > 0) & (wl_indexes < len(wl_logscale_highres))
+                spectrum_highres_log = np.zeros(shape=(len(selected_apertures), len(wl_logscale_highres)), dtype=float)
+                win = (len(wl_logscale_lsf_highres) - 1) // 2
+                for ind, r in enumerate(rec):
+                    if r:
+                        spectrum_highres_log[:, wl_indexes[ind] - win: wl_indexes[ind] + win + 1] += \
+                            line_highres_log[:, :] * flux_norm_in_apertures[:, ind].reshape(
+                                (len(selected_apertures), 1))
+                p = interp1d(wl_logscale_highres, spectrum_highres_log, axis=1, assume_sorted=True, bounds_error=False,
+                             fill_value='extrapolate')
+                spectrum[selected_apertures, :] += (p(wl_logscale) * delta_lr * 1e6)
 
-                flux_norm_in_apertures = flux_norm_in_apertures * \
-                                    self.content[my_comp + "_FLUXRATIOS"].data[1, None, :]
-            wl_indexes = np.round((np.log(all_wavelength) - wl_logscale_highres[0]) * 1e6).astype(int)
-            rec = (wl_indexes > 0) & (wl_indexes < len(wl_logscale_highres))
-            spectrum_highres_log = np.zeros(shape=(len(selected_apertures), len(wl_logscale_highres)), dtype=float)
-            win = (len(wl_logscale_lsf_highres) - 1) // 2
-            for ind, r in enumerate(rec):
-                if r:
-                    spectrum_highres_log[:, wl_indexes[ind] - win: wl_indexes[ind] + win + 1] += \
-                        line_highres_log[:, :] * flux_norm_in_apertures[:, ind].reshape((len(selected_apertures), 1))
-            p = interp1d(wl_logscale_highres, spectrum_highres_log, axis=1, assume_sorted=True)
-            spectrum[selected_apertures, :] += (p(wl_logscale) * delta_lr * 1e6)
-            # print(np.sum(flux_norm_in_apertures, axis=1), np.sum((p(wl_logscale) * delta_lr * 1e6), axis=1))
+            if my_comp + "_CONTINUUM" in self.content:
+                brt_max = self.content[cur_ext].header.get('MAXBRT')
+                if not brt_max:
+                    brt_max = self.content[cur_ext].header.get('MAXEXT')
+                if not brt_max:
+                    brt_max = 1
+                continuum = self._get_continuum(my_comp, wl_grid.value)
+
+                brt = self.content[cur_ext].data[cur_mask_in_neb].reshape((1, yfin_neb - ystart_neb + 1,
+                                                                           xfin_neb - xstart_neb + 1)) / brt_max
+                if brt.shape[0] != 1:
+                    brt = brt.reshape((1, brt.shape[0], brt.shape[1]))
+                data_in_apertures = convolve_fft(brt, kern,
+                                                 allow_huge=True, normalize_kernel=False)[
+                                    :, aperture_centers[selected_apertures, 1] - ystart_neb - y0,
+                                    aperture_centers[selected_apertures, 0] - xstart_neb - x0]
+                data_in_apertures = data_in_apertures.reshape((data_in_apertures.shape[0] * data_in_apertures.shape[1],
+                                                               1))
+                spectrum[selected_apertures, :] += continuum[None, :] * data_in_apertures[:, 0]
+
             bar.update(neb_index + 1)
         bar.finish()
         return spectrum * (proj_plane_pixel_scales(self.wcs)[0] * 3600) ** 2 * fluxunit * u.arcsec ** 2
