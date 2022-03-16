@@ -316,7 +316,7 @@ class Simulator:
         """Extract spectra of the terget from the field object"""
 
         obj_spec = OrderedDict()
-        wl_grid = np.arange(3650, 9900.01, 0.06) * u.AA
+        wl_grid = np.arange(3647, 9900.01, 0.06) * u.AA
         index, spectra = self.source.extract_spectra(self.bundle.fibers, wl_grid)
         log.info("Recovering target spectra.")
         for fiber in self.bundle.fibers:
@@ -329,7 +329,6 @@ class Simulator:
             fiber_spec = OrderedDict()
 
             for branch in self.spectrograph.branches:
-
                 lsf_fwhm = branch.lsf_fwhm / disp0  # from A to pix
                 dfib_lam = fiber.dispersion * branch.wavecoord.step / disp0
                 fwhm = np.sqrt((lsf_fwhm) ** 2 + (dfib_lam) ** 2)
@@ -373,15 +372,13 @@ class Simulator:
         """
         log.info("Simulating observations.")
 
-        if len(self.bundle.fibers) < 500:
+        if len(self.bundle.fibers) < 1800:
             _ = [self._simulate_observations_single_fiber(fiber, self.target_spectra)
                  for fiber in self.bundle.fibers]
         else:
             _ = Parallel(n_jobs=lvmdatasimulator.n_process)(
                 delayed(self._simulate_observations_single_fiber)(fiber, self.target_spectra)
                 for fiber in self.bundle.fibers)
-
-        return
 
     def save_outputs(self):
 
@@ -415,7 +412,7 @@ class Simulator:
 
         hdul = fits.HDUList([primary, signal_hdu, sky_hdu, wave_hdu, ids_hdu])
 
-        filename = f"{self.outdir}/{self.source.name}_{branch.name}_{self.bundle.bundle_type}" +\
+        filename = f"{self.outdir}/{self.source.name}_{branch.name}_{self.bundle.bundle_name}" +\
                    "_input.fits"
 
         hdul.writeto(filename, overwrite=True)
@@ -458,7 +455,7 @@ class Simulator:
         hdul = fits.HDUList([primary, target_hdu, total_hdu, noise_hdu, stn_hdu, sky_hdu, wave_hdu,
                              ids_hdu])
 
-        filename = f"{self.outdir}/{self.source.name}_{branch.name}_{self.bundle.bundle_type}" +\
+        filename = f"{self.outdir}/{self.source.name}_{branch.name}_{self.bundle.bundle_name}" +\
                    "_flux.fits"
 
         hdul.writeto(filename, overwrite=True)
@@ -500,7 +497,7 @@ class Simulator:
         hdul = fits.HDUList([primary, target_hdu, total_hdu, noise_hdu, stn_hdu, sky_hdu, wave_hdu,
                              ids_hdu])
 
-        filename = f"{self.outdir}/{self.source.name}_{branch.name}_{self.bundle.bundle_type}" +\
+        filename = f"{self.outdir}/{self.source.name}_{branch.name}_{self.bundle.bundle_name}" +\
                    "_realization.fits"
 
         hdul.writeto(filename, overwrite=True)
@@ -759,3 +756,51 @@ class Simulator:
                 "noise": noise_out,
                 "snr": exposure['snr'],
                 "sky": sky_out}
+
+    def save_output_maps(self, min_wave, max_wave):
+
+        for branch in self.spectrograph.branches:
+            ids, target, total, _, _, _ = self._reorganize_to_rss(branch, self.output_calib)
+            target_out = np.zeros((self.source.npixels, self.source.npixels))
+            total_out = np.zeros((self.source.npixels, self.source.npixels))
+            wcs = self.source.wcs
+
+            # I'm not interpolating to the exact wavelength
+
+            mask1 = branch.wavecoord.wave > min_wave
+            mask2 = branch.wavecoord.wave < max_wave
+            mask = np.all([mask1, mask2], axis=0)
+
+            target_val = target[:, mask].sum(axis=1)
+            total_val = total[:, mask].sum(axis=1)
+
+            # Just the target
+            target_out = self._populate_map(target_out, target_val, ids, wcs)
+            filename = f"{self.outdir}/{self.source.name}_{branch.name}_{self.bundle.bundle_name}" +\
+                       "_target_map.fits"
+            hdu = fits.PrimaryHDU(data=target_out, header=wcs.to_header())
+            hdu.writeto(filename, overwrite=True)
+            log.info(f' Saving {filename}...')
+
+            # full spectrum
+            total_out = self._populate_map(total_out, total_val, ids, wcs)
+            filename = f"{self.outdir}/{self.source.name}_{branch.name}_{self.bundle.bundle_name}" +\
+                       "_total_map.fits"
+            hdu = fits.PrimaryHDU(data=total_out, header=wcs.to_header())
+            hdu.writeto(filename, overwrite=True)
+            log.info(f' Saving {filename}...')
+
+    def _populate_map(self, map, values, ids, wcs):
+
+        yy, xx = np.mgrid[:map.shape[0], :map.shape[1]]
+
+        for fiber in self.bundle.fibers:
+            flux = values[ids == fiber.id]
+            fiber_coord = self.source.coord.spherical_offsets_by(fiber.x, fiber.y)
+
+            fiber_x, fiber_y = wcs.world_to_pixel(fiber_coord)
+
+            radius = np.sqrt((xx - fiber_x)**2 + (yy - fiber_y)**2)
+            map[radius < fiber.diameter.value / 2] = flux
+
+        return map
