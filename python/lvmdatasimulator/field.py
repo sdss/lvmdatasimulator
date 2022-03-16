@@ -9,6 +9,7 @@
 
 import numpy as np
 import astropy.units as u
+from astropy.io import fits
 from astropy.coordinates import SkyCoord
 from astropy.visualization import ImageNormalize, PercentileInterval, AsinhStretch
 import matplotlib.pyplot as plt
@@ -179,8 +180,8 @@ class LVMField:
 
         fig, ax = plt.subplots(1, 1, subplot_kw=dict(projection=self.wcs))
         if self.ism_map is None:
-            self._get_ism_map()
-        norm = ImageNormalize(self.ism_map, interval=PercentileInterval(94),
+            self._get_ism_map(wavelength=6562.81)
+        norm = ImageNormalize(self.ism_map, interval=PercentileInterval(98),
                               stretch=AsinhStretch())
         img = ax.imshow(self.ism_map, norm=norm, cmap=plt.cm.Oranges)
         if self.starlist is not None:
@@ -226,6 +227,39 @@ class LVMField:
                    distance=distance,
                    spec_resolution=spec_resolution,
                    sys_velocity=sys_velocity)
+
+    def get_map(self, wavelength_range=None, save_file=None):
+        self.ism_map = np.zeros(shape=(self.npixels, self.npixels), dtype=float)
+        if wavelength_range is None:
+            log.info("Input map is produced for default lambda = 6562.81")
+            wavelength_range = 6562.81
+        wavelength_range = np.atleast_1d(wavelength_range)
+        if len(wavelength_range) == 1:
+            wavelength_range = np.array([wavelength_range[0] - 0.01, wavelength_range[1] + 0.01])
+        if self.starlist is not None:
+            xc_stars = np.round(self.starlist.stars_table['x']).astype(int)
+            yc_stars = np.round(self.starlist.stars_table['y']).astype(int)
+            wl_grid = np.linspace(wavelength_range[0], wavelength_range[1], 10)
+            for star_id, xy in enumerate(zip(xc_stars, yc_stars)):
+                if (xy[0] >= self.npixels) or (xy[1] >= self.npixels) or (xy[0] < 0) or (xy[1] < 0):
+                    continue
+                p = interp1d(self.starlist.wave.to(u.AA).value, self.starlist.spectra[star_id], bounds_error=False,
+                             fill_value='extrapolate')
+                # !!! APPLY EXTINCTION BY DARK NEBULAE TO STARS !!!
+                self.ism_map[xy[1], xy[0]] += np.sum(p(wl_grid) * (wl_grid[1] - wl_grid[0]))
+
+        if self.ism.content[0].header['Nobj'] > 0:
+            self.ism_map += self.ism.get_map(wavelength=wavelength_range, get_continuum=True)
+
+        if save_file is not None:
+            header = self.wcs.to_header()
+            header['LAMRANGE'] = ("{0}-{1}".format(wavelength_range[0], wavelength_range[1]),
+                                  "Wavelength range used for image extraction")
+            fits.writeto(save_file, data=self.ism_map, header=header, overwrite=True)
+            log.info("Input image in {0}-{1}AA wavelength range "
+                     "is saved to {2}".format(wavelength_range[0], wavelength_range[1], save_file))
+
+
 
     def add_nebulae(self, list_of_nebulae=None, load_from_file=None, save_nebulae=None):
         """
@@ -295,12 +329,12 @@ class LVMField:
             log.warning("Cannot load the nebulae! Check input parameters.")
             return None
 
-    def _get_ism_map(self):
+    def _get_ism_map(self, wavelength=6562.81):
         """
-        Create map of ISM part in Halpha line
+        Create map of ISM part in desired line or wavelength range (default = Halpha)
         """
         if self.ism.content[0].header['Nobj'] > 0:
-            self.ism_map = self.ism.get_map()
+            self.ism_map = self.ism.get_map(wavelength=wavelength)
         else:
             self.ism_map = np.zeros(shape=(self.npixels, self.npixels), dtype=float)
 
@@ -343,7 +377,8 @@ class LVMField:
                 yc_stars = np.round(self.starlist.stars_table['y']).astype(int)
                 stars_id = np.flatnonzero(aperture_mask[yc_stars, xc_stars] == (index + 1))
                 for star_id in stars_id:
-                    p = interp1d(self.starlist.wave.to(u.AA).value, self.starlist.spectra[star_id])
+                    p = interp1d(self.starlist.wave.to(u.AA).value, self.starlist.spectra[star_id], bounds_error=False,
+                                 fill_value='extrapolate')
                     # !!! APPLY EXTINCTION BY DARK NEBULAE TO STARS !!!
                     spectrum[index, :] += (p(wl_grid.value) * dl.value * fluxunit * u.arcsec ** 2)
         if np.max(aperture_mask) < fibers_coords.shape[0]:
