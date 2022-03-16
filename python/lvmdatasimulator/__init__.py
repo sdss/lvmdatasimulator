@@ -21,7 +21,9 @@ ROOT_DIR = os.path.realpath(os.path.join(os.path.dirname(__file__), '..', '..'))
 n_process = config.get('nprocess')
 
 # path to the Cloudy models and some default parameters
-if config.get('data_dir').startswith("/") or config.get('data_dir').startswith("\\"):
+if config.get('data_dir').startswith("."):
+    CLOUDY_MODELS = os.path.join(os.path.curdir, config.get('cloudy_models_name'))
+elif config.get('data_dir').startswith("/") or config.get('data_dir').startswith("\\"):
     CLOUDY_MODELS = os.path.join(config.get('data_dir'), config.get('cloudy_models_name'))
 else:
     CLOUDY_MODELS = os.path.join(os.path.join(ROOT_DIR, config.get('data_dir')), config.get('cloudy_models_name'))
@@ -30,6 +32,17 @@ if not os.path.isfile(CLOUDY_MODELS):
                 "Flux distribution in different lines will be unavailable".format(CLOUDY_MODELS))
     CLOUDY_MODELS = None
 CLOUDY_SPEC_DEFAULTS = config.get('cloudy_default_params')
+
+# path to the Cloudy models and some default parameters
+if config.get('data_dir').startswith("."):
+    CONTINUUM_MODELS = os.path.join(os.path.curdir, config.get('continuum_models_name'))
+elif config.get('data_dir').startswith("/") or config.get('data_dir').startswith("\\"):
+    CONTINUUM_MODELS = os.path.join(config.get('data_dir'), config.get('continuum_models_name'))
+else:
+    CONTINUUM_MODELS = os.path.join(os.path.join(ROOT_DIR, config.get('data_dir')), config.get('continuum_models_name'))
+if not os.path.isfile(CONTINUUM_MODELS):
+    log.warning("Pre-computed models of continuum are not available. ")
+    CONTINUUM_MODELS = None
 
 # path to the directory where all computational results will be saved
 if config.get('run_dir').startswith("/") or config.get('run_dir').startswith("\\"):

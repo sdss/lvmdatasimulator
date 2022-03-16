@@ -2,7 +2,9 @@
 
 nprocess: 8  # number of processes for parallelization
 
-cloudy_models_name: 'LVM_cloudy_sphere_models.fits'  # Name for the pre-computed models to be used
+cloudy_models_name: 'LVM_cloudy_sphere_models.fits'  # Name for the pre-computed emission-line models to be used
+                                                    # (should be stored in 'data' directory)
+continuum_models_name: 'LVM_continuum_models.fits'  # Name for the pre-computed continuum models to be used
                                                     # (should be stored in 'data' directory)
 
 cloudy_default_params:  # parameters for the Cloudy model to be used by default
