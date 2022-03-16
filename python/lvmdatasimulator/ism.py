@@ -923,7 +923,7 @@ class ISM:
                     continue
                 if cur_obj['type'] == 'Galaxy':
                     if 'n' not in cur_obj:
-                        log.warning("Set default Sersic index n=1 for the nebula #{0}".format(ind_obj))
+                        log.info("Set default Sersic index n=1 for the nebula #{0}".format(ind_obj))
                         cur_obj['n'] = 1
                     if 'rad_lim' not in cur_obj:
                         cur_obj['rad_lim'] = 3.
@@ -950,7 +950,7 @@ class ISM:
                         cur_obj['perturb_degree'] = 0
 
                 elif cur_obj['type'] == 'Filament' and ('width' not in cur_obj):
-                    log.warning("Set default width of the filament 0.1 pc for the nebula #{0}".format(ind_obj))
+                    log.info("Set default width of the filament 0.1 pc for the nebula #{0}".format(ind_obj))
                     cur_obj['width'] = 0.1 * u.pc
 
                 # ==== Start calculations of different nebulae
@@ -1156,12 +1156,16 @@ class ISM:
         #     pass
         return ext_map
 
-    def get_map(self, wavelength=6562.81):
+    def get_map(self, wavelength=6562.81, get_continuum=False):
         """
         Method to produce 2D map of all ISM nebulae in the selected line
         Args:
-            wavelength (float): exact wavelength (in Angstrom) according to the lines list
+            wavelength (float or iterative): wavelength (in Angstrom) according to the lines list, or wavelength range
+            get_continuum (bool): if True, then also counts the flux from the continuum
         """
+        wavelength = np.atleast_1d(wavelength)
+        if len(wavelength) == 1:
+            wavelength = np.array([wavelength[0]-0.01, wavelength[0]+0.01])
         if self.content[0].header['Nobj'] == 0:
             log.warning("ISM doesn't contain any nebula")
             return None
@@ -1170,48 +1174,75 @@ class ISM:
                                        if extname is not None and ("BRIGHTNESS" in extname)])
 
         if all([self.content[cur_ext].header.get("DARK") for cur_ext in all_extensions_brt]):
+            # !!!! ADD later accounting of the continuum and extinction from those nebulae
             log.warning("ISM doesn't contain any emission nebula")
             return None
 
         all_extensions_brt = all_extensions_brt[
             np.argsort([self.content[cur_ext].header.get('ZORDER') for cur_ext in all_extensions_brt])]
 
-        map_2d = None
-
+        map_2d = np.zeros(shape=(self.height, self.width), dtype=float)
+        map_is_empty = True
         for cur_ext in all_extensions_brt:
+            my_comp = "_".join(cur_ext.split("_")[:2])
+            if get_continuum and (my_comp + "_CONTINUUM" in all_extensions):
+                wl_grid = np.linspace(wavelength[0], wavelength[1], 10)
+                continuum = np.sum(self._get_continuum(my_comp, wl_grid))
+                add_continuum = self.content[cur_ext].data / np.max(self.content[cur_ext].data) * continuum
+                map_2d[self.content[cur_ext].header['Y0']:
+                       self.content[cur_ext].header['Y0'] + self.content[cur_ext].header['NAXIS2'],
+                       self.content[cur_ext].header['X0']:
+                       self.content[cur_ext].header['X0'] + self.content[cur_ext].header['NAXIS1']] += add_continuum
+                map_is_empty = False
             if self.content[cur_ext].header.get("DARK"):
-                if map_2d is None:
+                if map_is_empty:
                     continue
-                ext_map = self.calc_extinction(wavelength=wavelength, xs=self.width, ys=self.height,
+                ext_map = self.calc_extinction(wavelength=(wavelength[-1] + wavelength[0])/2., xs=self.width,
+                                               ys=self.height,
                                                extinction_name=cur_ext)
                 if ext_map is not None:
                     map_2d = map_2d * ext_map[0]
                 continue
-            my_comp = "_".join(cur_ext.split("_")[:2])
-            flux_ext = [extname for extname in all_extensions
-                        if extname is not None and (my_comp in extname and
-                                                    "FLUX_{0}".format(np.round(wavelength, 2)) in extname)]
-            if len(flux_ext) == 0:
+
+            all_flux_wl = [extname[-7:] for extname in all_extensions
+                           if extname is not None and (my_comp in extname and "FLUX_" in extname)]
+
+            # flux_ext = [extname for extname in all_extensions
+            #             if extname is not None and (my_comp in extname and
+            #                                         "FLUX_{0}".format(np.round(wavelength, 2)) in extname)]
+            add_emission = np.zeros(shape=(self.content[cur_ext].header['NAXIS2'],
+                                           self.content[cur_ext].header['NAXIS1']), dtype=float)
+            if len(all_flux_wl) == 0:
                 fluxrat_ext = [extname for extname in all_extensions
                                if extname is not None and (my_comp in extname and "FLUXRATIOS" in extname)]
                 if len(fluxrat_ext) == 0:
                     continue
                 fluxrat_ext = fluxrat_ext[0]
 
-                wl_index = np.flatnonzero(np.isclose(self.content[fluxrat_ext].data[0, :], wavelength))
-                if len(wl_index) == 0:
-                    continue
-                add_emission = (self.content[cur_ext].data * self.content[fluxrat_ext].data[1, wl_index[0]])
-            else:
-                flux_ext = flux_ext[0]
-                add_emission = self.content[flux_ext].data
+                wl_indexes = np.flatnonzero((self.content[fluxrat_ext].data[0, :] > (wavelength[0])) &
+                                            (self.content[fluxrat_ext].data[0, :] < (wavelength[1])))
 
-            if map_2d is None:
-                map_2d = np.zeros(shape=(self.height, self.width), dtype=float)
+                # wl_index = np.flatnonzero(np.isclose(self.content[fluxrat_ext].data[0, :], wavelength))
+                if len(wl_indexes) == 0:
+                    continue
+                for wl_index in wl_indexes:
+                    add_emission += (self.content[cur_ext].data * self.content[fluxrat_ext].data[1, wl_index])
+            else:
+                all_flux_wl_float = np.array(all_flux_wl).astype(float)
+                wl_indexes = np.flatnonzero((all_flux_wl_float > (wavelength[0] - 0.01)) &
+                                            (all_flux_wl_float < (wavelength[1] + 0.01)))
+                flux_ext_wl = all_flux_wl[wl_indexes]
+                if len(wl_indexes) == 0:
+                    continue
+
+                for cur_wl in flux_ext_wl:
+                    add_emission += self.content[my_comp + "_FLUX_" + cur_wl].data
+
             map_2d[self.content[cur_ext].header['Y0']:
                    self.content[cur_ext].header['Y0'] + self.content[cur_ext].header['NAXIS2'],
                    self.content[cur_ext].header['X0']:
                    self.content[cur_ext].header['X0'] + self.content[cur_ext].header['NAXIS1']] += add_emission
+            map_is_empty = False
         return map_2d * (proj_plane_pixel_scales(self.wcs)[0] * 3600) ** 2
 
     def get_spectrum(self, wl_grid=None, aperture_mask=None, fibers_coords=None):
