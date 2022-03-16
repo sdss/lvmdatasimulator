@@ -120,9 +120,9 @@ class FiberBundle:
             mask = selected['ring_id'] <= self.nrings
             selected = selected[mask].copy()
 
-        # if self.angle is not None:
-        #     log.info(f'Rotating the bundle to PA = {self.angle} deg.')
-        #     selected = self._rotates(selected)
+        if self.angle is not None:
+            log.info(f'Rotating the bundle to PA = {self.angle} deg.')
+            selected = self._rotates(selected)
 
         fibers = []
 
@@ -155,10 +155,15 @@ class FiberBundle:
 
         angle_rad = self.angle * np.pi / 180  # to radians
 
-        newx = table['x'] * np.cos(angle_rad) - table['y'] * np.sin(angle_rad)
-        newy = table['x'] * np.sin(angle_rad) + table['y'] * np.cos(angle_rad)
+        # Angle grows moving from north to east!
+        newx = table['x'] * np.cos(angle_rad) + table['y'] * np.sin(angle_rad)
+        newy = table['y'] * np.cos(angle_rad) - table['x'] * np.sin(angle_rad)
 
         table['x'] = newx
         table['y'] = newy
 
         return table
+
+
+# lat = arcsin(cos(ϑ) sin(lat') - cos(lon') sin(ϑ) cos(lat'))
+# lon = atan2(sin(lon'), tan(lat') sin(ϑ) + cos(lon') cos(ϑ)) - φ
