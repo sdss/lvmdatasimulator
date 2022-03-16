@@ -163,7 +163,3 @@ class FiberBundle:
         table['y'] = newy
 
         return table
-
-
-# lat = arcsin(cos(ϑ) sin(lat') - cos(lon') sin(ϑ) cos(lat'))
-# lon = atan2(sin(lon'), tan(lat') sin(ϑ) + cos(lon') cos(ϑ)) - φ

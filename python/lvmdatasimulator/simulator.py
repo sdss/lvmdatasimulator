@@ -246,10 +246,11 @@ class Simulator:
                 File containing the athmospheric extinction curve.
                 Defaults to f'{ROOT_DIR}data/sky/LVM_LVM160_KLAM.dat'.
         """
-        # log.info('Reading the atmospheric extinction from file.')
+        log.info('Reading the atmospheric extinction from file.')
         self.extinction_file = extinction_file
         data = ascii.read(self.extinction_file)
 
+        log.info('Resample extinction file to instrument wavelength solution.')
         return self._resample_and_convolve(data["col1"], data["col2"])
 
     @functools.cached_property
@@ -257,11 +258,16 @@ class Simulator:
 
         days_moon = self.observation.days_from_new_moon
         sky_file = f"{ROOT_DIR}/data/sky/LVM_{self.telescope.name}_SKY_{days_moon}.dat"
+
+        log.info(f'Simulating the sky emission {days_moon} from new moon.')
+        log.info(f'Using sky file: {sky_file}')
+
         area_fiber = np.pi * (self.bundle.fibers[0].diameter / 2) ** 2  # all fibers same diam.
         data = ascii.read(sky_file)
         wave = data["col1"]
         brightness = data["col2"] * area_fiber.value  # converting to Fluxes from SBrightness
 
+        log.info('Resample sky emission to instrument wavelength solution.')
         return self._resample_and_convolve(wave, brightness, u.erg / (u.cm ** 2 * u.s * u.AA))
 
     def _resample_and_convolve(self, old_wave, old_flux, unit=None):
@@ -317,8 +323,11 @@ class Simulator:
 
         obj_spec = OrderedDict()
         wl_grid = np.arange(3647, 9900.01, 0.06) * u.AA
+
+        log.info(f"Recovering target spectra for {self.bundle.nfibers} fibers.")
         index, spectra = self.source.extract_spectra(self.bundle.fibers, wl_grid)
-        log.info("Recovering target spectra.")
+
+        log.info('Resampling spectra to the instrument wavelength solution.')
         for fiber in self.bundle.fibers:
 
             original = spectra[index == fiber.id, :][0]
@@ -370,6 +379,7 @@ class Simulator:
         Main function of the simulators. It takes everything we have done before, and simulate
         the data
         """
+
         log.info("Simulating observations.")
 
         if len(self.bundle.fibers) < 1800:
@@ -384,9 +394,13 @@ class Simulator:
 
         log.info("Saving the outputs:")
         for branch in self.spectrograph.branches:
+            log.info('Input spectra')
             self._save_inputs(branch)
-            self._save_outputs_flux(branch)
+            log.info('Uncalibrated outputs')
             self._save_outputs_with_noise(branch)
+            log.info('Calibrated outputs')
+            self._save_outputs_flux(branch)
+
 
     def _save_inputs(self, branch):
 
@@ -759,6 +773,7 @@ class Simulator:
 
     def save_output_maps(self, min_wave, max_wave):
 
+        log.info('Saving the 2D output maps')
         for branch in self.spectrograph.branches:
             ids, target, total, _, _, _ = self._reorganize_to_rss(branch, self.output_calib)
             target_out = np.zeros((self.source.npixels, self.source.npixels))
