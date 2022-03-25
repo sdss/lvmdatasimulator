@@ -67,10 +67,9 @@ class FiberBundle:
 
         if nrings is not None:
             log.warning('nrings is defined. It will limit the number of fibers selected.')
-
-        if nrings > 24:
-            log.warning('The maximum number of rings that can be simulated is 25.')
-            self.nrings = 24
+            if nrings > 24:
+                log.warning('The maximum number of rings that can be simulated is 25.')
+                self.nrings = 24
 
         self.angle = angle
 
