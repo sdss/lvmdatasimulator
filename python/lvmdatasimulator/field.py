@@ -111,7 +111,8 @@ class LVMField:
 
         return wcs
 
-    def generate_gaia_stars(self, gmag_limit=17, shift=False, save=True):
+    def generate_gaia_stars(self, gmag_limit=17, shift=False, save=True, filename=None,
+                            directory='./'):
         """
         Generate a list of stars by querying gaia.
 
@@ -123,11 +124,18 @@ class LVMField:
             save (bool, optional):
                 If True save the list of stars to file. Defaults to True.
         """
+        if filename is not None:
+            log.info(f'Reading the star list from file {os.path.join(directory, filename)}')
+            self.starlist = StarsList(filename=filename, dir=directory)
+            return
+
         self.starlist = StarsList(ra=self.ra, dec=self.dec, radius=self.radius)
         self.starlist.generate_gaia(self.wcs, gmag_limit=gmag_limit, shift=shift)
 
         if save:
-            self.starlist.save_to_fits(outname=f'{self.name}_starlist.fits.gz')
+            outname = os.path.join(directory, f'{self.name}_starlist.fits.gz')
+            log.info(f'Saving star list to: {outname}')
+            self.starlist.save_to_fits(outname=outname)
 
     def generate_single_stars(self, parameters={}, shift=False, save=False):
         """
@@ -315,7 +323,7 @@ class LVMField:
                 log.info("Nebulae successfully loaded from file")
                 if self.ism_map is not None:
                     self._get_ism_map()
-                return True
+                return
 
         if list_of_nebulae is not None:
             loaded = self.ism.generate(list_of_nebulae)
