@@ -173,7 +173,7 @@ class LVMField:
 
         self.starlist = StarsList(filename=filename, dir=directory)
 
-    def show(self, subplots_kw=None, scatter_kw=None, fibers=None):
+    def show(self, subplots_kw=None, scatter_kw=None, fibers=None, outname=None):
         """
         Display the LVM field with overlaid apertures (if needed). This is a work in progress.
 
@@ -206,6 +206,8 @@ class LVMField:
                                     edgecolor='green', facecolor='none',
                                     transform=ax.get_transform('fk5'))
                 ax.add_patch(p)
+        if outname is not None:
+            plt.savefig(outname, dpi=200)
         plt.show()
 
     def _plot_stars(self, ax):
