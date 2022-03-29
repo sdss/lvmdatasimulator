@@ -805,6 +805,29 @@ class Simulator:
             hdu.writeto(filename, overwrite=True)
             log.info(f' Saving {filename}...')
 
+        self._print_fibers_to_ds9_regions()
+
+    def _print_fibers_to_ds9_regions(self):
+
+        outname = f'{self.outdir}/{self.source.name}_fibers.reg'
+
+        with open(outname, 'w') as f:
+            print('# Region file format: DS9 version 4.1', file=f)
+            print('global color=green dashlist=8 3 width=1 font="helvetica 10 normal roman"',
+                  end=' ', file=f)
+            print('select=1 highlite=1 dash=0 fixed=0 edit=1 move=1 delete=1 include=1 source=1',
+                  file=f)
+            print('image', file=f)
+
+            for fiber in self.bundle.fibers:
+                # converting to pixels
+                coord = self.observation.target_coords.spherical_offsets_by(fiber.x, fiber.y)
+                x, y = self.source.wcs.all_world2pix(coord.ra, coord.dec, 1)
+                r = fiber.diameter / (2 * self.source.spaxel.to(u.arcsec))
+                print(f'circle({x:0.3f}, {y:0.3f}, {r:0.3f})', file=f)
+
+        log.info(f' Saving {outname}...')
+
     def _populate_map(self, map, values, ids, wcs):
 
         yy, xx = np.mgrid[:map.shape[0], :map.shape[1]]
