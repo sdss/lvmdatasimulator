@@ -90,7 +90,7 @@ class FiberBundle:
         elif self.bundle_name == 'central':
 
             # open the central fiber
-            mask = fiber_table['ring_id'] == 1
+            mask = fiber_table['ring_id'] == 0
             selected = fiber_table[mask].copy()
             log.info('Using only the central fiber.')
 
