@@ -246,10 +246,11 @@ class Simulator:
                 File containing the athmospheric extinction curve.
                 Defaults to f'{ROOT_DIR}data/sky/LVM_LVM160_KLAM.dat'.
         """
-        # log.info('Reading the atmospheric extinction from file.')
+        log.info('Reading the atmospheric extinction from file.')
         self.extinction_file = extinction_file
         data = ascii.read(self.extinction_file)
 
+        log.info('Resample extinction file to instrument wavelength solution.')
         return self._resample_and_convolve(data["col1"], data["col2"])
 
     @functools.cached_property
@@ -257,11 +258,16 @@ class Simulator:
 
         days_moon = self.observation.days_from_new_moon
         sky_file = f"{ROOT_DIR}/data/sky/LVM_{self.telescope.name}_SKY_{days_moon}.dat"
+
+        log.info(f'Simulating the sky emission {days_moon} from new moon.')
+        log.info(f'Using sky file: {sky_file}')
+
         area_fiber = np.pi * (self.bundle.fibers[0].diameter / 2) ** 2  # all fibers same diam.
         data = ascii.read(sky_file)
         wave = data["col1"]
         brightness = data["col2"] * area_fiber.value  # converting to Fluxes from SBrightness
 
+        log.info('Resample sky emission to instrument wavelength solution.')
         return self._resample_and_convolve(wave, brightness, u.erg / (u.cm ** 2 * u.s * u.AA))
 
     def _resample_and_convolve(self, old_wave, old_flux, unit=None):
@@ -317,8 +323,11 @@ class Simulator:
 
         obj_spec = OrderedDict()
         wl_grid = np.arange(3647, 9900.01, 0.06) * u.AA
+
+        log.info(f"Recovering target spectra for {self.bundle.nfibers} fibers.")
         index, spectra = self.source.extract_spectra(self.bundle.fibers, wl_grid)
-        log.info("Recovering target spectra.")
+
+        log.info('Resampling spectra to the instrument wavelength solution.')
         for fiber in self.bundle.fibers:
 
             original = spectra[index == fiber.id, :][0]
@@ -370,6 +379,7 @@ class Simulator:
         Main function of the simulators. It takes everything we have done before, and simulate
         the data
         """
+
         log.info("Simulating observations.")
 
         if len(self.bundle.fibers) < 1800:
@@ -384,9 +394,13 @@ class Simulator:
 
         log.info("Saving the outputs:")
         for branch in self.spectrograph.branches:
+            log.info('Input spectra')
             self._save_inputs(branch)
-            self._save_outputs_flux(branch)
+            log.info('Uncalibrated outputs')
             self._save_outputs_with_noise(branch)
+            log.info('Calibrated outputs')
+            self._save_outputs_flux(branch)
+
 
     def _save_inputs(self, branch):
 
@@ -759,6 +773,7 @@ class Simulator:
 
     def save_output_maps(self, min_wave, max_wave):
 
+        log.info('Saving the 2D output maps')
         for branch in self.spectrograph.branches:
             ids, target, total, _, _, _ = self._reorganize_to_rss(branch, self.output_calib)
             target_out = np.zeros((self.source.npixels, self.source.npixels))
@@ -789,6 +804,29 @@ class Simulator:
             hdu = fits.PrimaryHDU(data=total_out, header=wcs.to_header())
             hdu.writeto(filename, overwrite=True)
             log.info(f' Saving {filename}...')
+
+        self._print_fibers_to_ds9_regions()
+
+    def _print_fibers_to_ds9_regions(self):
+
+        outname = f'{self.outdir}/{self.source.name}_fibers.reg'
+
+        with open(outname, 'w') as f:
+            print('# Region file format: DS9 version 4.1', file=f)
+            print('global color=green dashlist=8 3 width=1 font="helvetica 10 normal roman"',
+                  end=' ', file=f)
+            print('select=1 highlite=1 dash=0 fixed=0 edit=1 move=1 delete=1 include=1 source=1',
+                  file=f)
+            print('image', file=f)
+
+            for fiber in self.bundle.fibers:
+                # converting to pixels
+                coord = self.observation.target_coords.spherical_offsets_by(fiber.x, fiber.y)
+                x, y = self.source.wcs.all_world2pix(coord.ra, coord.dec, 1)
+                r = fiber.diameter / (2 * self.source.spaxel.to(u.arcsec))
+                print(f'circle({x:0.3f}, {y:0.3f}, {r:0.3f})', file=f)
+
+        log.info(f' Saving {outname}...')
 
     def _populate_map(self, map, values, ids, wcs):
 

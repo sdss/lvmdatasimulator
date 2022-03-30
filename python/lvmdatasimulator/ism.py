@@ -1204,8 +1204,9 @@ class ISM:
                     map_2d = map_2d * ext_map[0]
                 continue
 
-            all_flux_wl = [extname[-7:] for extname in all_extensions
+            all_flux_wl = [extname[-7:].strip('_') for extname in all_extensions
                            if extname is not None and (my_comp in extname and "FLUX_" in extname)]
+            all_flux_wl = np.array(all_flux_wl)
 
             # flux_ext = [extname for extname in all_extensions
             #             if extname is not None and (my_comp in extname and
