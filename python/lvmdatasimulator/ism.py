@@ -410,6 +410,16 @@ class Galaxy(Nebula):
                        n=self.n, x_0=(self.width - 1) / 2, y_0=(self.height - 1) / 2,
                        ellip=1 - self.ax_ratio, theta=(self.PA + 90 * u.degree).to(u.radian).value)
         brt = mod(xx, yy)
+
+        xct = (xx - (self.width - 1) / 2) * np.cos(self.PA.to(u.radians)) + \
+              (yy - (self.height - 1) / 2) * np.sin(self.PA.to(u.radians))
+        yct = (xx - (self.width - 1) / 2) * np.sin(self.PA.to(u.radians)) - \
+              (yy - (self.height - 1) / 2) * np.cos(self.PA.to(u.radians))
+        rmaj = self.rad_lim * (self.r_eff.to(u.pc) / self.pxscale.to(u.pc)).value
+        rmin = self.rad_lim * (self.r_eff.to(u.pc) / self.pxscale.to(u.pc)).value * self.ax_ratio
+        rec = (xct ** 2 / rmaj ** 2) + (yct ** 2 / rmin ** 2) >= 1
+        brt[rec] = 0
+
         brt = brt.reshape(self.height, self.width, 1)
         return brt
 
@@ -1181,7 +1191,7 @@ class ISM:
         all_extensions_brt = all_extensions_brt[
             np.argsort([self.content[cur_ext].header.get('ZORDER') for cur_ext in all_extensions_brt])]
 
-        map_2d = np.zeros(shape=(self.height, self.width), dtype=float)
+        map_2d = np.zeros(shape=(self.height, self.width), dtype=np.float32)
         map_is_empty = True
         for cur_ext in all_extensions_brt:
             my_comp = "_".join(cur_ext.split("_")[:2])
@@ -1204,14 +1214,15 @@ class ISM:
                     map_2d = map_2d * ext_map[0]
                 continue
 
-            all_flux_wl = [extname[-7:] for extname in all_extensions
+            all_flux_wl = [extname[-7:].strip('_') for extname in all_extensions
                            if extname is not None and (my_comp in extname and "FLUX_" in extname)]
+            all_flux_wl = np.array(all_flux_wl)
 
             # flux_ext = [extname for extname in all_extensions
             #             if extname is not None and (my_comp in extname and
             #                                         "FLUX_{0}".format(np.round(wavelength, 2)) in extname)]
             add_emission = np.zeros(shape=(self.content[cur_ext].header['NAXIS2'],
-                                           self.content[cur_ext].header['NAXIS1']), dtype=float)
+                                           self.content[cur_ext].header['NAXIS1']), dtype=np.float32)
             if len(all_flux_wl) == 0:
                 fluxrat_ext = [extname for extname in all_extensions
                                if extname is not None and (my_comp in extname and "FLUXRATIOS" in extname)]
@@ -1228,7 +1239,7 @@ class ISM:
                 for wl_index in wl_indexes:
                     add_emission += (self.content[cur_ext].data * self.content[fluxrat_ext].data[1, wl_index])
             else:
-                all_flux_wl_float = np.array(all_flux_wl).astype(float)
+                all_flux_wl_float = np.array(all_flux_wl).astype(np.float32)
                 wl_indexes = np.flatnonzero((all_flux_wl_float > (wavelength[0] - 0.01)) &
                                             (all_flux_wl_float < (wavelength[1] + 0.01)))
                 flux_ext_wl = all_flux_wl[wl_indexes]
@@ -1272,7 +1283,7 @@ class ISM:
         xx_sub, yy_sub = np.meshgrid(np.arange(xfin - xstart + 1), np.arange(yfin - ystart + 1))
         n_apertures = np.max(aperture_mask)
         aperture_centers = np.round(fibers_coords).astype(int)
-        spectrum = np.zeros(shape=(n_apertures, len(wl_grid)), dtype=float)
+        spectrum = np.zeros(shape=(n_apertures, len(wl_grid)), dtype=np.float32)
 
         radius = fibers_coords[0, 2]
         size = np.round(2 * radius).astype(int)
@@ -1335,32 +1346,33 @@ class ISM:
                     all_fluxes = np.array([self.content[my_comp + "_FLUX_" + wl].data[
                                                cur_mask_in_neb].reshape((yfin_neb - ystart_neb + 1,
                                                                          xfin_neb - xstart_neb + 1))
-                                           for wl in all_wavelength])
-                    all_wavelength = all_wavelength.astype(float)
+                                           for wl in all_wavelength], dtype=np.float32)
+                    all_wavelength = all_wavelength.astype(np.float32)
                 else:
                     all_fluxes = self.content[cur_ext].data[cur_mask_in_neb].reshape((1, yfin_neb - ystart_neb + 1,
-                                                                                      xfin_neb - xstart_neb + 1))
+                                                                                      xfin_neb - xstart_neb + 1)
+                                                                                     ).astype(np.float32)
 
                 if my_comp + "_LINEPROFILE" in self.content:
                     lsf = self.content[my_comp + "_LINEPROFILE"].data[
                           :, cur_mask_in_neb].reshape((len(self.vel_grid), yfin_neb - ystart_neb + 1,
-                                                       xfin_neb - xstart_neb + 1))
+                                                       xfin_neb - xstart_neb + 1)).astype(np.float32)
                 else:
                     if my_comp + "_VEL" in self.content:
                         vel = self.content[my_comp + "_VEL"].data[cur_mask_in_neb].reshape((yfin_neb - ystart_neb + 1,
                                                                                             xfin_neb - xstart_neb + 1))
                     else:
                         vel = np.zeros(shape=(yfin_neb - ystart_neb + 1, xfin_neb - xstart_neb + 1),
-                                       dtype=float) + self.sys_velocity.value
+                                       dtype=np.float32) + self.sys_velocity.value
                     if my_comp + "_DISP" in self.content:
                         disp = self.content[my_comp + "_DISP"].data[
                             cur_mask_in_neb].reshape((yfin_neb - ystart_neb + 1, xfin_neb - xstart_neb + 1))
                     else:
                         disp = np.zeros(shape=(yfin_neb - ystart_neb + 1, xfin_neb - xstart_neb + 1),
-                                        dtype=float) + self.turbulent_sigma.value
+                                        dtype=np.float32) + self.turbulent_sigma.value
                     lsf = np.exp(-np.power(
                         (self.vel_grid.value[:, None, None] - vel[None, :, :]) / disp[None, :, :], 2.) / 2)
-                    lsf = lsf / np.sum(lsf, axis=0)
+                    lsf = (lsf / np.sum(lsf, axis=0)).astype(np.float32)
 
                 if all_fluxes.shape[0] == 1:
                     data_in_apertures = \
@@ -1416,7 +1428,8 @@ class ISM:
                                         self.content[my_comp + "_FLUXRATIOS"].data[1, None, :]
                 wl_indexes = np.round((np.log(all_wavelength) - wl_logscale_highres[0]) * 1e6).astype(int)
                 rec = (wl_indexes > 0) & (wl_indexes < len(wl_logscale_highres))
-                spectrum_highres_log = np.zeros(shape=(len(selected_apertures), len(wl_logscale_highres)), dtype=float)
+                spectrum_highres_log = np.zeros(shape=(len(selected_apertures), len(wl_logscale_highres)),
+                                                dtype=np.float32)
                 win = (len(wl_logscale_lsf_highres) - 1) // 2
                 for ind, r in enumerate(rec):
                     if r:
