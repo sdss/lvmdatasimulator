@@ -67,10 +67,9 @@ class FiberBundle:
 
         if nrings is not None:
             log.warning('nrings is defined. It will limit the number of fibers selected.')
-
-        if nrings > 24:
-            log.warning('The maximum number of rings that can be simulated is 25.')
-            self.nrings = 24
+            if nrings > 24:
+                log.warning('The maximum number of rings that can be simulated is 25.')
+                self.nrings = 24
 
         self.angle = angle
 
@@ -91,7 +90,7 @@ class FiberBundle:
         elif self.bundle_name == 'central':
 
             # open the central fiber
-            mask = fiber_table['ring_id'] == 1
+            mask = fiber_table['ring_id'] == 0
             selected = fiber_table[mask].copy()
             log.info('Using only the central fiber.')
 
@@ -120,9 +119,9 @@ class FiberBundle:
             mask = selected['ring_id'] <= self.nrings
             selected = selected[mask].copy()
 
-        # if self.angle is not None:
-        #     log.info(f'Rotating the bundle to PA = {self.angle} deg.')
-        #     selected = self._rotates(selected)
+        if self.angle is not None:
+            log.info(f'Rotating the bundle to PA = {self.angle} deg.')
+            selected = self._rotates(selected)
 
         fibers = []
 
@@ -155,8 +154,9 @@ class FiberBundle:
 
         angle_rad = self.angle * np.pi / 180  # to radians
 
-        newx = table['x'] * np.cos(angle_rad) - table['y'] * np.sin(angle_rad)
-        newy = table['x'] * np.sin(angle_rad) + table['y'] * np.cos(angle_rad)
+        # Angle grows moving from north to east!
+        newx = table['x'] * np.cos(angle_rad) + table['y'] * np.sin(angle_rad)
+        newy = table['y'] * np.cos(angle_rad) - table['x'] * np.sin(angle_rad)
 
         table['x'] = newx
         table['y'] = newy
