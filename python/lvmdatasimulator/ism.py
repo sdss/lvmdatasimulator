@@ -25,7 +25,7 @@ from lvmdatasimulator import log
 import progressbar
 from joblib import Parallel, delayed
 from astropy.convolution import convolve_fft, kernels
-
+from pyneb import RedCorr
 fluxunit = u.erg / (u.cm ** 2 * u.s * u.arcsec ** 2)
 velunit = u.km / u.s
 
@@ -406,20 +406,23 @@ class Galaxy(Nebula):
         Method to obtain the brightness (or density) distribution of the nebula in cartesian coordinates
         """
         xx, yy = np.meshgrid(np.arange(self.width), np.arange(self.height))
+        angle = (self.PA + 90 * u.degree).to(u.radian).value
         mod = Sersic2D(amplitude=1, r_eff=(self.r_eff.to(u.pc) / self.pxscale.to(u.pc)).value,
                        n=self.n, x_0=(self.width - 1) / 2, y_0=(self.height - 1) / 2,
-                       ellip=1 - self.ax_ratio, theta=(self.PA + 90 * u.degree).to(u.radian).value)
+                       ellip=1 - self.ax_ratio, theta=angle)
         brt = mod(xx, yy)
 
-        xct = (xx - (self.width - 1) / 2) * np.cos(self.PA.to(u.radians)) + \
-              (yy - (self.height - 1) / 2) * np.sin(self.PA.to(u.radians))
-        yct = (xx - (self.width - 1) / 2) * np.sin(self.PA.to(u.radians)) - \
-              (yy - (self.height - 1) / 2) * np.cos(self.PA.to(u.radians))
+        xct = (xx - (self.width - 1) / 2) * np.cos(angle) + \
+              (yy - (self.height - 1) / 2) * np.sin(angle)
+        yct = (xx - (self.width - 1) / 2) * np.sin(angle) - \
+              (yy - (self.height - 1) / 2) * np.cos(angle)
         rmaj = self.rad_lim * (self.r_eff.to(u.pc) / self.pxscale.to(u.pc)).value
         rmin = self.rad_lim * (self.r_eff.to(u.pc) / self.pxscale.to(u.pc)).value * self.ax_ratio
+        mask = np.ones_like(brt, dtype=np.float32)
         rec = (xct ** 2 / rmaj ** 2) + (yct ** 2 / rmin ** 2) >= 1
-        brt[rec] = 0
-
+        mask[rec] = 0
+        mask = convolve_fft(mask, kernels.Gaussian2DKernel(3.), fill_value=0, allow_huge=True)
+        brt = brt * mask
         brt = brt.reshape(self.height, self.width, 1)
         return brt
 
@@ -1108,7 +1111,8 @@ class ISM:
                                                           name=hh.header.get('EXTNAME')))
                 return True
 
-    def calc_extinction(self, wavelength=6562.81, x0=0, y0=0, xs=None, ys=None, extinction_name=None, logscale=False):
+    def calc_extinction(self, wavelength=6562.81, x0=0, y0=0, xs=None, ys=None, extension_name=None, logscale=False,
+                        extinction_law='F99', R_V=3.1):
         """
         Calculate coefficient to reduce flux due to extinction at given wavelength(s)
 
@@ -1119,8 +1123,11 @@ class ISM:
             ys: y-size (in pixels) of the area for calculations (if None => then just pixel x0,y0 is considered; ys=1)
             wavelength: in angstrom, particular wavelength (or wavelengths)
                 at which the calculations should be performed
-            extinction_name (str): name of the extension for current dark nebula
+            extension_name (str): name of the extension for current dark nebula
             logscale: True if the wavelength is np.log(wavelength)
+            extinction_law: 'F99' or 'CCM89' or any other extinction law from pyneb
+            R_V:
+
         Returns:
             None (if no any dark nebula at particular location) or np.array of (nlines, ys, xs) shape
         """
@@ -1141,7 +1148,7 @@ class ISM:
             else:
                 return True
 
-        if extinction_name is None:
+        if extension_name is None:
             all_dark_nebulae = [hdu.header.get('EXTNAME') for hdu in self.content if
                                 hdu.header.get('EXTNAME') is not None and
                                 ("BRIGHTNESS" in hdu.header.get('EXTNAME')) and
@@ -1149,21 +1156,41 @@ class ISM:
                                 check_in_region(hdu.header.get('X0'), hdu.header.get('Y0'),
                                                 hdu.header.get('NAXIS1'), hdu.header.get('NAXIS2'))]
         else:
-            if not check_in_region(self.content[extinction_name].header.get('X0'),
-                                   self.content[extinction_name].header.get('Y0'),
-                                   self.content[extinction_name].header.get('NAXIS1'),
-                                   self.content[extinction_name].header.get('NAXIS2')):
+            if not check_in_region(self.content[extension_name].header.get('X0'),
+                                   self.content[extension_name].header.get('Y0'),
+                                   self.content[extension_name].header.get('NAXIS1'),
+                                   self.content[extension_name].header.get('NAXIS2')):
                 return None
-            all_dark_nebulae = [extinction_name]
+            all_dark_nebulae = [extension_name]
         if len(all_dark_nebulae) == 0:
             return None
-        if type(wavelength) in [float, int]:
-            wavelength = np.array([wavelength])
-        ext_map = np.ones(shape=(len(wavelength), y1 - y0 + 1, x1 - x0 + 1), dtype=float)
-        # NEXT: ADD correct extinction calculations
-        # xx, yy = np.meshgrid(np.arange(y1 - y0 + 1), np.arange(x1 - x0 + 1))
-        # for xy in zip(xx.ravel(), yy.ravel()):
-        #     pass
+        if type(wavelength) in [float, int, np.float64, np.float32]:
+            wavelength = np.atleast_1d(wavelength)
+        ext_map = np.ones(shape=(len(wavelength), y1 - y0 + 1, x1 - x0 + 1), dtype=np.float32)
+
+        for dark_nebula in all_dark_nebulae:
+            cur_neb_av = np.zeros(shape=(y1 - y0 + 1, x1 - x0 + 1), dtype=np.float32)
+            cur_neb_x0 = np.clip(x0 - self.content[dark_nebula].header.get('X0'), 0, None)
+            cur_neb_y0 = np.clip(y0 - self.content[dark_nebula].header.get('Y0'), 0, None)
+            cur_neb_x1 = self.content[dark_nebula].header.get('NAXIS1') - 1 - np.clip(
+                self.content[dark_nebula].header.get('X0') + self.content[dark_nebula].header.get('NAXIS1') - 1 - x1,
+                0, None)
+            cur_neb_y1 = self.content[dark_nebula].header.get('NAXIS2') - 1 - np.clip(
+                self.content[dark_nebula].header.get('Y0') + self.content[dark_nebula].header.get('NAXIS2') - 1 - y1,
+                0, None)
+            cur_neb_av[cur_neb_y0 + self.content[dark_nebula].header.get('Y0') - y0:
+                       cur_neb_y1 + self.content[dark_nebula].header.get('Y0') - y0 + 1,
+                       cur_neb_x0 + self.content[dark_nebula].header.get('X0') - x0:
+                       cur_neb_x1 + self.content[dark_nebula].header.get('X0') - x0 + 1
+                       ] = self.content[dark_nebula].data[cur_neb_y0: cur_neb_y1 + 1, cur_neb_x0: cur_neb_x1 + 1]
+            cur_extinction_law = extinction_law
+            cur_r_v = R_V
+            if self.content[dark_nebula].header.get('EXT_LAW'):
+                cur_extinction_law = self.content[dark_nebula].header.get('EXT_LAW')
+            if self.content[dark_nebula].header.get('EXT_RV'):
+                cur_r_v = self.content[dark_nebula].header.get('EXT_RV')
+            rc = RedCorr(E_BV=cur_neb_av, R_V=cur_r_v, law=cur_extinction_law)
+            ext_map = ext_map / (rc.getCorr(wavelength))
         return ext_map
 
     def get_map(self, wavelength=6562.81, get_continuum=False):
@@ -1209,7 +1236,7 @@ class ISM:
                     continue
                 ext_map = self.calc_extinction(wavelength=(wavelength[-1] + wavelength[0])/2., xs=self.width,
                                                ys=self.height,
-                                               extinction_name=cur_ext)
+                                               extension_name=cur_ext)
                 if ext_map is not None:
                     map_2d = map_2d * ext_map[0]
                 continue
@@ -1330,7 +1357,7 @@ class ISM:
                 # for xy in zip(xx[cur_neb_ap].ravel(), yy[cur_neb_ap].ravel()):
                 #   self._spectrum[:, xy[1], xy[0]] = self._spectrum[:, xy[1], xy[0]] * \
                 #                             self.calc_extinction(wl_logscale_highres, xy[0], xy[1],
-                #                                                  extinction_name=cur_ext, logscale=True)
+                #                                                  extension_name=cur_ext, logscale=True)
                 bar.update(neb_index + 1)
                 continue
             my_comp = "_".join(cur_ext.split("_")[:2])
@@ -1458,7 +1485,7 @@ class ISM:
                                     aperture_centers[selected_apertures, 0] - xstart_neb - x0]
                 data_in_apertures = data_in_apertures.reshape((data_in_apertures.shape[0] * data_in_apertures.shape[1],
                                                                1))
-                spectrum[selected_apertures, :] += continuum[None, :] * data_in_apertures[:, 0]
+                spectrum[selected_apertures, :] += continuum[None, :] * data_in_apertures
 
             bar.update(neb_index + 1)
         bar.finish()
