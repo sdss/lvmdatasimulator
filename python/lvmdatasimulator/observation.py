@@ -47,6 +47,19 @@ class Observation:
         sky_transparency (str, optional):
             sky transparency during the observations. Only three values available: 'PHOT', 'CLR',
             'THIN'. Defaults to 'PHOT'.
+        airmass (float, optional):
+            Airmass of the target when observed. If set to None, the airmass will be automatically
+            calculated from the target coordinates and the date and time of observetions.
+            Defaults to None
+        days_moon (int, optional):
+            days from new monns at the moment of the observation. If set to None, it will be
+            automatically calculated from the date and time of observetions. Defaults to None.
+        sky_template (str, optional):
+            full path to the sky models to use during the simulation. If set to None, the number
+            of days from new_moon will be used to select one of the models for average conditions
+            extracted from the ESO La Silla-Paranal sky model during the simulatin.
+            Defaults to None
+
 
     Attributes:
         total_time (float):
@@ -80,11 +93,20 @@ class Observation:
     nexp: int = 1  # number of exposures
     seeing: u.arcsec = 1 * u.arcsec  # seeing at zenit in the V-band (5500 A?)
     sky_transparency: str = 'PHOT'
+    airmass: float = None
+    days_moon: int = None
+    sky_template: str = None
 
     def __post_init__(self):
         self.time = Time(self.time, format='isot', scale='utc')  # time of obs.
         if self.sky_transparency not in ['PHOT', 'CLR', 'THIN']:
             raise ValueError(f'{self.sky_transparency} is not accepted.')
+
+        if self.days_moon is None:
+            self.days_moon = self.days_from_new_moon()
+
+        if self.airmass is None:
+            self.airmass = self.target_coords_altaz.secz.value
 
     @functools.cached_property
     def localtime(self):
@@ -154,18 +176,12 @@ class Observation:
         '''get moon illumination'''
         return round(moon_illumination(self.time), 3)
 
-    @functools.cached_property
     def days_from_new_moon(self):
         '''This is greatly approximated'''
         conversion = np.array([0, 0.01, 0.05, 0.11, 0.19, 0.27, 0.36, 0.46, 0.55,
                                0.65, 0.73, 0.81, 0.88, 0.93, 1])
         diff = np.abs(conversion - self.moon_illumination)
         return np.argmin(diff)
-
-    @functools.cached_property
-    def airmass(self):
-        '''get airmass of target from coordinates'''
-        return self.target_coords_altaz.secz.value
 
     def plot_visibilities(self, dir='.', show=False):
 
