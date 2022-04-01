@@ -40,13 +40,12 @@ class Fiber:
     def to_table(self):
 
         out = {
-            'id': self.id,
-            'ring': self.ring,
-            'position': self.position,
-            'x': self.x,
-            'y': self.y
+            'id': [self.id],
+            'ring': [self.ring],
+            'position': [self.position],
+            'x': [self.x],
+            'y': [self.y]
         }
-
         return Table(out)
 
 
