@@ -33,7 +33,8 @@ class Fiber:
         self.nypix = 5 * self.dispersion  # size of 2D spectrum
 
     def __str__(self):
-        string = f'Fiber {self.id} in ring {self.ring} located at {self.x}, {self.y}'
+        string = f'Fiber {self.id} in ring {self.ring}, position {self.position}' +\
+            f'located at {self.x}, {self.y}'
         return string
 
 
