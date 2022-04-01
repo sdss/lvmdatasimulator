@@ -18,7 +18,6 @@
 
 import numpy as np
 import astropy.units as u
-import functools
 
 from collections import OrderedDict
 from scipy import special
@@ -37,7 +36,7 @@ from lvmdatasimulator import log, ROOT_DIR
 from lvmdatasimulator.utils import round_up_to_odd
 from joblib import Parallel, delayed
 import os
-import sys
+# import sys
 
 
 @dataclass(frozen=True)
@@ -236,8 +235,11 @@ class Simulator:
         if not os.path.isdir(self.outdir):
             os.mkdir(self.outdir)
 
-    @functools.cached_property
-    def extinction(self, extinction_file=f"{ROOT_DIR}/data/sky/LVM_LVM160_KLAM.dat"):
+        self.extinction = self.extract_extinction()
+        self.sky = self.extract_sky()
+        self.target_spectra = self.extract_target_spectra()
+
+    def extract_extinction(self, extinction_file=f"{ROOT_DIR}/data/sky/LVM_LVM160_KLAM.dat"):
         """
         Returns atmospheric extinction coefficient sampled at instrumental wavelengths
 
@@ -253,13 +255,15 @@ class Simulator:
         log.info('Resample extinction file to instrument wavelength solution.')
         return self._resample_and_convolve(data["col1"], data["col2"])
 
-    @functools.cached_property
-    def sky(self):
+    def extract_sky(self):
 
-        days_moon = self.observation.days_from_new_moon
-        sky_file = f"{ROOT_DIR}/data/sky/LVM_{self.telescope.name}_SKY_{days_moon}.dat"
+        if self.observation.sky_template is None:
+            days_moon = self.observation.days_moon
+            log.info(f'Simulating the sky emission {days_moon} from new moon.')
+            sky_file = f"{ROOT_DIR}/data/sky/LVM_{self.telescope.name}_SKY_{days_moon}.dat"
+        else:
+            sky_file = self.observation.sky_template
 
-        log.info(f'Simulating the sky emission {days_moon} from new moon.')
         log.info(f'Using sky file: {sky_file}')
 
         area_fiber = np.pi * (self.bundle.fibers[0].diameter / 2) ** 2  # all fibers same diam.
@@ -317,9 +321,8 @@ class Simulator:
 
         return out_spec
 
-    @functools.cached_property
-    def target_spectra(self):
-        """Extract spectra of the terget from the field object"""
+    def extract_target_spectra(self):
+        """Extract spectra of the target from the field object"""
 
         obj_spec = OrderedDict()
         wl_grid = np.arange(3647, 9900.01, 0.06) * u.AA
@@ -400,7 +403,6 @@ class Simulator:
             self._save_outputs_with_noise(branch)
             log.info('Calibrated outputs')
             self._save_outputs_flux(branch)
-
 
     def _save_inputs(self, branch):
 
@@ -779,6 +781,10 @@ class Simulator:
             target_out = np.zeros((self.source.npixels, self.source.npixels))
             total_out = np.zeros((self.source.npixels, self.source.npixels))
             wcs = self.source.wcs
+            head = wcs.to_header()
+
+            head['MIN_WAVE'] = min_wave
+            head['MAX_WAVE'] = max_wave
 
             # I'm not interpolating to the exact wavelength
 
@@ -793,7 +799,7 @@ class Simulator:
             target_out = self._populate_map(target_out, target_val, ids, wcs)
             filename = f"{self.outdir}/{self.source.name}_{branch.name}_{self.bundle.bundle_name}" +\
                        "_target_map.fits"
-            hdu = fits.PrimaryHDU(data=target_out, header=wcs.to_header())
+            hdu = fits.PrimaryHDU(data=target_out, header=head)
             hdu.writeto(filename, overwrite=True)
             log.info(f' Saving {filename}...')
 
@@ -801,7 +807,7 @@ class Simulator:
             total_out = self._populate_map(total_out, total_val, ids, wcs)
             filename = f"{self.outdir}/{self.source.name}_{branch.name}_{self.bundle.bundle_name}" +\
                        "_total_map.fits"
-            hdu = fits.PrimaryHDU(data=total_out, header=wcs.to_header())
+            hdu = fits.PrimaryHDU(data=total_out, header=head)
             hdu.writeto(filename, overwrite=True)
             log.info(f' Saving {filename}...')
 
