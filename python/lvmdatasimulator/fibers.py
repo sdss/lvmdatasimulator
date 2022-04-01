@@ -37,6 +37,18 @@ class Fiber:
             f'located at {self.x}, {self.y}'
         return string
 
+    def to_table(self):
+
+        out = {
+            'id': self.id,
+            'ring': self.ring,
+            'position': self.position,
+            'x': self.x,
+            'y': self.y
+        }
+
+        return Table(out)
+
 
 class FiberBundle:
     """
