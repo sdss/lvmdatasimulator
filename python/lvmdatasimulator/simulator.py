@@ -23,6 +23,7 @@ from collections import OrderedDict
 from scipy import special
 from spectres import spectres
 from astropy.io import ascii, fits
+from astropy.table import vstack
 from dataclasses import dataclass
 from astropy.convolution import Gaussian1DKernel, convolve
 
@@ -422,8 +423,7 @@ class Simulator:
         wave_hdu.header["BUNIT"] = "Angstrom"
         primary.header["EXT3"] = "WAVE"
 
-        col1 = fits.Column(name="ID", format="10A", array=ids)
-        ids_hdu = fits.BinTableHDU.from_columns([col1], name="FIBERID")
+        ids_hdu = fits.BinTableHDU(ids)
         primary.header["EXT4"] = "FIBERID"
 
         hdul = fits.HDUList([primary, signal_hdu, sky_hdu, wave_hdu, ids_hdu])
@@ -464,8 +464,7 @@ class Simulator:
         wave_hdu.header["BUNIT"] = "Angstrom"
         primary.header["EXT6"] = "WAVE"
 
-        col1 = fits.Column(name="ID", format="10A", array=ids)
-        ids_hdu = fits.BinTableHDU.from_columns([col1], name="FIBERID")
+        ids_hdu = fits.BinTableHDU(ids)
         primary.header["EXT7"] = "FIBERID"
 
         hdul = fits.HDUList([primary, target_hdu, total_hdu, noise_hdu, stn_hdu, sky_hdu, wave_hdu,
@@ -506,8 +505,7 @@ class Simulator:
         wave_hdu.header["BUNIT"] = "Angstrom"
         primary.header["EXT6"] = "WAVE"
 
-        col1 = fits.Column(name="ID", format="10A", array=ids)
-        ids_hdu = fits.BinTableHDU.from_columns([col1], name="FIBERID")
+        ids_hdu = fits.BinTableHDU(ids)
         primary.header["EXT7"] = "FIBERID"
 
         hdul = fits.HDUList([primary, target_hdu, total_hdu, noise_hdu, stn_hdu, sky_hdu, wave_hdu,
@@ -685,12 +683,13 @@ class Simulator:
         sky = np.zeros((nfibers, branch.wavecoord.npix))
 
         for i, fiber in enumerate(self.bundle.fibers):
+            fib_id.append(fiber.to_table())
 
-            fib_id.append(fiber.id)
             signal[i, :] = self.target_spectra[fiber.id][branch.name]
             sky[i, :] = self.sky[fiber.id][branch.name]
 
-        return np.array(fib_id), signal, sky
+        fib_id = vstack(fib_id)
+        return fib_id, signal, sky
 
     def _reorganize_to_rss(self, branch, exposures):
 
@@ -704,15 +703,16 @@ class Simulator:
         noise_el = np.zeros((nfibers, branch.wavecoord.npix))
         snr = np.zeros((nfibers, branch.wavecoord.npix))
 
-        for i, (fiber_id, spectra) in enumerate(exposures.items()):
-            fib_id.append(fiber_id)
+        for i, spectra in enumerate(exposures.values()):
+            fib_id.append(self.bundle.fibers[i].to_table())
             target_w_noise[i, :] = spectra["target"][branch.name]
             total_w_noise[i, :] = spectra["signal"][branch.name]
             noise_el[i, :] = spectra["noise"][branch.name]
             sky_el[i, :] = spectra["sky"][branch.name]
             snr[i, :] = spectra["snr"][branch.name]
 
-        return np.array(fib_id), target_w_noise, total_w_noise, noise_el, sky_el, snr
+        fib_id = vstack(fib_id)
+        return fib_id, target_w_noise, total_w_noise, noise_el, sky_el, snr
 
     def _create_primary_hdu(self, branch):
 
@@ -730,7 +730,7 @@ class Simulator:
         primary.header["BRANCH"] = branch.name
         primary.header["MOON"] = (self.observation.moon_distance.value,
                                   "Fractional moon illumination")
-        primary.header["DAY-MOON"] = (self.observation.days_from_new_moon,
+        primary.header["DAY-MOON"] = (self.observation.days_moon,
                                       "Days from new moon")
 
         return primary
@@ -783,8 +783,8 @@ class Simulator:
             wcs = self.source.wcs
             head = wcs.to_header()
 
-            head['MIN_WAVE'] = min_wave
-            head['MAX_WAVE'] = max_wave
+            head['MIN_WAVE'] = min_wave.value
+            head['MAX_WAVE'] = max_wave.value
 
             # I'm not interpolating to the exact wavelength
 
@@ -839,7 +839,7 @@ class Simulator:
         yy, xx = np.mgrid[:map.shape[0], :map.shape[1]]
 
         for fiber in self.bundle.fibers:
-            flux = values[ids == fiber.id]
+            flux = values[ids['id'] == fiber.id]
             fiber_coord = self.source.coord.spherical_offsets_by(fiber.x, fiber.y)
 
             fiber_x, fiber_y = wcs.world_to_pixel(fiber_coord)
