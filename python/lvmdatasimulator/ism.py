@@ -1354,10 +1354,11 @@ class ISM:
 
             if self.content[cur_ext].header.get("DARK"):
                 # !!! ADD TREATEMENT OF EXTINCTION !!!
-                # for xy in zip(xx[cur_neb_ap].ravel(), yy[cur_neb_ap].ravel()):
+                # for xy inx zip(xx[cur_neb_ap].ravel(), yy[cur_neb_ap].ravel()):
                 #   self._spectrum[:, xy[1], xy[0]] = self._spectrum[:, xy[1], xy[0]] * \
                 #                             self.calc_extinction(wl_logscale_highres, xy[0], xy[1],
                 #                                                  extension_name=cur_ext, logscale=True)
+                log.warning("Correction of the spectra for ISM extintion is not implemented yet.")
                 bar.update(neb_index + 1)
                 continue
             my_comp = "_".join(cur_ext.split("_")[:2])
