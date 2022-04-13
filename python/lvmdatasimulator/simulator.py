@@ -266,7 +266,8 @@ class Simulator:
         wl_grid = np.arange(3647, 9900.01, 0.06) * u.AA
 
         log.info(f"Recovering target spectra for {self.bundle.nfibers} fibers.")
-        index, spectra = self.source.extract_spectra(self.bundle.fibers, wl_grid)
+        index, spectra = self.source.extract_spectra(self.bundle.fibers, wl_grid,
+                                                     obs_coords=self.observation.target_coords)
 
         log.info('Resampling spectra to the instrument wavelength solution.')
         for fiber in self.bundle.fibers:
