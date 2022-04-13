@@ -20,6 +20,7 @@ from astropy.visualization import astropy_mpl_style, quantity_support
 plt.style.use(astropy_mpl_style)
 quantity_support()
 
+import os
 
 @dataclass
 class Observation:
@@ -62,6 +63,12 @@ class Observation:
 
 
     Attributes:
+        localtime (Time):
+            local time at the observatory
+        target_coords (SkyCoord):
+            Equatorial coordinates of the target field.
+        target_coords_altaz (SkyCoord):
+            target coordinates in the Altazimuthal system.
         total_time (float):
             total exposure time of the observations. It's the results of nexp * exptime.
         moon_coords (skycoords):
@@ -76,10 +83,10 @@ class Observation:
             mjd date of the observations
         jd (float):
             jd date of the observations
-
-
-    Raises:
-        ValueError: [description]
+        moon_distance (astropy.units):
+            separation between the target and the moon.
+        moon_illumination (float):
+            return the moon illumination at a specific time.
 
     """
 
@@ -110,6 +117,7 @@ class Observation:
 
     @functools.cached_property
     def localtime(self):
+        """ Return the local time based on the UT time and on the UTC offset"""
         return self.time + self.utcoffset
 
     @functools.cached_property
@@ -124,6 +132,7 @@ class Observation:
 
     @functools.cached_property
     def _altaz(self):
+        """ Convert equatorial coordinates to altazimuthal"""
         return AltAz(obstime=self.time, location=self.location)
 
     @functools.cached_property
@@ -177,13 +186,27 @@ class Observation:
         return round(moon_illumination(self.time), 3)
 
     def days_from_new_moon(self):
-        '''This is greatly approximated'''
+        '''This is greatly approximated.
+        Return the distance between the observations and the closest new moon in days.'''
         conversion = np.array([0, 0.01, 0.05, 0.11, 0.19, 0.27, 0.36, 0.46, 0.55,
                                0.65, 0.73, 0.81, 0.88, 0.93, 1])
         diff = np.abs(conversion - self.moon_illumination)
         return np.argmin(diff)
 
-    def plot_visibilities(self, dir='.', show=False):
+    def plot_visibilities(self, dir='./', show=False):
+        """
+        Plot the visibility of the target during the observations. Also the visibility of the moon
+        and the sun during the day are plotted.
+
+        Not sure if it is working at this stage
+
+        Args:
+            dir (str, optional):
+                Directory where to save the output image. Defaults to '.'.
+            show (bool, optional):
+                If True, the plot is showed before saving. Otherwise, the plot is directly saved
+                to file. Defaults to False.
+        """
 
         # preparing the plot for the full day
         delta_midnight = np.linspace(-12, 12, 100) * u.hour
@@ -194,8 +217,8 @@ class Observation:
         moon_altaz = self.moon_coords.transform_to(frames)
         target_altaz = self.target_coords.transform_to(frames)
 
-        print(moon_altaz.alt)
-        print(delta_midnight)
+        # print(moon_altaz.alt)
+        # print(delta_midnight)
 
         deltaobs = np.arange(0, self.total_time.value, 120) * u.s
         delta_time = self.time - midnight
@@ -219,7 +242,7 @@ class Observation:
         ax.set_ylim(0 * u.deg, 90 * u.deg)
         ax.set_xlabel('Hours from UT Midnight')
         ax.set_ylabel('Altitude [deg]')
-        fig.savefig(f'{dir}/{self.name}_visibility.png')
+        fig.savefig(os.path.join(dir, f'{self.name}_visibility.png'))
         if show:
             plt.show()
         else:
