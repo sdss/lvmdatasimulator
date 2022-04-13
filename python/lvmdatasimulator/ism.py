@@ -25,14 +25,9 @@ from lvmdatasimulator import log
 import progressbar
 from joblib import Parallel, delayed
 from astropy.convolution import convolve_fft, kernels
-from pyneb import RedCorr
+from lvmdatasimulator.utils import calc_circular_mask, set_default_dict_values, ism_extinction
 fluxunit = u.erg / (u.cm ** 2 * u.s * u.arcsec ** 2)
 velunit = u.km / u.s
-
-
-def set_default_dict_values(mydict, key_to_check, default_value):
-    if key_to_check not in mydict:
-        mydict[key_to_check] = default_value
 
 
 def brightness_inhomogeneities_sphere(harm_amplitudes, ll, phi_cur, theta_cur, rho, med, radius, thickness):
@@ -265,6 +260,86 @@ class Nebula:
         lprf = np.zeros(shape=len(self.los_velocity), dtype=float)
         lprf[np.floor(len(lprf) / 2.).astype(int)] = 1.
         return lprf
+
+
+@dataclass
+class Rectangle(Nebula):
+    """
+    Class defining a simple rectangular component.
+    This is equal to Nebula, but no perturbations and turbulence by default
+    """
+    perturb_amplitude: float = 0.0  # Maximal amplitude of perturbations
+    turbulent_sigma: velunit = 0 * velunit  # Velocity dispersion due to turbulence; included in calculations of LSF
+    #!!! TO BE FIXED: currently width and height should be in pixels, not in pc.
+
+
+@dataclass
+class Ellipse(Nebula):
+    """
+    Class defining a simple elliptical component.
+    No perturbations and turbulence by default
+    """
+    perturb_amplitude: float = 0.0  # Maximal amplitude of perturbations
+    turbulent_sigma: velunit = 0 * velunit  # Velocity dispersion due to turbulence; included in calculations of LSF
+    radius: u.pc = 1.0 * u.pc  # Radius along the major axis of the ellipse (or radius of the circle)
+    PA: u.degree = 90 * u.degree  # position angle of the major axis
+    ax_ratio: float = 1.  # ratio of minor/major axes
+
+    def __post_init__(self):
+        self.width = (np.round(np.abs(self.radius.to(u.pc) / self.pxscale * np.sin(self.PA)) +
+                               np.abs(self.radius.to(u.pc) / self.pxscale *
+                                      self.ax_ratio * np.cos(self.PA))).astype(int) * 2 + 1).value
+        self.height = (np.round(np.abs(self.radius.to(u.pc) / self.pxscale * np.cos(self.PA)) +
+                                np.abs(self.radius.to(u.pc) / self.pxscale *
+                                       self.ax_ratio * np.sin(self.PA))).astype(int) * 2 + 1).value
+        self._npix_los = 1
+        if (self.xc is not None) and (self.yc is not None):
+            self.x0 = (self.xc - np.round((self.width - 1) / 2)).astype(int)
+            self.y0 = (self.yc - np.round((self.height - 1) / 2)).astype(int)
+        elif (self.x0 is not None) and (self.y0 is not None):
+            self.xc = (self.x0 + np.round((self.width - 1) / 2)).astype(int)
+            self.yc = (self.y0 + np.round((self.height - 1) / 2)).astype(int)
+        self._ref_line_id = 0
+        self.linerat_constant = True  # True if the ratio of line fluxes shouldn't change across the nebula
+
+    @functools.cached_property
+    def _brightness_3d_cartesian(self):
+        """
+        Method to obtain the brightness (or density) distribution of the nebula in cartesian coordinates
+        """
+        xx, yy = np.meshgrid(np.arange(self.width), np.arange(self.height))
+        brt = np.ones(shape=(self.height, self.width), dtype=np.float32)
+        angle = (self.PA + 90 * u.degree).to(u.radian).value
+        xct = (xx - (self.width - 1) / 2) * np.cos(angle) + \
+              (yy - (self.height - 1) / 2) * np.sin(angle)
+        yct = (xx - (self.width - 1) / 2) * np.sin(angle) - \
+              (yy - (self.height - 1) / 2) * np.cos(angle)
+        rmaj = (self.radius.to(u.pc) / self.pxscale.to(u.pc)).value
+        rmin = (self.radius.to(u.pc) / self.pxscale.to(u.pc)).value * self.ax_ratio
+        rec = (xct ** 2 / rmaj ** 2) + (yct ** 2 / rmin ** 2) >= 1
+        brt[rec] = 0
+        brt = brt.reshape((self.height, self.width, 1))
+        return brt
+
+
+@dataclass
+class Circle(Ellipse):
+    """
+    Class defining a simple circular component.
+    """
+    def __post_init__(self):
+        self.ax_ratio = 1.
+        self.width = int(np.round(self.radius.to(u.pc) / self.pxscale * 2).value) + 1
+        self.height = int(np.round(self.radius.to(u.pc) / self.pxscale * 2).value) + 1
+        self._npix_los = 1
+        if (self.xc is not None) and (self.yc is not None):
+            self.x0 = (self.xc - np.round((self.width - 1) / 2)).astype(int)
+            self.y0 = (self.yc - np.round((self.height - 1) / 2)).astype(int)
+        elif (self.x0 is not None) and (self.y0 is not None):
+            self.xc = (self.x0 + np.round((self.width - 1) / 2)).astype(int)
+            self.yc = (self.y0 + np.round((self.height - 1) / 2)).astype(int)
+        self._ref_line_id = 0
+        self.linerat_constant = True  # True if the ratio of line fluxes shouldn't change across the nebula
 
 
 @dataclass
@@ -758,7 +833,7 @@ class ISM:
         """
         Method to add the particular nebula to the ISM object and to the output multi-extensions fits file
         """
-        if type(obj_to_add) not in [Nebula, Bubble, Filament, DIG, Cloud, Galaxy]:
+        if type(obj_to_add) not in [Nebula, Bubble, Filament, DIG, Cloud, Galaxy, Ellipse, Circle, Rectangle]:
             log.warning('Skip nebula of wrong type ({0})'.format(type(obj_to_add)))
             return
 
@@ -844,7 +919,8 @@ class ISM:
             log.warning('Cannot generate nebulae as the input is not a list or tuple')
             return None
         all_objects = [cobj for cobj in all_objects if cobj.get('type') in ['Nebula', 'Bubble', 'Galaxy',
-                                                                            'Filament', 'DIG', 'Cloud']]
+                                                                            'Filament', 'DIG', 'Cloud',
+                                                                            'Rectangle', 'Circle', 'Ellipse']]
         n_objects = len(all_objects)
         log.info("Start generating {} nebulae".format(n_objects))
         bar = progressbar.ProgressBar(max_value=n_objects).start()
@@ -924,7 +1000,10 @@ class ISM:
                         (cur_obj.get('X') and cur_obj.get('Y'))):
                     log.warning("Wrong set of parameters for the nebula #{0}: skip this one".format(ind_obj))
                     continue
-                if (cur_obj['type'] in ["Bubble", "Cloud"]) and (cur_obj['radius'] == 0):
+                if cur_obj['type'] in ['Rectangle', 'Nebula'] and not (('width' in cur_obj) and ('height' in cur_obj)):
+                    log.warning("Wrong set of parameters for the nebula #{0}: skip this one".format(ind_obj))
+                    continue
+                if (cur_obj['type'] in ["Bubble", "Cloud", "Ellipse", 'Circle']) and (cur_obj['radius'] == 0):
                     log.warning("Wrong set of parameters for the nebula #{0}: skip this one".format(ind_obj))
                     continue
                 if cur_obj['type'] == 'Filament' and not (('length' in cur_obj) and ('PA' in cur_obj)):
@@ -1031,8 +1110,49 @@ class ISM:
                                               pxscale=self.pxscale * (cur_obj['distance'].to(u.pc) /
                                                                       self.distance.to(u.pc)),
                                               )
+                elif cur_obj['type'] == "Ellipse":
+                    generated_object = Ellipse(xc=x, yc=y,
+                                               max_brightness=cur_obj.get('max_brightness'),
+                                               max_extinction=cur_obj.get('max_extinction'),
+                                               radius=cur_obj['radius'],
+                                               ax_ratio=cur_obj['ax_ratio'],
+                                               PA=cur_obj['PA'],
+                                               spectrum_id=cloudy_model_index,
+                                               turbulent_sigma=cur_obj['turbulent_sigma'],
+                                               sys_velocity=cur_obj['sys_velocity'],
+                                               pxscale=self.pxscale * (cur_obj['distance'].to(u.pc) /
+                                                                       self.distance.to(u.pc)),
+                                               perturb_scale=cur_obj['perturb_scale'],
+                                               perturb_amplitude=cur_obj['perturb_amplitude'],
+                                               )
+                elif cur_obj['type'] == "Circle":
+                    generated_object = Circle(xc=x, yc=y,
+                                              max_brightness=cur_obj.get('max_brightness'),
+                                              max_extinction=cur_obj.get('max_extinction'),
+                                              radius=cur_obj['radius'],
+                                              spectrum_id=cloudy_model_index,
+                                              turbulent_sigma=cur_obj['turbulent_sigma'],
+                                              sys_velocity=cur_obj['sys_velocity'],
+                                              pxscale=self.pxscale * (cur_obj['distance'].to(u.pc) /
+                                                                      self.distance.to(u.pc)),
+                                              perturb_scale=cur_obj['perturb_scale'],
+                                              perturb_amplitude=cur_obj['perturb_amplitude'],
+                                              )
+                elif cur_obj['type'] == "Rectangle" or (cur_obj['type'] == "Nebula"):
+                    generated_object = Rectangle(xc=x, yc=y,
+                                                 width=cur_obj.get('width'), height=cur_obj.get('width'),
+                                                 max_brightness=cur_obj.get('max_brightness'),
+                                                 max_extinction=cur_obj.get('max_extinction'),
+                                                 spectrum_id=cloudy_model_index,
+                                                 turbulent_sigma=cur_obj['turbulent_sigma'],
+                                                 sys_velocity=cur_obj['sys_velocity'],
+                                                 pxscale=self.pxscale * (cur_obj['distance'].to(u.pc) /
+                                                                      self.distance.to(u.pc)),
+                                                 perturb_scale=cur_obj['perturb_scale'],
+                                                 perturb_amplitude=cur_obj['perturb_amplitude'],
+                                              )
                 else:
-                    log.warning("Unexpected type of the nebula #{0}: skip this one".format(ind_obj))
+                    log.warning("Unrecognized type of the nebula #{0}: skip this one".format(ind_obj))
                     continue
             if cloudy_model_index is not None:
                 if cur_obj['linerat_constant']:
@@ -1189,8 +1309,8 @@ class ISM:
                 cur_extinction_law = self.content[dark_nebula].header.get('EXT_LAW')
             if self.content[dark_nebula].header.get('EXT_RV'):
                 cur_r_v = self.content[dark_nebula].header.get('EXT_RV')
-            rc = RedCorr(E_BV=cur_neb_av, R_V=cur_r_v, law=cur_extinction_law)
-            ext_map = ext_map / (rc.getCorr(wavelength))
+            ext_map = ext_map * ism_extinction(av=cur_neb_av, r_v=cur_r_v,
+                                               ext_law=cur_extinction_law, wavelength=wavelength)
         return ext_map
 
     def get_map(self, wavelength=6562.81, get_continuum=False):
@@ -1223,7 +1343,8 @@ class ISM:
         for cur_ext in all_extensions_brt:
             my_comp = "_".join(cur_ext.split("_")[:2])
             if get_continuum and (my_comp + "_CONTINUUM" in all_extensions):
-                wl_grid = np.linspace(wavelength[0], wavelength[1], 10)
+                n_wl_bins = int(np.clip(np.ceil((wavelength[1]-wavelength[0])/20.), 10, 200))
+                wl_grid = np.linspace(wavelength[0], wavelength[1], n_wl_bins)
                 continuum = np.sum(self._get_continuum(my_comp, wl_grid))
                 add_continuum = self.content[cur_ext].data / np.max(self.content[cur_ext].data) * continuum
                 map_2d[self.content[cur_ext].header['Y0']:
@@ -1313,18 +1434,21 @@ class ISM:
         spectrum = np.zeros(shape=(n_apertures, len(wl_grid)), dtype=np.float32)
 
         radius = fibers_coords[0, 2]
-        size = np.round(2 * radius).astype(int)
-        if size % 2 == 0:
-            size += 1
-        # radius = np.round(np.sqrt(np.sum(aperture_mask == n_apertures) / np.pi)).astype(int)
-        # size = 2 * radius + 1
+        kern_mask = calc_circular_mask(radius)
+        kern = kernels.CustomKernel(kern_mask.reshape((1, kern_mask.shape[0], kern_mask.shape[1])))
+
+        # size = np.round(2 * radius).astype(int)
         # if size % 2 == 0:
         #     size += 1
-        kern_array = np.zeros(shape=(1, size, size), dtype=int)
-        xx_kern, yy_kern = np.meshgrid(np.arange(size), np.arange(size))
-        rec = (xx_kern - radius) ** 2 + (yy_kern - radius) ** 2 <= radius ** 2
-        kern_array[0, yy_kern[rec], xx_kern[rec]] = 1
-        kern = kernels.CustomKernel(kern_array)
+        # # radius = np.round(np.sqrt(np.sum(aperture_mask == n_apertures) / np.pi)).astype(int)
+        # # size = 2 * radius + 1
+        # # if size % 2 == 0:
+        # #     size += 1
+        # kern_array = np.zeros(shape=(1, size, size), dtype=int)
+        # xx_kern, yy_kern = np.meshgrid(np.arange(size), np.arange(size))
+        # rec = (xx_kern - radius) ** 2 + (yy_kern - radius) ** 2 <= radius ** 2
+        # kern_array[0, yy_kern[rec], xx_kern[rec]] = 1
+        # kern = kernels.CustomKernel(kern_array)
 
         bar = progressbar.ProgressBar(max_value=len(all_extensions_brt)).start()
         for neb_index, cur_ext in enumerate(all_extensions_brt):
@@ -1353,14 +1477,30 @@ class ISM:
                                                 (fibers_coords[:, 1] >= y0) & (fibers_coords[:, 1] <= (y0 + ny)))
 
             if self.content[cur_ext].header.get("DARK"):
-                # !!! ADD TREATEMENT OF EXTINCTION !!!
-                # for xy inx zip(xx[cur_neb_ap].ravel(), yy[cur_neb_ap].ravel()):
-                #   self._spectrum[:, xy[1], xy[0]] = self._spectrum[:, xy[1], xy[0]] * \
-                #                             self.calc_extinction(wl_logscale_highres, xy[0], xy[1],
-                #                                                  extension_name=cur_ext, logscale=True)
-                log.warning("Correction of the spectra for ISM extintion is not implemented yet.")
+                extinction_map = self.content[cur_ext].data[cur_mask_in_neb].reshape((1, yfin_neb - ystart_neb + 1,
+                                                                                      xfin_neb - xstart_neb + 1))
+
+                if self.content[cur_ext].header.get('EXT_LAW'):
+                    cur_extinction_law = self.content[cur_ext].header.get('EXT_LAW')
+                else:
+                    cur_extinction_law = 'F99'
+                if self.content[cur_ext].header.get('EXT_RV'):
+                    cur_r_v = self.content[cur_ext].header.get('EXT_RV')
+                else:
+                    cur_r_v = 3.1
+                data_in_apertures = convolve_fft(extinction_map, kern,
+                                                 allow_huge=True, normalize_kernel=True)[
+                                    :, aperture_centers[selected_apertures, 1] - ystart_neb - y0,
+                                    aperture_centers[selected_apertures, 0] - xstart_neb - x0]
+                data_in_apertures = data_in_apertures.reshape((data_in_apertures.shape[0] * data_in_apertures.shape[1],
+                                                               1))
+                spectrum[selected_apertures, :] = \
+                    spectrum[selected_apertures, :] * ism_extinction(av=data_in_apertures, r_v=cur_r_v,
+                                                                     ext_law=cur_extinction_law, wavelength=wl_grid).T
+
                 bar.update(neb_index + 1)
                 continue
+
             my_comp = "_".join(cur_ext.split("_")[:2])
 
             if self.content[cur_ext].header.get('MAXBRT'):
