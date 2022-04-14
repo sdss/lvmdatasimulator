@@ -19,8 +19,8 @@ from astropy.table import Table, vstack
 from astroquery.gaia import Gaia
 from spectres import spectres
 # from scipy.interpolate import interp1d
-
-from lvmdatasimulator import log, ROOT_DIR
+import lvmdatasimulator
+from lvmdatasimulator import log
 
 import os
 
@@ -56,7 +56,7 @@ class StarsList:
             name of the file to be opened. If it is not provided an empty object is created using
             the default options or the user provided ones. Defaults to None.
         dir (str, optional):
-            directory where the file to open is located. Defaults to './'
+            directory where the file to open is located. Defaults to WORK_DIR
         unit_ra (astropy.unit, optional):
             unit associated to the right ascension. Defaults to u.deg
         unit_dec (astropy.unit, optional):
@@ -76,7 +76,7 @@ class StarsList:
             table containing the list of stars and their parameters
     """
 
-    def __init__(self, ra=0, dec=0, radius=1, filename=None, dir='./',
+    def __init__(self, ra=0, dec=0, radius=1, filename=None, dir=lvmdatasimulator.WORK_DIR,
                  unit_ra=u.deg, unit_dec=u.deg, unit_radius=u.arcmin,
                  colnames=['star_id', 'ra', 'dec', 'phot_g_mean_mag', 'phot_bp_mean_mag',
                            'phot_rp_mean_mag', 'teff_val', 'a_g_val', 'e_bp_min_rp_val',
@@ -90,8 +90,8 @@ class StarsList:
         # if a filename is given open the file, otherwise create an object with the default
         # or user provided details
         if filename is not None:
-            filename = os.path.join(dir, filename)
-            self._read_from_fits(filename)
+            # filename = os.path.join(dir, filename)
+            self._read_from_fits(filename, dir=dir)
 
         else:
             # create an empty table to contain the list of stars
@@ -230,7 +230,7 @@ class StarsList:
         self.stars_table = vstack([self.stars_table, result])
 
     def associate_spectra(self, shift=False, append=False,
-                          library=f'{ROOT_DIR}/data/pollux_resampled_v0.fits'):
+                          library=lvmdatasimulator.STELLAR_LIBS):
         """
         Associate spectra to the identifyied stars. It can both associate spectra to the full list
         or append them if the first part of the list have already been processed.
@@ -243,7 +243,7 @@ class StarsList:
                 it can be used to process only the newly added stars. Defaults to False.
             library (str, optional):
                 path to the spectral library to use.
-                Defaults to f'{ROOT_DIR}/data/pollux_resampled_v0.fits'.
+                Defaults to the file defined as stellar_library_name in config (should be stored in data directory).
         """
 
         self.library = os.path.split(library)[1]
@@ -345,7 +345,7 @@ class StarsList:
             self.spectra[i] = self.spectra[i] * factor
 
     @staticmethod
-    def _get_wavelength_array(filename=f'{ROOT_DIR}/data/pollux_resampled_v0.fits',
+    def _get_wavelength_array(filename=lvmdatasimulator.STELLAR_LIBS,
                               unit=u.AA):
 
         with fits.open(filename) as hdu:
@@ -379,7 +379,7 @@ class StarsList:
         self.stars_table['x'].unit = u.pix
         self.stars_table['y'].unit = u.pix
 
-    def save_to_fits(self, outname='starlist.fits.gz', outdir='./', overwrite=True):
+    def save_to_fits(self, outname='starlist.fits.gz', outdir=lvmdatasimulator.WORK_DIR, overwrite=True):
         """
         Save the StarList as a fits file.
 
@@ -387,7 +387,7 @@ class StarsList:
             outname (str, optional):
                 name of the output file. Defaults to 'starlist.fits.gz'.
             outdir (str, optional):
-                path to the output directory. Defaults to './'.
+                path to the output directory. Defaults to WORK_DIR.
             overwrite (bool, optional):
                 overwrite the file if it already exist. Defaults to True.
         """
@@ -429,7 +429,7 @@ class StarsList:
 
         hdul.writeto(filename, overwrite=overwrite)
 
-    def _read_from_fits(self, filename, dir='./'):
+    def _read_from_fits(self, filename, dir=lvmdatasimulator.WORK_DIR):
         """
         Read a starlist object from a fits file.
 
@@ -441,7 +441,7 @@ class StarsList:
             filename (str):
                 name of the file to open. It must be a .fits or a .fits.gz file
             dir (str, optional):
-                directory where the file is located. Defaults to './'.
+                directory where the file is located. Defaults to WORK_DIR.
 
         Raises:
             ValueError:
@@ -454,7 +454,9 @@ class StarsList:
             raise ValueError('Only .fits or .fits.gz files are accepted')
 
         filename = os.path.join(dir, filename)
-
+        if not os.path.isfile(filename):
+            log.error("File with stars is not found: {}".format(filename))
+            return
         # reading the file
         with fits.open(filename) as hdu:
 

@@ -5,7 +5,7 @@
 # @Filename: field.py
 # @License: BSD 3-Clause
 # @Copyright: Oleg Egorov, Enrico Congiu
-
+import os.path
 from functools import cached_property
 import functools
 import astropy.units as u
@@ -16,7 +16,7 @@ from astropy.io import ascii
 from scipy.interpolate import interp1d
 
 
-from lvmdatasimulator import ROOT_DIR
+from lvmdatasimulator import DATA_DIR
 from abc import ABC, abstractmethod
 
 
@@ -56,7 +56,7 @@ class Branch:
     def efficiency(self):
         """Read the branch efficiency from a file."""
 
-        filename = f'{ROOT_DIR}/data/instrument/LVM_ELAM_{self.name}.dat'
+        filename = os.path.join(DATA_DIR, 'instrument', f'LVM_ELAM_{self.name}.dat')
         data = ascii.read(filename, names=['col1', 'col2'])
         lam0 = data['col1']
         elam0 = data['col2']

@@ -7,6 +7,8 @@
 # @Copyright: Oleg Egorov, Enrico Congiu
 
 import functools
+import os.path
+
 import astropy.units as u
 import numpy as np
 
@@ -14,6 +16,8 @@ from dataclasses import dataclass
 from astropy.time import Time
 from astropy.coordinates import get_body, EarthLocation, AltAz, SkyCoord
 from astroplan import moon_illumination
+
+from lvmdatasimulator import WORK_DIR
 
 import matplotlib.pyplot as plt
 from astropy.visualization import astropy_mpl_style, quantity_support
@@ -193,7 +197,7 @@ class Observation:
         diff = np.abs(conversion - self.moon_illumination)
         return np.argmin(diff)
 
-    def plot_visibilities(self, dir='./', show=False):
+    def plot_visibilities(self, dir=WORK_DIR, show=False):
         """
         Plot the visibility of the target during the observations. Also the visibility of the moon
         and the sun during the day are plotted.
@@ -242,7 +246,9 @@ class Observation:
         ax.set_ylim(0 * u.deg, 90 * u.deg)
         ax.set_xlabel('Hours from UT Midnight')
         ax.set_ylabel('Altitude [deg]')
-        fig.savefig(os.path.join(dir, f'{self.name}_visibility.png'))
+
+        fig.savefig(os.path.join(dir, r'{self.name}_visibility.png'))
+
         if show:
             plt.show()
         else:
