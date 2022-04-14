@@ -174,7 +174,8 @@ class Simulator:
         self.sky = self.extract_sky()
         self.target_spectra = self.extract_target_spectra()
 
-    def extract_extinction(self, extinction_file=os.path.join(lvmdatasimulator.DATA_DIR, 'sky', 'LVM_LVM160_KLAM.dat')):
+    def extract_extinction(self, extinction_file=os.path.join(lvmdatasimulator.DATA_DIR, 'sky',
+                                                              'LVM_LVM160_KLAM.dat')):
         """
         Returns atmospheric extinction coefficient sampled at instrumental wavelengths
 
@@ -198,7 +199,8 @@ class Simulator:
         if self.observation.sky_template is None:
             days_moon = self.observation.days_moon
             log.info(f'Simulating the sky emission {days_moon} from new moon.')
-            sky_file = os.path.join(lvmdatasimulator.DATA_DIR, 'sky', f'LVM_{self.telescope.name}_SKY_{days_moon}.dat')
+            sky_file = os.path.join(lvmdatasimulator.DATA_DIR, 'sky',
+                                    f'LVM_{self.telescope.name}_SKY_{days_moon}.dat')
         else:
             sky_file = self.observation.sky_template
 
@@ -385,7 +387,9 @@ class Simulator:
 
         hdul = fits.HDUList([primary, signal_hdu, sky_hdu, wave_hdu, ids_hdu])
 
-        filename = os.path.join(self.outdir, f"{self.source.name}_{branch.name}_{self.bundle.bundle_name}_input.fits")
+        filename = os.path.join(self.outdir,
+                                f"{self.source.name}_{branch.name}_{self.bundle.bundle_name}_" +
+                                "input.fits")
 
         hdul.writeto(filename, overwrite=True)
         log.info(f"{filename} saved.")
@@ -433,7 +437,9 @@ class Simulator:
         hdul = fits.HDUList([primary, target_hdu, total_hdu, noise_hdu, stn_hdu, sky_hdu, wave_hdu,
                              ids_hdu])
 
-        filename = os.path.join(self.outdir, f"{self.source.name}_{branch.name}_{self.bundle.bundle_name}_flux.fits")
+        filename = os.path.join(self.outdir,
+                                f"{self.source.name}_{branch.name}_{self.bundle.bundle_name}_" +
+                                "flux.fits")
 
         hdul.writeto(filename, overwrite=True)
         log.info(f"{filename} saved.")
@@ -481,7 +487,8 @@ class Simulator:
                              ids_hdu])
 
         filename = os.path.join(self.outdir,
-                                f"{self.source.name}_{branch.name}_{self.bundle.bundle_name}_realization.fits")
+                                f"{self.source.name}_{branch.name}_{self.bundle.bundle_name}_" +
+                                "realization.fits")
 
         hdul.writeto(filename, overwrite=True)
         log.info(f"{filename} saved.")
