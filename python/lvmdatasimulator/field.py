@@ -135,6 +135,8 @@ class LVMField:
         self.starlist.generate_gaia(self.wcs, gmag_limit=gmag_limit, shift=shift)
 
         if save:
+            if not os.path.isdir(directory):
+                os.mkdir(directory)
             outname = os.path.join(directory, f'{self.name}_starlist.fits.gz')
             log.info(f'Saving star list to: {outname}')
             self.starlist.save_to_fits(outname=outname)
