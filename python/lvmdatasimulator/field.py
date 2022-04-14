@@ -15,13 +15,13 @@ from astropy.visualization import ImageNormalize, PercentileInterval, AsinhStret
 import matplotlib.pyplot as plt
 from astropy.visualization.wcsaxes import SphericalCircle
 from astropy.wcs import WCS
+
+import lvmdatasimulator
 from lvmdatasimulator.stars import StarsList
 from lvmdatasimulator.ism import ISM
 import os
-from lvmdatasimulator import WORK_DIR, log
+from lvmdatasimulator import log
 from scipy.interpolate import interp1d
-# import cProfile
-# from pstats import Stats
 
 
 fluxunit = u.erg / (u.cm ** 2 * u.s * u.arcsec ** 2)
@@ -112,7 +112,7 @@ class LVMField:
         return wcs
 
     def generate_gaia_stars(self, gmag_limit=17, shift=False, save=True, filename=None,
-                            directory='./'):
+                            directory=lvmdatasimulator.WORK_DIR):
         """
         Generate a list of stars by querying gaia.
 
@@ -123,6 +123,8 @@ class LVMField:
                 shift the spectra according to the radial velocity of the stars. Defaults to False.
             save (bool, optional):
                 If True save the list of stars to file. Defaults to True.
+            directory (str, optional):
+                Directory containing the file. Defaults to WORK_DIR defined in config file
         """
         if filename is not None:
             log.info(f'Reading the star list from file {os.path.join(directory, filename)}')
@@ -160,7 +162,7 @@ class LVMField:
         if save:
             self.starlist.save_to_fits(outname=f'{self.name}_starlist.fits.gz')
 
-    def open_starlist(self, filename, directory='./'):
+    def open_starlist(self, filename, directory=lvmdatasimulator.WORK_DIR):
         """
         Open an existing file list from a fits file.
 
@@ -168,7 +170,7 @@ class LVMField:
             filename (str):
                 Name of the fits file containing the StarList.
             directory (str, optional):
-                Directory containing the file. Defaults to './'.
+                Directory containing the file. Defaults to WORK_DIR defined in config file
         """
 
         self.starlist = StarsList(filename=filename, dir=directory)
@@ -184,6 +186,8 @@ class LVMField:
                 keyword arguments to be passed to plt.scatter. Defaults to None.
             fibers (dict or list of fibers, optional):
                 structure defining the position and size of aperture(s) for spectra extraction.
+            outname (str, optional):
+                name of the file where the output image will be saved (abs. path or relative to WORK_DIR or cur. dir)
         """
 
         fig, ax = plt.subplots(1, 1, subplot_kw=dict(projection=self.wcs))
@@ -207,7 +211,11 @@ class LVMField:
                                     transform=ax.get_transform('fk5'))
                 ax.add_patch(p)
         if outname is not None:
-            plt.savefig(outname, dpi=200)
+            if outname.startswith("/") or outname.startswith("\\") or outname.startswith("."):
+                cur_outname = outname
+            else:
+                cur_outname = os.path.join(lvmdatasimulator.WORK_DIR, outname)
+            plt.savefig(cur_outname, dpi=200)
         plt.show()
 
     def _plot_stars(self, ax):
@@ -239,6 +247,13 @@ class LVMField:
                    sys_velocity=sys_velocity)
 
     def get_map(self, wavelength_range=None, save_file=None):
+        """
+        Create the input map of the field in the selected wavelength range
+
+        :param wavelength_range: exact wavelength or minimal and maximal wavelength (in angstom) for the map extraction
+        :param save_file: name of the fits-file where the generated map will be stored
+            (absolute path or relative to WORK_DIR or current directory)
+        """
         self.ism_map = np.zeros(shape=(self.npixels, self.npixels), dtype=float)
         if wavelength_range is None:
             log.info("Input map is produced for default lambda = 6562.81")
@@ -262,14 +277,16 @@ class LVMField:
             self.ism_map += self.ism.get_map(wavelength=wavelength_range, get_continuum=True)
 
         if save_file is not None:
+            if save_file.startswith("/") or save_file.startswith("\\") or save_file.startswith("."):
+                cur_save_file = save_file
+            else:
+                cur_save_file = os.path.join(lvmdatasimulator.WORK_DIR, save_file)
             header = self.wcs.to_header()
             header['LAMRANGE'] = ("{0}-{1}".format(wavelength_range[0], wavelength_range[1]),
                                   "Wavelength range used for image extraction")
-            fits.writeto(save_file, data=self.ism_map, header=header, overwrite=True)
+            fits.writeto(cur_save_file, data=self.ism_map, header=header, overwrite=True)
             log.info("Input image in {0}-{1}AA wavelength range "
                      "is saved to {2}".format(wavelength_range[0], wavelength_range[1], save_file))
-
-
 
     def add_nebulae(self, list_of_nebulae=None, load_from_file=None, save_nebulae=None):
         """
@@ -305,7 +322,7 @@ class LVMField:
             load_from_file: path (asbolute or relative to work_dir) to the file with previously
                             calculated ISM part (preferred if both load_from_file and
                             list_of_nebulae are present)
-            save_nebulae: path (asbolute or relative to work_dir) where to save fits with
+            save_nebulae: path (asbolute or relative to WORK_DIR or current dir) where to save fits with
                           calculated ISM (only used if list_of_nebulae is present and
                           load_from_file is not)
 
@@ -314,8 +331,9 @@ class LVMField:
         if load_from_file is not None:
             cfile = load_from_file
             if not os.path.isfile(cfile):
-                cfile = os.path.join(WORK_DIR, load_from_file)
+                cfile = os.path.join(lvmdatasimulator.WORK_DIR, load_from_file)
                 if not os.path.isfile(cfile):
+                    log.warning("Cannot find file with ISM content to load: {}".format(load_from_file))
                     cfile = None
         else:
             cfile = None
@@ -332,8 +350,8 @@ class LVMField:
             if loaded and self.ism_map is not None:
                 self._get_ism_map()
             if loaded and save_nebulae is not None:
-                if not (save_nebulae.startswith('/') or save_nebulae.startswith(r'\\')):
-                    save_nebulae = os.path.join(WORK_DIR, save_nebulae)
+                if not (save_nebulae.startswith('/') or save_nebulae.startswith(r'\\') or save_nebulae.startswith('.')):
+                    save_nebulae = os.path.join(lvmdatasimulator.WORK_DIR, save_nebulae)
                 self.ism.save_ism(save_nebulae)
         if not loaded:
             log.warning("Cannot load the nebulae! Check input parameters.")
@@ -398,87 +416,3 @@ class LVMField:
         if spectrum_ism is not None:
             spectrum[: len(spectrum_ism), :] += spectrum_ism
         return np.array(fiber_id), spectrum / dl.value / u.AA
-
-
-def run_test(ra=10., dec=-10., spaxel=1 / 3600., size=1000 / 60.):
-    # my_nebulae = [
-    #         {"type": 'Bubble', 'expansion_velocity': 45 * u.km/u.s,
-    #          'turbulent_sigma': 20 * u.km/u.s,
-    #          'radius': 10 * u.pc,
-    #          'max_brightness': 3e-16 * u.erg / u.cm**2 / u.s / u.arcsec ** 2,
-    #          'RA': '00h39m40s', 'DEC': "-10d02m13s",
-    #          'cloudy_params': {'Z': 0.4, 'qH': 50., 'nH': 30, 'Teff': 50000, 'Rin': 0},
-    #          },  # 'perturb_amplitude': 0.1, 'perturb_order': 8},
-    #         {"type": 'Cloud',
-    #          'radius': 12 * u.pc,
-    #          'max_extinction': 0.6 * u.mag,
-    #          'RA': "00h39m10s", 'DEC': "-10d00m00s", 'zorder': 2},
-    #         {"type": 'Filament',
-    #          'length': 50 * u.pc, 'width': 1. * u.pc, 'PA': -35 * u.degree,
-    #          'max_brightness': 3e-17 * u.erg / u.cm**2 / u.s / u.arcsec ** 2,
-    #          'cloudy_params': {'Z': 0.2, 'qH': 48., 'nH': 30, 'Teff': 30000, 'Rin': 0},
-    #          'RA': "00h40m10s", 'DEC': "-10d01m20s", 'zorder': 3},
-    #         {"type": 'Bubble', 'expansion_velocity': 25 * u.km/u.s,
-    #          'turbulent_sigma': 20 * u.km/u.s,
-    #          'radius': 25 * u.pc,
-    #          'max_brightness': 1e-16 * u.erg / u.cm**2 / u.s / u.arcsec ** 2,
-    #          'RA': "00h40m05s", 'DEC': "-10d04m00s",
-    #          'cloudy_params': {'Z': 0.6, 'qH': 49., 'nH': 30, 'Teff': 30000, 'Rin': 0},
-    #          'perturb_amplitude': 0.4, 'perturb_order': 8},
-    #         {"type": 'Bubble', 'expansion_velocity': 55 * u.km / u.s,
-    #          'turbulent_sigma': 20 * u.km / u.s,
-    #          'radius': 15 * u.pc,
-    #          'max_brightness': 2e-16 * u.erg / u.cm ** 2 / u.s / u.arcsec ** 2,
-    #          'RA': "00h40m00s", 'DEC': "-09d56m00s",
-    #          'cloudy_params': {'Z': 0.4, 'qH': 50., 'nH': 30, 'Teff': 70000, 'Rin': 0},
-    #          'perturb_amplitude': 0.1, 'perturb_order': 8},
-    #         {"type": 'DIG', 'max_brightness': 1e-17 * u.erg / u.cm ** 2 / u.s / u.arcsec ** 2,
-    #          'perturb_amplitude': 0.1, 'perturb_scale': 200 * u.pc}
-    #         ]
-
-    my_lvmfield = LVMField(ra=ra, dec=dec, size=size, spaxel=spaxel, unit_ra=u.degree,
-                           unit_dec=u.degree, unit_size=u.arcmin, unit_spaxel=u.degree)
-    # my_lvmfield.add_nebulae(my_nebulae, save_nebulae="/Users/mors/Science/LVM/testneb_v2.fits")
-    my_lvmfield.add_nebulae(load_from_file="/Users/mors/Science/LVM/testneb_v2.fits")
-    my_lvmfield.generate_gaia_stars()
-
-    apertures = [{"RA": 10.018 * u.degree, "DEC": -10.059 * u.degree, "Radius": 30 * u.arcsec},
-                 # {"RA": 10.007 * u.degree, "DEC": -10.05 * u.degree, "Radius": 30 * u.arcsec},
-                 # {"RA": 09.995 * u.degree, "DEC": -10.0 * u.degree, "Radius": 30 * u.arcsec},
-                 # {"RA": 09.985 * u.degree, "DEC": -9.95 * u.degree, "Radius": 30 * u.arcsec},
-                 ]
-
-    my_lvmfield.show(fibers=apertures)
-
-    dlam = 0.06
-    l0 = 3650.
-    l1 = 9850.
-    npix = np.round((l1 - l0) / dlam).astype(int)
-    wl_grid = (np.arange(npix) * dlam + l0) * u.AA
-
-    spec = my_lvmfield.extract_spectra(apertures, wl_grid)
-    if spec is not None:
-        _ = plt.figure(figsize=(12, 10))
-        for i in range(2):
-            ax = plt.subplot(211 + i)
-            ax.plot(wl_grid, spec[0], 'k', lw=0.7)
-            ax.set_xlabel(r"Wavelength, $'\AA$", fontsize=14)
-            ax.set_ylabel(r"Intensity, erg s$^{-1}$ cm$^{-2}$", fontsize=14)
-            if i == 0:
-                ax.set_xlim(6500, 6600)
-            else:
-                ax.set_xlim(3700, 9600)
-
-    plt.show()
-
-
-if __name__ == '__main__':
-    run_test()
-    # with cProfile.Profile() as pr:
-    #     run_test()
-    #     with open('/Users/mors/Science/LVM/profiling_stats.prof', 'w') as stream:
-    #         stats = Stats(pr, stream=stream)
-    #         stats.strip_dirs()
-    #         stats.sort_stats('time')
-    #         stats.dump_stats('.prof_stats')  # the name you have to give to snakeviz
-    #         stats.print_stats()

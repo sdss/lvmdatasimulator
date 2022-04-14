@@ -33,7 +33,7 @@ from lvmdatasimulator.field import LVMField
 from lvmdatasimulator.fibers import FiberBundle
 from lvmdatasimulator.observation import Observation
 from lvmdatasimulator.telescope import Telescope
-from lvmdatasimulator import log, ROOT_DIR
+from lvmdatasimulator import log
 from lvmdatasimulator.utils import round_up_to_odd
 from joblib import Parallel, delayed
 import os
@@ -211,7 +211,7 @@ class Simulator:
         bundle: FiberBundle,
         telescope: Telescope,
         aperture: u.pix = 4 * u.pix,
-        root: str = "./",
+        root: str = lvmdatasimulator.WORK_DIR,
         overwrite: bool = True,
     ):
 
@@ -237,14 +237,14 @@ class Simulator:
             os.mkdir(self.outdir)
 
     @functools.cached_property
-    def extinction(self, extinction_file=f"{ROOT_DIR}/data/sky/LVM_LVM160_KLAM.dat"):
+    def extinction(self, extinction_file=os.path.join(lvmdatasimulator.DATA_DIR, 'sky', 'LVM_LVM160_KLAM.dat')):
         """
         Returns atmospheric extinction coefficient sampled at instrumental wavelengths
 
         Args:
             extinction_file (str, optional):
                 File containing the athmospheric extinction curve.
-                Defaults to f'{ROOT_DIR}data/sky/LVM_LVM160_KLAM.dat'.
+                Defaults to f'{DATA_DIR}/sky/LVM_LVM160_KLAM.dat'.
         """
         log.info('Reading the atmospheric extinction from file.')
         self.extinction_file = extinction_file
@@ -257,7 +257,8 @@ class Simulator:
     def sky(self):
 
         days_moon = self.observation.days_from_new_moon
-        sky_file = f"{ROOT_DIR}/data/sky/LVM_{self.telescope.name}_SKY_{days_moon}.dat"
+        sky_file = os.path.join(lvmdatasimulator.DATA_DIR, 'sky',
+                                'LVM_{0}_SKY_{1}.dat'.format(self.telescope.name, days_moon))
 
         log.info(f'Simulating the sky emission {days_moon} from new moon.')
         log.info(f'Using sky file: {sky_file}')
@@ -340,7 +341,7 @@ class Simulator:
             for branch in self.spectrograph.branches:
                 lsf_fwhm = branch.lsf_fwhm / disp0  # from A to pix
                 dfib_lam = fiber.dispersion * branch.wavecoord.step / disp0
-                fwhm = np.sqrt((lsf_fwhm) ** 2 + (dfib_lam) ** 2)
+                fwhm = np.sqrt(lsf_fwhm ** 2 + dfib_lam ** 2)
 
                 convolved = convolve_for_gaussian(original, fwhm, boundary="extend")
                 resampled_v1 = resample_spectrum(branch.wavecoord.wave.value, wl_grid.value,
@@ -426,8 +427,7 @@ class Simulator:
 
         hdul = fits.HDUList([primary, signal_hdu, sky_hdu, wave_hdu, ids_hdu])
 
-        filename = f"{self.outdir}/{self.source.name}_{branch.name}_{self.bundle.bundle_name}" +\
-                   "_input.fits"
+        filename = os.path.join(self.outdir, f"{self.source.name}_{branch.name}_{self.bundle.bundle_name}_input.fits")
 
         hdul.writeto(filename, overwrite=True)
         log.info(f"{filename} saved.")
@@ -469,8 +469,7 @@ class Simulator:
         hdul = fits.HDUList([primary, target_hdu, total_hdu, noise_hdu, stn_hdu, sky_hdu, wave_hdu,
                              ids_hdu])
 
-        filename = f"{self.outdir}/{self.source.name}_{branch.name}_{self.bundle.bundle_name}" +\
-                   "_flux.fits"
+        filename = os.path.join(self.outdir, f"{self.source.name}_{branch.name}_{self.bundle.bundle_name}_flux.fits")
 
         hdul.writeto(filename, overwrite=True)
         log.info(f"{filename} saved.")
@@ -511,8 +510,8 @@ class Simulator:
         hdul = fits.HDUList([primary, target_hdu, total_hdu, noise_hdu, stn_hdu, sky_hdu, wave_hdu,
                              ids_hdu])
 
-        filename = f"{self.outdir}/{self.source.name}_{branch.name}_{self.bundle.bundle_name}" +\
-                   "_realization.fits"
+        filename = os.path.join(self.outdir,
+                                f"{self.source.name}_{branch.name}_{self.bundle.bundle_name}_realization.fits")
 
         hdul.writeto(filename, overwrite=True)
         log.info(f"{filename} saved.")
@@ -791,16 +790,16 @@ class Simulator:
 
             # Just the target
             target_out = self._populate_map(target_out, target_val, ids, wcs)
-            filename = f"{self.outdir}/{self.source.name}_{branch.name}_{self.bundle.bundle_name}" +\
-                       "_target_map.fits"
+            filename = os.path.join(self.outdir,
+                                    f"{self.source.name}_{branch.name}_{self.bundle.bundle_name}_target_map.fits")
             hdu = fits.PrimaryHDU(data=target_out, header=wcs.to_header())
             hdu.writeto(filename, overwrite=True)
             log.info(f' Saving {filename}...')
 
             # full spectrum
             total_out = self._populate_map(total_out, total_val, ids, wcs)
-            filename = f"{self.outdir}/{self.source.name}_{branch.name}_{self.bundle.bundle_name}" +\
-                       "_total_map.fits"
+            filename = os.path.join(self.outdir,
+                                    f"{self.source.name}_{branch.name}_{self.bundle.bundle_name}_total_map.fits")
             hdu = fits.PrimaryHDU(data=total_out, header=wcs.to_header())
             hdu.writeto(filename, overwrite=True)
             log.info(f' Saving {filename}...')
@@ -809,7 +808,7 @@ class Simulator:
 
     def _print_fibers_to_ds9_regions(self):
 
-        outname = f'{self.outdir}/{self.source.name}_fibers.reg'
+        outname = os.path.join(self.outdir, f'{self.source.name}_fibers.reg')
 
         with open(outname, 'w') as f:
             print('# Region file format: DS9 version 4.1', file=f)

@@ -5,6 +5,7 @@
 # @Filename: field.py
 # @License: BSD 3-Clause
 # @Copyright: Oleg Egorov, Enrico Congiu
+import os.path
 
 import numpy as np
 import astropy.units as u
@@ -12,7 +13,7 @@ import astropy.units as u
 from dataclasses import dataclass
 from astropy.table import Table, vstack
 
-from lvmdatasimulator import ROOT_DIR, log
+from lvmdatasimulator import DATA_DIR, log
 
 
 @dataclass
@@ -143,7 +144,7 @@ class FiberBundle:
         TBW
         """
 
-        filename = f'{ROOT_DIR}/data/instrument/full_array.dat'
+        filename = os.path.join(DATA_DIR, 'instrument', 'full_array.dat')
         table = Table.read(filename, format='ascii.csv')
 
         return table

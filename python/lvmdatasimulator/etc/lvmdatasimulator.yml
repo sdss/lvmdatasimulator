@@ -3,10 +3,11 @@
 nprocess: 8  # number of processes for parallelization
 
 cloudy_models_name: 'LVM_cloudy_sphere_models.fits'  # Name for the pre-computed emission-line models to be used
-                                                    # (should be stored in 'data' directory)
-continuum_models_name: 'LVM_continuum_models.fits'  # Name for the pre-computed continuum models to be used
-                                                    # (should be stored in 'data' directory)
-
+                                                     # (should be stored in 'data' directory)
+continuum_models_name: 'LVM_continuum_models.fits'   # Name for the pre-computed continuum models to be used
+                                                     # (should be stored in 'data' directory)
+stellar_library_name: 'pollux_resampled_v0.fits'     # Name for the library of stellar spectra
+                                                     # (should be stored in 'data' directory)
 cloudy_default_params:  # parameters for the Cloudy model to be used by default
     id: 983
     Z: 0.4
@@ -15,8 +16,8 @@ cloudy_default_params:  # parameters for the Cloudy model to be used by default
     nH: 100.
     Rin: 0.01
 
-data_dir: "data"  # Path to the model grids etc. (relative to the ROOT of package unless it begins with /)
+data_dir: "data"  # Path to the model grids etc. (relative to the ROOT of package unless it begins with / or \\ or ./)
 
-run_dir: "run"  # Path to the directory where the computation results will be saved
-                # (relative to the ROOT of package unless it begins with /)
+work_dir: "./"  # Path to the directory where the computation results will be saved
+                # (relative to the ROOT of package unless it begins with / or \\ or ./)
 
