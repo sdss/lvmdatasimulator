@@ -19,7 +19,27 @@ from lvmdatasimulator import DATA_DIR, log
 @dataclass
 class Fiber:
     """
-    Class containing the information on a single LVM fiber
+    Low level object representing a single LVM fiber
+
+    Attributes:
+
+        id (int, optional):
+            Unique ID of the fiber in the current bundle. Defaults to 0.
+        ring (int, optional):
+            hexagonal ring where the fiber is positioned. Defaults to 0.
+        position (int, optional):
+            position of the fiber in the hexagonal ring considered. Defaults to 0.
+        x (astropy.quantity, optional):
+            Offset of the fiber in the x direction with respect to the center of the fiber bundle.
+            Defaults to 0 * u.arcsec.
+        y (astropy.quantity, optional):
+            Offset of the fiber in the y direction with respect to the center of the fiber bundle.
+            Defaults to 0 * u.arcsec.
+        diameter (astropy.quantity, optional):
+            Diameter of the fiber on the sky. Defaults to 35.3 * u.arcsec
+        dispersion (astropy.quantity, optional):
+            Dispersion caused by the fiber in the spatial direction. Defaults to 3 * u.pix
+
     """
     id: int = 0
     ring: int = 0
@@ -34,8 +54,30 @@ class Fiber:
         self.nypix = 5 * self.dispersion  # size of 2D spectrum
 
     def __str__(self):
-        string = f'Fiber {self.id} in ring {self.ring} located at {self.x}, {self.y}'
+        string = f'Fiber {self.id} in ring {self.ring}, position {self.position}' +\
+            f'located at {self.x}, {self.y}'
         return string
+
+    def to_table(self):
+        """
+        return the main properties of the fiber as an astropy table.
+
+        Returns:
+            astropy.table.Table:
+                Table containing the information about the fiber.
+        """
+
+        out = {
+            'id': [self.id],
+            'ring': [self.ring],
+            'position': [self.position],
+            'x': [self.x],
+            'y': [self.y],
+            'diameter': [self.diameter],
+            'dispersion': [self.dispersion]
+        }
+
+        return Table(out)
 
 
 class FiberBundle:
@@ -47,8 +89,14 @@ class FiberBundle:
         name of a specific fiber bundle configuration. Available options: 'central', 'full'.
         Defaults to 'central'
     nrings (int, optional):
-         _description_. Defaults to None.
-
+        last hexagonal ring to be considered when building the fiber bundle. If None,
+        the full array will be simulated. Defaults to None.
+    custom_fibers (list, optional):
+        list of tuples containing an arbitrary configuration of fibers. The fibers are identified
+        by their hexagonal ring and by the position in their hexagonal ring
+    angle (float, optional):
+        rotation to be applied to the final bundle of fiber in degrees. If None, no rotation is
+        applied. Defaults to None
     """
 
     def __init__(self, bundle_name='central', nrings=None, custom_fibers=None, angle=None):
@@ -79,6 +127,14 @@ class FiberBundle:
         self.nfibers = len(self.fibers)
 
     def build_bundle(self):
+        """
+        Read the database containing the informations on the fibers and setup the bundle to be
+        used for the observations.
+
+        Returns:
+            list:
+                list of fibers to be simulated.
+        """
 
         fiber_table = self._read_fiber_file()
         if self.custom_fibers is not None:
@@ -140,8 +196,12 @@ class FiberBundle:
     @staticmethod
     def _read_fiber_file():
         """
-        Read the file containg information on the fibers corresponding to one slit
-        TBW
+        Reads the file containing the information on each fiber and it returns it as an astropy
+        table
+
+        Returns:
+            astropy.table.Table:
+                table containing the informations about each fiber.
         """
 
         filename = os.path.join(DATA_DIR, 'instrument', 'full_array.dat')
@@ -150,6 +210,18 @@ class FiberBundle:
         return table
 
     def _rotates(self, table):
+        """
+        Apply a rotation to the selected fibers
+
+        Args:
+            table (astropy.table.Table):
+                Table containing the information on the selected fibers. Only the 'x' and 'y'
+                columns are used.
+
+        Returns:
+            astropy.table.Table:
+                Table containing the information on the fibers updated after the rotation.
+        """
 
         table = table.copy()
 

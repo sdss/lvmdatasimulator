@@ -175,11 +175,13 @@ class LVMField:
 
         self.starlist = StarsList(filename=filename, dir=directory)
 
-    def show(self, subplots_kw=None, scatter_kw=None, fibers=None, outname=None):
+    def show(self, obs_coords=None, subplots_kw=None, scatter_kw=None, fibers=None, outname=None):
         """
         Display the LVM field with overlaid apertures (if needed). This is a work in progress.
 
         Args:
+            obs_coords (SkyCoord, optional):
+                Coordinates of the center of the fiber bundle
             subplots_kw (dict, optional):
                 keyword arguments to be passed to plt.subplots. Defaults to None.
             scatter_kw (dict, optional):
@@ -189,6 +191,10 @@ class LVMField:
             outname (str, optional):
                 name of the file where the output image will be saved (abs. path or relative to WORK_DIR or cur. dir)
         """
+
+        if obs_coords is None:
+            obs_coords = self.coord
+            log.warning('Bundle center coords are not defined, using the coords of the field.')
 
         fig, ax = plt.subplots(1, 1, subplot_kw=dict(projection=self.wcs))
         if self.ism_map is None:
@@ -205,7 +211,7 @@ class LVMField:
 
         if fibers is not None:
             for fiber in fibers:
-                fiber_coord = self.coord.spherical_offsets_by(fiber.x, fiber.y)
+                fiber_coord = obs_coords.spherical_offsets_by(fiber.x, fiber.y)
                 p = SphericalCircle((fiber_coord.ra, fiber_coord.dec), fiber.diameter / 2,
                                     edgecolor='green', facecolor='none',
                                     transform=ax.get_transform('fk5'))
@@ -366,15 +372,22 @@ class LVMField:
         else:
             self.ism_map = np.zeros(shape=(self.npixels, self.npixels), dtype=float)
 
-    def extract_spectra(self, fibers, wl_grid):
+    def extract_spectra(self, fibers, wl_grid, obs_coords=None):
         """
         Perform spectra extraction within the given aperture.
 
         Args:
             fibers (list or tuple fiber objects):
                 structure defining the position and size of aperture for spectra extraction
-            wl_grid (numpy.array): wavelength grid for the resulting spectrum
+            wl_grid (numpy.array):
+                wavelength grid for the resulting spectrum
+            obs_coords (SkyCoord, optional):
+                Coordinates of the center of the fiber bundle
         """
+
+        if obs_coords is None:
+            obs_coords = self.coord
+            log.warning('Bundle center coords are not defined, using the coords of the field.')
 
         spectrum = np.zeros(shape=(len(fibers), len(wl_grid))) * fluxunit * u.arcsec ** 2
         fiber_id = []
@@ -385,7 +398,7 @@ class LVMField:
         for index, fiber in enumerate(fibers):
             fiber_id.append(fiber.id)
             # I have to check this holds
-            cur_fiber_coord = self.coord.spherical_offsets_by(fiber.x, fiber.y)
+            cur_fiber_coord = obs_coords.spherical_offsets_by(fiber.x, fiber.y)
             xc, yc = self.wcs.world_to_pixel(cur_fiber_coord)
 
             s = (fiber.diameter.to(u.degree) / self.spaxel.to(u.degree)).value / 2
