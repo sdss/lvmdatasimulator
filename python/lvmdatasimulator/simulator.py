@@ -159,8 +159,8 @@ class Simulator:
         self.overwrite = overwrite
 
         # creating empty storage
-        self.output_noise = OrderedDict()  # realization with noise
-        self.output_calib = OrderedDict()  # flux calibrated
+        self.output_noise = None  # realization with noise
+        self.output_calib = None  # flux calibrated
         # self.output_coadd = OrderedDict()
 
         self.outdir = os.path.join(self.root, "outputs")
@@ -198,7 +198,7 @@ class Simulator:
 
         if self.observation.sky_template is None:
             days_moon = self.observation.days_moon
-            log.info(f'Simulating the sky emission {days_moon} from new moon.')
+            log.info(f'Simulating the sky emission {days_moon} days from new moon.')
             sky_file = os.path.join(lvmdatasimulator.DATA_DIR, 'sky',
                                     f'LVM_{self.telescope.name}_SKY_{days_moon}.dat')
         else:
@@ -236,35 +236,68 @@ class Simulator:
         tmp_lam = np.arange(np.amin(old_wave), np.amax(old_wave), disp0.value)
 
         resampled_v0 = resample_spectrum(tmp_lam, old_wave, old_flux)
-        out_spec = OrderedDict()
-        for fiber in self.bundle.fibers:
-            fiber_spec = OrderedDict()
-            for branch in self.spectrograph.branches:
-                # computing the FWHM of the final kernel (LSF (A) + fiber dispersion (pix))
-                lsf_fwhm = branch.lsf_fwhm / disp0  # from A to pix
 
-                # fiber dispersion must be converted to match the pixel scale of the tmp axis
-                dfib_lam = fiber.dispersion * branch.wavecoord.step / disp0
 
-                fwhm = np.sqrt((lsf_fwhm) ** 2 + (dfib_lam) ** 2)
+        if self.bundle.nfibers < 10:
+            results = [self._resample_and_convolve_loop(fiber, disp0, resampled_v0, tmp_lam, unit)
+                       for fiber in self.bundle.fibers]
+        else:
+            results = Parallel(n_jobs=lvmdatasimulator.n_process)(
+                delayed(self._resample_and_convolve_loop)(fiber, disp0, resampled_v0,
+                tmp_lam, unit) for fiber in self.bundle.fibers)
 
-                # do both convolutions at the same time
-                convolved = convolve_for_gaussian(resampled_v0, fwhm, boundary="extend")
-                resampled_v1 = resample_spectrum(branch.wavecoord.wave.value, tmp_lam, convolved)
+        out_spec = OrderedDict(results)
 
-                if unit:
-                    fiber_spec[branch.name] = resampled_v1 * unit
-                else:
-                    fiber_spec[branch.name] = resampled_v1
+        # for fiber in self.bundle.fibers:
+        #     fiber_spec = OrderedDict()
+        #     for branch in self.spectrograph.branches:
+        #         # computing the FWHM of the final kernel (LSF (A) + fiber dispersion (pix))
+        #         lsf_fwhm = branch.lsf_fwhm / disp0  # from A to pix
 
-            out_spec[fiber.id] = fiber_spec
+        #         # fiber dispersion must be converted to match the pixel scale of the tmp axis
+        #         dfib_lam = fiber.dispersion * branch.wavecoord.step / disp0
+
+        #         fwhm = np.sqrt((lsf_fwhm) ** 2 + (dfib_lam) ** 2)
+
+        #         # do both convolutions at the same time
+        #         convolved = convolve_for_gaussian(resampled_v0, fwhm, boundary="extend")
+        #         resampled_v1 = resample_spectrum(branch.wavecoord.wave.value, tmp_lam, convolved)
+
+        #         if unit:
+        #             fiber_spec[branch.name] = resampled_v1 * unit
+        #         else:
+        #             fiber_spec[branch.name] = resampled_v1
+
+        #     out_spec[fiber.id] = fiber_spec
 
         return out_spec
+
+    def _resample_and_convolve_loop(self, fiber, disp0, resampled_v0, tmp_lam, unit):
+
+        fiber_spec = OrderedDict()
+        for branch in self.spectrograph.branches:
+            # computing the FWHM of the final kernel (LSF (A) + fiber dispersion (pix))
+            lsf_fwhm = branch.lsf_fwhm / disp0  # from A to pix
+
+            # fiber dispersion must be converted to match the pixel scale of the tmp axis
+            dfib_lam = fiber.dispersion * branch.wavecoord.step / disp0
+
+            fwhm = np.sqrt((lsf_fwhm) ** 2 + (dfib_lam) ** 2)
+
+            # do both convolutions at the same time
+            convolved = convolve_for_gaussian(resampled_v0, fwhm, boundary="extend")
+            resampled_v1 = resample_spectrum(branch.wavecoord.wave.value, tmp_lam, convolved)
+
+            if unit:
+                fiber_spec[branch.name] = resampled_v1 * unit
+            else:
+                fiber_spec[branch.name] = resampled_v1
+
+        return fiber.id, fiber_spec
 
     def extract_target_spectra(self):
         """Extract spectra of the target from the field object"""
 
-        obj_spec = OrderedDict()
         wl_grid = np.arange(3647, 9900.01, 0.06) * u.AA
 
         log.info(f"Recovering target spectra for {self.bundle.nfibers} fibers.")
@@ -272,28 +305,56 @@ class Simulator:
                                                      obs_coords=self.observation.target_coords)
 
         log.info('Resampling spectra to the instrument wavelength solution.')
-        for fiber in self.bundle.fibers:
 
-            original = spectra[index == fiber.id, :][0]
-            # from here, this is a replica of _resample_and_convolve()
-            # I cannot use the method directly because I cannot use the same spectra for all fibers
-            disp0 = np.median(wl_grid[1:-1] - wl_grid[0:-2])
+        if self.bundle.nfibers < 10:
+            results = [self._extract_target_spectra(fiber, spectra, index, wl_grid)
+                       for fiber in self.bundle.fibers]
+        else:
+            results = Parallel(n_jobs=lvmdatasimulator.n_process)(
+                delayed(self._extract_target_spectra)(fiber, spectra, index, wl_grid)
+                for fiber in self.bundle.fibers)
+        obj_spec = OrderedDict(results)
 
-            fiber_spec = OrderedDict()
+            # original = spectra[index == fiber.id, :][0]
+            # # from here, this is a replica of _resample_and_convolve()
+            # # I cannot use the method directly because I cannot use the same spectra for all fibers
+            # disp0 = np.median(wl_grid[1:-1] - wl_grid[0:-2])
 
-            for branch in self.spectrograph.branches:
-                lsf_fwhm = branch.lsf_fwhm / disp0  # from A to pix
-                dfib_lam = fiber.dispersion * branch.wavecoord.step / disp0
-                fwhm = np.sqrt(lsf_fwhm ** 2 + dfib_lam ** 2)
+            # fiber_spec = OrderedDict()
 
-                convolved = convolve_for_gaussian(original, fwhm, boundary="extend")
-                resampled_v1 = resample_spectrum(branch.wavecoord.wave.value, wl_grid.value,
-                                                 convolved)
+            # for branch in self.spectrograph.branches:
+            #     lsf_fwhm = branch.lsf_fwhm / disp0  # from A to pix
+            #     dfib_lam = fiber.dispersion * branch.wavecoord.step / disp0
+            #     fwhm = np.sqrt(lsf_fwhm ** 2 + dfib_lam ** 2)
 
-                fiber_spec[branch.name] = resampled_v1 * (u.erg / (u.cm ** 2 * u.s * u.AA))
+            #     convolved = convolve_for_gaussian(original, fwhm, boundary="extend")
+            #     resampled_v1 = resample_spectrum(branch.wavecoord.wave.value, wl_grid.value,
+            #                                      convolved)
 
-            obj_spec[fiber.id] = fiber_spec
+            #     fiber_spec[branch.name] = resampled_v1 * (u.erg / (u.cm ** 2 * u.s * u.AA))
+
         return obj_spec
+
+    def _extract_target_spectra(self, fiber, spectra, index, wl_grid):
+
+        original = spectra[index == fiber.id, :][0]
+        # from here, this is a replica of _resample_and_convolve()
+        # I cannot use the method directly because I cannot use the same spectra for all fibers
+        disp0 = np.median(wl_grid[1:-1] - wl_grid[0:-2])
+
+        fiber_spec = OrderedDict()
+
+        for branch in self.spectrograph.branches:
+            lsf_fwhm = branch.lsf_fwhm / disp0  # from A to pix
+            dfib_lam = fiber.dispersion * branch.wavecoord.step / disp0
+            fwhm = np.sqrt(lsf_fwhm ** 2 + dfib_lam ** 2)
+
+            convolved = convolve_for_gaussian(original, fwhm, boundary="extend")
+            resampled_v1 = resample_spectrum(branch.wavecoord.wave.value, wl_grid.value,
+                                                convolved)
+
+            fiber_spec[branch.name] = resampled_v1 * (u.erg / (u.cm ** 2 * u.s * u.AA))
+
 
     def _simulate_observations_single_fiber(self, fiber, spectra):
         """
@@ -321,11 +382,13 @@ class Simulator:
 
         # create a realistic spectrum with noise
         realization_noise = self._add_noise(single_exposure)
-        self.output_noise[fiber.id] = realization_noise
+        # self.output_noise[fiber.id] = realization_noise
 
         # flux calibrate
         calibrated = self._flux_calibration(fiber.id, realization_noise)
-        self.output_calib[fiber.id] = calibrated
+        # self.output_calib[fiber.id] = calibrated
+
+        return (fiber.id, realization_noise, calibrated)
 
     def simulate_observations(self):
         """
@@ -334,13 +397,26 @@ class Simulator:
 
         log.info("Simulating observations.")
 
-        if len(self.bundle.fibers) < 1800:
-            _ = [self._simulate_observations_single_fiber(fiber, self.target_spectra)
-                 for fiber in self.bundle.fibers]
+        print(self.bundle.nfibers)
+        if self.bundle.nfibers < 10:
+            results = [self._simulate_observations_single_fiber(fiber, self.target_spectra)
+                      for fiber in self.bundle.fibers]
         else:
-            _ = Parallel(n_jobs=lvmdatasimulator.n_process)(
+            results = Parallel(n_jobs=lvmdatasimulator.n_process)(
                 delayed(self._simulate_observations_single_fiber)(fiber, self.target_spectra)
                 for fiber in self.bundle.fibers)
+
+        # reorganize outputs
+        ids = []
+        noises = []
+        calibs = []
+        for item in results:
+            ids.append(item[0])
+            noises.append(item[1])
+            calibs.append(item[2])
+
+        self.output_noise = OrderedDict(zip(ids, noises))
+        self.output_calib = OrderedDict(zip(ids, calibs))
 
     def save_outputs(self):
         """
