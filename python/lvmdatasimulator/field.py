@@ -427,7 +427,8 @@ class LVMField:
         if np.max(aperture_mask) < fibers_coords.shape[0]:
             fibers_coords = fibers_coords[:np.max(aperture_mask), :]
         log.info("Start extracting nebular spectra")
-        spectrum_ism = self.ism.get_spectrum(wl_grid.to(u.AA), aperture_mask, fibers_coords)
+        spectrum_ism = self.ism.get_spectrum(wl_grid.to(u.AA), aperture_mask, fibers_coords,
+                                             self.spaxel.value)
         if spectrum_ism is not None:
             spectrum[: len(spectrum_ism), :] += spectrum_ism
         return np.array(fiber_id), spectrum / dl.value / u.AA
