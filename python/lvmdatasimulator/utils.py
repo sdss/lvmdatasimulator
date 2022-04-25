@@ -22,6 +22,24 @@ def round_up_to_odd(f):
         return (np.ceil(f.value) // 2 * 2 + 1) * unit
 
 
+def check_overlap(hdu, out_shape):
+    """
+    Checks if the current nebula (defined in hdu) is overlapping with the FOV
+    :param hdu: HDU defining the current nebula brightness distribution
+    :param out_shape: tuple (height, width) defining the size of the FOV in pixels
+    :return: True if the nebula is overlapping with the FOV; otherwise is False
+    """
+
+    if ((hdu.header['X0'] + hdu.header['NAXIS1']) < 0) or (
+            (hdu.header['Y0'] + hdu.header['NAXIS2']) < 0) or (
+            hdu.header['Y0'] >= out_shape[0]) or (hdu.header['X0'] >= out_shape[1]):
+        return False
+    return True
+
+
+
+
+
 def set_default_dict_values(mydict, key_to_check, default_value):
     """
     Checks the dictionary for the keyword and set the default values if it is missing

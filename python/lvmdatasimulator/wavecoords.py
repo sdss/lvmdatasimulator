@@ -11,7 +11,12 @@ import astropy.units as u
 
 from dataclasses import dataclass
 from abc import ABC, abstractmethod
-from functools import cached_property
+import sys
+if (sys.version_info[0]+sys.version_info[1]/10.) < 3.8:
+    from backports.cached_property import cached_property
+else:
+    from functools import cached_property
+
 
 from lvmdatasimulator import ROOT_DIR
 
