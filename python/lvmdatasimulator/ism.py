@@ -17,7 +17,11 @@ from astropy.wcs.utils import proj_plane_pixel_scales
 from astropy.coordinates import SkyCoord
 from astropy.modeling.models import Sersic2D
 from dataclasses import dataclass
-import functools
+import sys
+if (sys.version_info[0]+sys.version_info[1]/10.) < 3.8:
+    from backports.cached_property import cached_property
+else:
+    from functools import cached_property
 from scipy.ndimage.interpolation import map_coordinates
 from scipy.interpolate import interp1d, interp2d
 import lvmdatasimulator
@@ -25,7 +29,7 @@ from lvmdatasimulator import log
 import progressbar
 from joblib import Parallel, delayed
 from astropy.convolution import convolve_fft, kernels
-from lvmdatasimulator.utils import calc_circular_mask, set_default_dict_values, ism_extinction
+from lvmdatasimulator.utils import calc_circular_mask, set_default_dict_values, ism_extinction, check_overlap
 fluxunit = u.erg / (u.cm ** 2 * u.s * u.arcsec ** 2)
 velunit = u.km / u.s
 
@@ -163,23 +167,23 @@ class Nebula:
         self._ref_line_id = 0
         self.linerat_constant = True  # True if the ratio of line fluxes shouldn't change across the nebula
 
-    @functools.cached_property
+    @cached_property
     def _cartesian_x_grid(self):
         return np.arange(self.width) * self.pxscale
 
-    @functools.cached_property
+    @cached_property
     def _cartesian_y_grid(self):
         return np.arange(self.height) * self.pxscale
 
-    @functools.cached_property
+    @cached_property
     def _cartesian_z_grid(self):
         return np.arange(self._npix_los) * self.pxscale
 
-    @functools.cached_property
+    @cached_property
     def _max_density(self):
         return self.max_extinction * (1.8e21 / (u.cm ** 2 * u.mag))
 
-    @functools.cached_property
+    @cached_property
     def _brightness_3d_cartesian(self):
         """
         Method to obtain the brightness (or density) distribution of the nebula in cartesian coordinates
@@ -194,7 +198,7 @@ class Nebula:
             brt += (perturb[:, :, None] - np.median(perturb))
         return brt
 
-    @functools.cached_property
+    @cached_property
     def _brightness_4d_cartesian(self):
         """
         Derive the brightness (or density) distribution of the nebula for each emission line in cartesian coordinates
@@ -210,7 +214,7 @@ class Nebula:
 
         return self._brightness_3d_cartesian[None, :, :, :] * flux_ratios[:, None, None, None]
 
-    @functools.cached_property
+    @cached_property
     def brightness_skyplane(self):
         """
         Project the 3D nebula onto sky plane (for emission or continuum sources)
@@ -229,7 +233,7 @@ class Nebula:
         # else:
         #     return None
 
-    @functools.cached_property
+    @cached_property
     def brightness_skyplane_lines(self):
         """
         Project the 3D emission nebula line onto sky plane (return images in each emission line)
@@ -240,7 +244,7 @@ class Nebula:
         else:
             return None
 
-    @functools.cached_property
+    @cached_property
     def extinction_skyplane(self):
         """
         Project the 3D nebula onto sky plane (for dark clouds)
@@ -251,11 +255,11 @@ class Nebula:
         else:
             return None
 
-    @functools.cached_property
+    @cached_property
     def los_velocity(self):
         return np.atleast_1d(self.sys_velocity)
 
-    @functools.cached_property
+    @cached_property
     def line_profile(self):
         lprf = np.zeros(shape=len(self.los_velocity), dtype=float)
         lprf[np.floor(len(lprf) / 2.).astype(int)] = 1.
@@ -302,7 +306,7 @@ class Ellipse(Nebula):
         self._ref_line_id = 0
         self.linerat_constant = True  # True if the ratio of line fluxes shouldn't change across the nebula
 
-    @functools.cached_property
+    @cached_property
     def _brightness_3d_cartesian(self):
         """
         Method to obtain the brightness (or density) distribution of the nebula in cartesian coordinates
@@ -370,37 +374,37 @@ class Filament(Nebula):
         self._ref_line_id = 0
         self.linerat_constant = True  # True if the ratio of line fluxes shouldn't change across the nebula
 
-    @functools.cached_property
+    @cached_property
     def _theta_grid(self):
         return np.linspace(0, 2 * np.pi, self._theta_bins)
 
-    @functools.cached_property
+    @cached_property
     def _h_grid(self):
         return np.linspace(0, self.length, self._h_bins)
 
-    @functools.cached_property
+    @cached_property
     def _rad_grid(self):
         return np.linspace(0, self.width / 2, self._rad_bins)
 
-    @functools.cached_property
+    @cached_property
     def _cartesian_y_grid(self):
         npix = np.ceil(1.01 * (self.length * np.abs(np.sin(self.PA)) +
                                self.width * np.abs(np.cos(self.PA))) / self.pxscale).astype(int)
         npix_l = npix / 2 - np.ceil(self.length / 2 * np.sin(-self.PA) / self.pxscale).astype(int)
         return (np.linspace(0, npix, npix + 1) - npix_l) * self.pxscale
 
-    @functools.cached_property
+    @cached_property
     def _cartesian_z_grid(self):
         npix = np.ceil(1.01 * (self.length * np.abs(np.cos(self.PA)) +
                                self.width * np.abs(np.sin(self.PA))) / self.pxscale).astype(int)
         npix_l = npix / 2 - np.ceil(self.length / 2 * np.cos(-self.PA) / self.pxscale).astype(int)
         return (np.linspace(0, npix, npix + 1) - npix_l) * self.pxscale
 
-    @functools.cached_property
+    @cached_property
     def _cartesian_x_grid(self):
         return np.linspace(-1.01, 1.01, self._npix_los) * self.width / 2
 
-    @functools.cached_property
+    @cached_property
     def _brightness_3d_cylindrical(self):
         """
         Method to calculate brightness (or opacity) of the cloud at given theta, phi and radii
@@ -419,7 +423,7 @@ class Filament(Nebula):
             brt = brt / np.sum(brt)
         return brt
 
-    @functools.cached_property
+    @cached_property
     def _brightness_3d_cartesian(self):
         x, y, z = np.meshgrid(self._cartesian_x_grid, self._cartesian_y_grid,
                               self._cartesian_z_grid, indexing='ij')
@@ -475,7 +479,7 @@ class Galaxy(Nebula):
         self._ref_line_id = 0
         self.linerat_constant = True  # True if the ratio of line fluxes shouldn't change across the nebula
 
-    @functools.cached_property
+    @cached_property
     def _brightness_3d_cartesian(self):
         """
         Method to obtain the brightness (or density) distribution of the nebula in cartesian coordinates
@@ -538,32 +542,32 @@ class Cloud(Nebula):
             self.yc = self.y0 + delta
         self._ref_line_id = 0
 
-    @functools.cached_property
+    @cached_property
     def _theta_grid(self):
         return np.linspace(0, np.pi, self._theta_bins)
 
-    @functools.cached_property
+    @cached_property
     def _phi_grid(self):
         return np.linspace(0, 2 * np.pi, self._phi_bins)
 
-    @functools.cached_property
+    @cached_property
     def _rad_grid(self):
         return np.linspace(0, self.radius, self._rad_bins)
 
-    @functools.cached_property
+    @cached_property
     def _cartesian_z_grid(self):
         npix = np.ceil(1.02 * self.radius / self.pxscale).astype(int)
         return np.linspace(-npix, npix, 2 * npix + 1) * self.pxscale
 
-    @functools.cached_property
+    @cached_property
     def _cartesian_y_grid(self):
         return self._cartesian_z_grid.copy()
 
-    @functools.cached_property
+    @cached_property
     def _cartesian_x_grid(self):
         return np.linspace(-1.02, 1.02, self._npix_los) * self.radius
 
-    @functools.cached_property
+    @cached_property
     def _brightness_3d_spherical(self):
         """
         Method to calculate brightness (or opacity) of the cloud at given theta, phi and radii
@@ -595,7 +599,7 @@ class Cloud(Nebula):
             brt = brt / np.sum(brt)
         return brt
 
-    @functools.cached_property
+    @cached_property
     def _brightness_4d_spherical(self):
         """
         Method to calculate brightness of the cloud at given theta, phi and radii for each line
@@ -625,14 +629,14 @@ class Cloud(Nebula):
                                                                                                      s[0], s[1], s[2]))
             return brt / np.sum(brt[self._ref_line_id])
 
-    @functools.cached_property
+    @cached_property
     def _brightness_3d_cartesian(self):
         return interpolate_sphere_to_cartesian(self._brightness_3d_spherical, x_grid=self._cartesian_x_grid,
                                                y_grid=self._cartesian_y_grid, z_grid=self._cartesian_z_grid,
                                                rad_grid=self._rad_grid, theta_grid=self._theta_grid,
                                                phi_grid=self._phi_grid, pxscale=self.pxscale)
 
-    @functools.cached_property
+    @cached_property
     def _brightness_4d_cartesian(self):
         s = self._brightness_4d_spherical.shape
         return np.array(Parallel(n_jobs=lvmdatasimulator.n_process)(delayed(interpolate_sphere_to_cartesian)
@@ -654,7 +658,7 @@ class Bubble(Cloud):
     max_extinction: u.mag = 0 * u.mag
     thickness: float = 0.2
 
-    @functools.cached_property
+    @cached_property
     def _velocity_3d_spherical(self) -> velunit:
         """
         Calculate line of sight velocity at given radius, phi, theta
@@ -671,7 +675,7 @@ class Bubble(Cloud):
             np.median(self._brightness_3d_spherical[self._brightness_3d_spherical > 0])
         return vel_cube
 
-    @functools.cached_property
+    @cached_property
     def _velocity_3d_cartesian(self) -> velunit:
         return interpolate_sphere_to_cartesian(self._velocity_3d_spherical, x_grid=self._cartesian_x_grid,
                                                y_grid=self._cartesian_y_grid, z_grid=self._cartesian_z_grid,
@@ -690,7 +694,7 @@ class Bubble(Cloud):
         return (self._brightness_3d_cartesian[:, :, :, None] * (
                 fluxunit / u.pc ** 3) * self._turbulent_lsf(velocity)).to(fluxunit / velunit / u.pc ** 3)
 
-    @functools.cached_property
+    @cached_property
     def vel_field(self) -> (fluxunit / velunit):
         """
         Produces the distribution of the observed line profiles in each pixels of the sky plane
@@ -723,7 +727,8 @@ class ISM:
     sys_velocity: velunit = 0 * velunit  # Systemic velocity to center the vel.grid on
     vel_amplitude: velunit = 100 * velunit  # Maximal deviation from the systemic velocity to setup vel.grid
     turbulent_sigma: velunit = 10. * velunit  # turbulence vel. disp. to be used for every nebula unless other specified
-
+    R_V: float = 3.1  # R_V value defining the reddening curve (to be used unless other value is provided for a nebula)
+    ext_law: str = 'F99'  # Reddening law (to be used unless other value is provided for a nebula)
     # last_id: int = 0
     # ext_eps: u.mag = 0.01 * u.mag
     # brt_eps: fluxunit = 1e-20 * fluxunit
@@ -745,7 +750,7 @@ class ISM:
         self.content[0].header['TurbSig'] = (self.turbulent_sigma.value, "Default turbulent velocity dispersion, km/s")
         self.content[0].header['Nobj'] = (0, "Number of generated nebulae")
 
-    @functools.cached_property
+    @cached_property
     def vel_resolution(self):
         return (self.spec_resolution / self.npix_line / (10000 * u.Angstrom) * c.c).to(velunit)
 
@@ -910,7 +915,9 @@ class ISM:
                                 'continuum_data': model_id or [poly_coefficients] or Teff # value defining cont. shape
                                 'continuum_flux': 1e-16 * u.erg / u.cm ** 2 / u.s / u.arcsec **2 / u.AA,
                                 'continuum_mag': 22 * u.mag,
-                                'continuum_wl': 5500, # could be also R, V, B
+                                'continuum_wl': 5500, # could be also R, V, B,
+                                'ext_law': 'F99',  # Extinction law, one of those used by pyneb (used for dark nebulae)
+                                'ext_rv': 3.1,  # Value of R_V for extinction curve calculation (used for dark nebulae)
                                 }]
         """
         if type(all_objects) is dict:
@@ -933,9 +940,10 @@ class ISM:
                              'expansion_velocity', 'sys_velocity',
                              'turbulent_sigma', 'perturb_degree',
                              'perturb_amplitude', 'perturb_scale', 'radius', 'distance',
-                             'continuum_type', 'continuum_data', 'continuum_flux', 'continuum_mag', 'continuum_wl'],
+                             'continuum_type', 'continuum_data', 'continuum_flux', 'continuum_mag', 'continuum_wl',
+                             'ext_law', 'ext_rv'],
                             [0, 0, 1., 0, self.sys_velocity, self.turbulent_sigma, 0, 0.1, 0, 0, self.distance,
-                             None, None, 0, None, 5500.]):
+                             None, None, 0, None, 5500., self.ext_law, self.R_V]):
                 set_default_dict_values(cur_obj, k, v)
             for k in ['max_brightness', 'max_extinction', 'radius', 'continuum_flux']:
                 if cur_obj[k] < 0:
@@ -996,8 +1004,10 @@ class ISM:
                 # ==== Check input parameters and do necessary conversions
                 if not cur_obj.get('zorder'):
                     cur_obj['zorder'] = 0
-                if not ((cur_obj.get('RA') and cur_obj.get('DEC')) or
-                        (cur_obj.get('X') and cur_obj.get('Y'))):
+                if not ((cur_obj.get('RA') is not None and cur_obj.get('DEC') is not None) or
+                        (cur_obj.get('X') is not None and cur_obj.get('Y') is not None) or
+                        (cur_obj.get('offset_X') is not None and cur_obj.get('offset_Y') is not None) or
+                        (cur_obj.get('offset_RA') is not None and cur_obj.get('offset_DEC') is not None)):
                     log.warning("Wrong set of parameters for the nebula #{0}: skip this one".format(ind_obj))
                     continue
                 if cur_obj['type'] in ['Rectangle', 'Nebula'] and not (('width' in cur_obj) and ('height' in cur_obj)):
@@ -1021,8 +1031,15 @@ class ISM:
                         cur_obj['rad_lim'] = 3.
 
                 if not (cur_obj.get('X') and cur_obj.get('Y')):
-                    radec = SkyCoord(ra=cur_obj.get('RA'), dec=cur_obj.get('DEC'))
-                    x, y = self.wcs.world_to_pixel(radec)
+                    if cur_obj.get('offset_X') and cur_obj.get('offset_Y'):
+                        x = self.width / 2. + cur_obj.get('offset_X')
+                        y = self.height / 2. + cur_obj.get('offset_Y')
+                    elif cur_obj.get('RA') and cur_obj.get('DEC'):
+                        radec = SkyCoord(ra=cur_obj.get('RA'), dec=cur_obj.get('DEC'))
+                        x, y = self.wcs.world_to_pixel(radec)
+                    elif cur_obj.get('offset_RA') and cur_obj.get('offset_DEC'):
+                        x = self.width / 2. - (cur_obj.get('offset_RA') / proj_plane_pixel_scales(self.wcs)[0] / 3600)
+                        y = self.height / 2. + (cur_obj.get('offset_DEC') / proj_plane_pixel_scales(self.wcs)[0] / 3600)
                     x = np.round(x).astype(int)
                     y = np.round(y).astype(int)
                 else:
@@ -1194,6 +1211,13 @@ class ISM:
                 add_fits_kw['CONTMAG'] = (contmag,
                                           "Continuum brightness (in mag/asec^2) at ref. wl/Filter")
                 add_fits_kw['CONTWL'] = (cur_obj['continuum_wl'], 'Reference wavelength/filter for cont. flux/mag')
+
+            if cur_obj.get('max_extinction') > 0:
+                if add_fits_kw is None:
+                    add_fits_kw = {}
+                add_fits_kw['EXT_LAW'] = (cur_obj['ext_law'], "Extinction law according to pyneb list")
+                add_fits_kw['EXT_RV'] = (cur_obj['ext_rv'], "R_V value for extinction calculations")
+
             self.add_nebula(generated_object, obj_id=obj_id, zorder=cur_obj.get('zorder'), add_fits_kw=add_fits_kw,
                             continuum=continuum)
             obj_id += 1
@@ -1231,8 +1255,7 @@ class ISM:
                                                           name=hh.header.get('EXTNAME')))
                 return True
 
-    def calc_extinction(self, wavelength=6562.81, x0=0, y0=0, xs=None, ys=None, extension_name=None, logscale=False,
-                        extinction_law='F99', R_V=3.1):
+    def calc_extinction(self, wavelength=6562.81, x0=0, y0=0, xs=None, ys=None, extension_name=None):
         """
         Calculate coefficient to reduce flux due to extinction at given wavelength(s)
 
@@ -1244,9 +1267,6 @@ class ISM:
             wavelength: in angstrom, particular wavelength (or wavelengths)
                 at which the calculations should be performed
             extension_name (str): name of the extension for current dark nebula
-            logscale: True if the wavelength is np.log(wavelength)
-            extinction_law: 'F99' or 'CCM89' or any other extinction law from pyneb
-            R_V:
 
         Returns:
             None (if no any dark nebula at particular location) or np.array of (nlines, ys, xs) shape
@@ -1303,8 +1323,8 @@ class ISM:
                        cur_neb_x0 + self.content[dark_nebula].header.get('X0') - x0:
                        cur_neb_x1 + self.content[dark_nebula].header.get('X0') - x0 + 1
                        ] = self.content[dark_nebula].data[cur_neb_y0: cur_neb_y1 + 1, cur_neb_x0: cur_neb_x1 + 1]
-            cur_extinction_law = extinction_law
-            cur_r_v = R_V
+            cur_extinction_law = self.ext_law
+            cur_r_v = self.R_V
             if self.content[dark_nebula].header.get('EXT_LAW'):
                 cur_extinction_law = self.content[dark_nebula].header.get('EXT_LAW')
             if self.content[dark_nebula].header.get('EXT_RV'):
@@ -1328,7 +1348,8 @@ class ISM:
             return None
         all_extensions = [hdu.header.get('EXTNAME') for hdu in self.content]
         all_extensions_brt = np.array([extname for extname in all_extensions
-                                       if extname is not None and ("BRIGHTNESS" in extname)])
+                                       if extname is not None and ("BRIGHTNESS" in extname) and
+                                       check_overlap(self.content[extname], (self.height, self.width))])
 
         if all([self.content[cur_ext].header.get("DARK") for cur_ext in all_extensions_brt]):
             # !!!! ADD later accounting of the continuum and extinction from those nebulae
@@ -1342,15 +1363,25 @@ class ISM:
         map_is_empty = True
         for cur_ext in all_extensions_brt:
             my_comp = "_".join(cur_ext.split("_")[:2])
+
+            y0_in_field = np.clip(self.content[cur_ext].header['Y0'], 0, None)
+            y1_in_field = np.clip(self.content[cur_ext].header['Y0'] + self.content[cur_ext].header['NAXIS2'] - 1, None,
+                                  self.height-1)
+            x0_in_field = np.clip(self.content[cur_ext].header['X0'], 0, None)
+            x1_in_field = np.clip(self.content[cur_ext].header['X0'] + self.content[cur_ext].header['NAXIS1'] - 1, None,
+                                  self.width - 1)
+
             if get_continuum and (my_comp + "_CONTINUUM" in all_extensions):
                 n_wl_bins = int(np.clip(np.ceil((wavelength[1]-wavelength[0])/20.), 10, 200))
                 wl_grid = np.linspace(wavelength[0], wavelength[1], n_wl_bins)
                 continuum = np.sum(self._get_continuum(my_comp, wl_grid))
                 add_continuum = self.content[cur_ext].data / np.max(self.content[cur_ext].data) * continuum
-                map_2d[self.content[cur_ext].header['Y0']:
-                       self.content[cur_ext].header['Y0'] + self.content[cur_ext].header['NAXIS2'],
-                       self.content[cur_ext].header['X0']:
-                       self.content[cur_ext].header['X0'] + self.content[cur_ext].header['NAXIS1']] += add_continuum
+                map_2d[y0_in_field: y1_in_field + 1, x0_in_field: x1_in_field + 1] += \
+                    add_continuum[y0_in_field - self.content[cur_ext].header['Y0']:
+                                  y1_in_field - self.content[cur_ext].header['Y0'] + 1,
+                                  x0_in_field - self.content[cur_ext].header['X0']: x1_in_field -
+                                  self.content[cur_ext].header['X0'] + 1
+                                  ]
                 map_is_empty = False
             if self.content[cur_ext].header.get("DARK"):
                 if map_is_empty:
@@ -1397,10 +1428,13 @@ class ISM:
                 for cur_wl in flux_ext_wl:
                     add_emission += self.content[my_comp + "_FLUX_" + cur_wl].data
 
-            map_2d[self.content[cur_ext].header['Y0']:
-                   self.content[cur_ext].header['Y0'] + self.content[cur_ext].header['NAXIS2'],
-                   self.content[cur_ext].header['X0']:
-                   self.content[cur_ext].header['X0'] + self.content[cur_ext].header['NAXIS1']] += add_emission
+            map_2d[y0_in_field: y1_in_field + 1, x0_in_field: x1_in_field + 1] += \
+                add_emission[y0_in_field - self.content[cur_ext].header['Y0']:
+                             y1_in_field - self.content[cur_ext].header['Y0'] + 1,
+                             x0_in_field - self.content[cur_ext].header['X0']: x1_in_field -
+                             self.content[cur_ext].header['X0'] + 1
+                             ]
+
             map_is_empty = False
         return map_2d * (proj_plane_pixel_scales(self.wcs)[0] * 3600) ** 2
 
@@ -1409,7 +1443,8 @@ class ISM:
             return None
         all_extensions = [hdu.header.get('EXTNAME') for hdu in self.content]
         all_extensions_brt = np.array([extname for extname in all_extensions
-                                       if extname is not None and ("BRIGHTNESS" in extname)])
+                                       if extname is not None and ("BRIGHTNESS" in extname) and
+                                       check_overlap(self.content[extname], (self.height, self.width))])
         if all([self.content[cur_ext].header.get("DARK") for cur_ext in all_extensions_brt]):
             return None
         all_extensions_brt = all_extensions_brt[np.argsort([self.content[cur_ext].header.get('ZORDER')
@@ -1423,10 +1458,10 @@ class ISM:
 
         xx, yy = np.meshgrid(np.arange(aperture_mask.shape[1]), np.arange(aperture_mask.shape[0]))
         pix_in_apertures = aperture_mask > 0
-        xstart = np.min(xx[pix_in_apertures])
-        ystart = np.min(yy[pix_in_apertures])
-        xfin = np.max(xx[pix_in_apertures])
-        yfin = np.max(yy[pix_in_apertures])
+        xstart = np.clip(np.min(xx[pix_in_apertures]) - 1, 0, None)
+        ystart = np.clip(np.min(yy[pix_in_apertures]) - 1, 0, None)
+        xfin = np.clip(np.max(xx[pix_in_apertures]) + 1, None, aperture_mask.shape[1]-1)
+        yfin = np.clip(np.max(yy[pix_in_apertures]) + 1, None, aperture_mask.shape[0]-1)
         aperture_mask_sub = aperture_mask[ystart: yfin + 1, xstart: xfin + 1]
         xx_sub, yy_sub = np.meshgrid(np.arange(xfin - xstart + 1), np.arange(yfin - ystart + 1))
         n_apertures = np.max(aperture_mask)
@@ -1436,19 +1471,6 @@ class ISM:
         radius = fibers_coords[0, 2]
         kern_mask = calc_circular_mask(radius)
         kern = kernels.CustomKernel(kern_mask.reshape((1, kern_mask.shape[0], kern_mask.shape[1])))
-
-        # size = np.round(2 * radius).astype(int)
-        # if size % 2 == 0:
-        #     size += 1
-        # # radius = np.round(np.sqrt(np.sum(aperture_mask == n_apertures) / np.pi)).astype(int)
-        # # size = 2 * radius + 1
-        # # if size % 2 == 0:
-        # #     size += 1
-        # kern_array = np.zeros(shape=(1, size, size), dtype=int)
-        # xx_kern, yy_kern = np.meshgrid(np.arange(size), np.arange(size))
-        # rec = (xx_kern - radius) ** 2 + (yy_kern - radius) ** 2 <= radius ** 2
-        # kern_array[0, yy_kern[rec], xx_kern[rec]] = 1
-        # kern = kernels.CustomKernel(kern_array)
 
         bar = progressbar.ProgressBar(max_value=len(all_extensions_brt)).start()
         for neb_index, cur_ext in enumerate(all_extensions_brt):
@@ -1468,14 +1490,18 @@ class ISM:
                                          np.arange(self.content[cur_ext].data.shape[0]))
             cur_mask_in_neb[(xx_neb >= (xstart - x0)) & (xx_neb <= (xfin - x0)) &
                             (yy_neb >= (ystart - y0)) & (yy_neb <= (yfin - y0))] = True
-            xstart_neb = np.min(xx_neb[cur_mask_in_neb])  # np.clip(np.min(xx_neb[cur_mask_in_neb]) - 2, 0, nx - 1)
-            ystart_neb = np.min(yy_neb[cur_mask_in_neb])  # np.clip(np.min(yy_neb[cur_mask_in_neb]) - 2, 0, ny - 1)
-            xfin_neb = np.max(xx_neb[cur_mask_in_neb])  # np.clip(np.max(xx_neb[cur_mask_in_neb]) + 2, 0, nx - 1)
-            yfin_neb = np.max(yy_neb[cur_mask_in_neb])  # np.clip(np.max(yy_neb[cur_mask_in_neb]) + 2, 0, ny - 1)
-
-            selected_apertures = np.flatnonzero((fibers_coords[:, 0] >= x0) & (fibers_coords[:, 0] <= (x0 + nx)) &
-                                                (fibers_coords[:, 1] >= y0) & (fibers_coords[:, 1] <= (y0 + ny)))
-
+            xstart_neb = np.min(xx_neb[cur_mask_in_neb])
+            ystart_neb = np.min(yy_neb[cur_mask_in_neb])
+            xfin_neb = np.max(xx_neb[cur_mask_in_neb])
+            yfin_neb = np.max(yy_neb[cur_mask_in_neb])
+            selected_apertures = np.flatnonzero(((fibers_coords[:, 0] + fibers_coords[:, 2]) >= x0) &
+                                                ((fibers_coords[:, 0] - fibers_coords[:, 2]) <= (x0 + nx - 1)) &
+                                                ((fibers_coords[:, 1] + fibers_coords[:, 2]) >= y0) &
+                                                ((fibers_coords[:, 1] - fibers_coords[:, 2]) <= (y0 + ny - 1)))
+            selected_apertures = np.array([sa for sa in selected_apertures if (sa+1) in aperture_mask_sub], dtype=int)
+            if len(selected_apertures) == 0:
+                bar.update(neb_index + 1)
+                continue
             if self.content[cur_ext].header.get("DARK"):
                 extinction_map = self.content[cur_ext].data[cur_mask_in_neb].reshape((1, yfin_neb - ystart_neb + 1,
                                                                                       xfin_neb - xstart_neb + 1))
@@ -1483,11 +1509,11 @@ class ISM:
                 if self.content[cur_ext].header.get('EXT_LAW'):
                     cur_extinction_law = self.content[cur_ext].header.get('EXT_LAW')
                 else:
-                    cur_extinction_law = 'F99'
+                    cur_extinction_law = self.ext_law
                 if self.content[cur_ext].header.get('EXT_RV'):
                     cur_r_v = self.content[cur_ext].header.get('EXT_RV')
                 else:
-                    cur_r_v = 3.1
+                    cur_r_v = self.R_V
                 data_in_apertures = convolve_fft(extinction_map, kern,
                                                  allow_huge=True, normalize_kernel=True)[
                                     :, aperture_centers[selected_apertures, 1] - ystart_neb - y0,

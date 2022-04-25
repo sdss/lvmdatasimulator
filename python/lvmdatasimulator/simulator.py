@@ -18,7 +18,6 @@
 
 import numpy as np
 import astropy.units as u
-
 from collections import OrderedDict
 from scipy import special
 from spectres import spectres
@@ -184,6 +183,7 @@ class Simulator:
                 File containing the athmospheric extinction curve.
                 Defaults to f'{DATA_DIR}/sky/LVM_LVM160_KLAM.dat'.
         """
+        
         log.info('Reading the atmospheric extinction from file.')
         self.extinction_file = extinction_file
         data = ascii.read(self.extinction_file)
@@ -195,7 +195,7 @@ class Simulator:
         """
         Return sky emission spectrum sampled at instrumental wavelengths
         """
-
+        
         if self.observation.sky_template is None:
             days_moon = self.observation.days_moon
             log.info(f'Simulating the sky emission {days_moon} from new moon.')
@@ -263,7 +263,6 @@ class Simulator:
 
     def extract_target_spectra(self):
         """Extract spectra of the target from the field object"""
-
         obj_spec = OrderedDict()
         wl_grid = np.arange(3647, 9900.01, 0.06) * u.AA
 
@@ -305,6 +304,7 @@ class Simulator:
             spectra (dictionary):
                 dictionary containing the input spectrum for each fiber.
         """
+        
         spectrum = spectra[fiber.id]
 
         # convert spectra to electrons
