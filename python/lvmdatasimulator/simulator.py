@@ -19,16 +19,11 @@
 import numpy as np
 import astropy.units as u
 
-import sys
-if (sys.version_info[0]+sys.version_info[1]/10.) < 3.8:
-    from backports.cached_property import cached_property
-else:
-    from functools import cached_property
-
 from collections import OrderedDict
 from scipy import special
 from spectres import spectres
 from astropy.io import ascii, fits
+from astropy.table import vstack
 from dataclasses import dataclass
 from astropy.convolution import Gaussian1DKernel, convolve
 
@@ -42,7 +37,7 @@ from lvmdatasimulator import log
 from lvmdatasimulator.utils import round_up_to_odd
 from joblib import Parallel, delayed
 import os
-import sys
+# import sys
 
 
 @dataclass(frozen=True)
@@ -90,72 +85,6 @@ def epp2flam(lam, fe, ddisp):
     """
 
     return fe * Constants.h * Constants.c / (lam * ddisp)
-
-
-def zp2elam(zp, lam, neobj, ddisp, texp, atel, klam, airmass):
-    """
-    Claculates the system efficiency "elam" from a Zero Point "zp" (AB mag) corresponding to
-    "neobj" electrons per pixel of width "ddisp" collected in "texp" at airmass "amass"
-    The ZP is typically given for 1 e/s/pixel at amass=1 and sometimes 1 ADU/s/pixel at amass=1
-
-    Args:
-        zp (float ?):
-            zeropoint of the instrument.
-        lam (array-like):
-            ?
-        neobj ([type]):
-            Not sure what this is. Number of electron produced by the object?
-        ddisp (float):
-            dispersion of the instrumment
-        texp (float):
-            Exposure time
-        atel ([type]):
-            collecting area of the telescope
-        klam ([type]):
-            extinction as a function of lambda ?
-        airmass (float):
-            airmass
-
-    Returns:
-        ?:
-            efficiency of the telescope
-    """
-
-    exponent = 0.4 * (zp + 48.6 + klam * airmass)
-    constant = Constants.h * lam * neobj / (ddisp * texp * atel)
-
-    return constant * 10 ** exponent
-
-
-def elam2zp(elam, lam, neobj, ddisp, texp, atel, klam, airmass):
-    """
-    Zero Point from System Efficiency. It's the inverse function of zp2elam.
-
-    Args:
-        elam ([type]):
-            system efficiency
-        lam ([type]):
-            wavelengths
-        neobj ([type]):
-            [description]
-        ddisp ([type]):
-            [description]
-        texp ([type]):
-            [description]
-        atel ([type]):
-            [description]
-        klam ([type]):
-            [description]
-        amass ([type]):
-            [description]
-
-    Returns:
-        [type]: [description]
-    """
-    const1 = elam * ddisp * texp * atel
-    const2 = Constants.h * lam * neobj
-
-    return 2.5 * np.log10(const1 / const2) - 48.6 - klam * airmass
 
 
 def resample_spectrum(new_wave, old_wave, flux):
@@ -241,8 +170,12 @@ class Simulator:
         if not os.path.isdir(self.outdir):
             os.mkdir(self.outdir)
 
-    @cached_property
-    def extinction(self, extinction_file=os.path.join(lvmdatasimulator.DATA_DIR, 'sky', 'LVM_LVM160_KLAM.dat')):
+        self.extinction = self.extract_extinction()
+        self.sky = self.extract_sky()
+        self.target_spectra = self.extract_target_spectra()
+
+    def extract_extinction(self, extinction_file=os.path.join(lvmdatasimulator.DATA_DIR, 'sky',
+                                                              'LVM_LVM160_KLAM.dat')):
         """
         Returns atmospheric extinction coefficient sampled at instrumental wavelengths
 
@@ -258,14 +191,19 @@ class Simulator:
         log.info('Resample extinction file to instrument wavelength solution.')
         return self._resample_and_convolve(data["col1"], data["col2"])
 
-    @cached_property
-    def sky(self):
+    def extract_sky(self):
+        """
+        Return sky emission spectrum sampled at instrumental wavelengths
+        """
 
-        days_moon = self.observation.days_from_new_moon
-        sky_file = os.path.join(lvmdatasimulator.DATA_DIR, 'sky',
-                                'LVM_{0}_SKY_{1}.dat'.format(self.telescope.name, days_moon))
+        if self.observation.sky_template is None:
+            days_moon = self.observation.days_moon
+            log.info(f'Simulating the sky emission {days_moon} from new moon.')
+            sky_file = os.path.join(lvmdatasimulator.DATA_DIR, 'sky',
+                                    f'LVM_{self.telescope.name}_SKY_{days_moon}.dat')
+        else:
+            sky_file = self.observation.sky_template
 
-        log.info(f'Simulating the sky emission {days_moon} from new moon.')
         log.info(f'Using sky file: {sky_file}')
 
         area_fiber = np.pi * (self.bundle.fibers[0].diameter / 2) ** 2  # all fibers same diam.
@@ -278,7 +216,7 @@ class Simulator:
 
     def _resample_and_convolve(self, old_wave, old_flux, unit=None):
         """
-        auxiliary function to resample a spectrum to the instrument wavelength array and
+        Auxiliary function to resample a spectrum to the instrument wavelength array and
         convolve it for the LSF and for the fiber_profile
 
         Args:
@@ -323,15 +261,15 @@ class Simulator:
 
         return out_spec
 
-    @cached_property
-    def target_spectra(self):
-        """Extract spectra of the terget from the field object"""
+    def extract_target_spectra(self):
+        """Extract spectra of the target from the field object"""
 
         obj_spec = OrderedDict()
         wl_grid = np.arange(3647, 9900.01, 0.06) * u.AA
 
         log.info(f"Recovering target spectra for {self.bundle.nfibers} fibers.")
-        index, spectra = self.source.extract_spectra(self.bundle.fibers, wl_grid)
+        index, spectra = self.source.extract_spectra(self.bundle.fibers, wl_grid,
+                                                     obs_coords=self.observation.target_coords)
 
         log.info('Resampling spectra to the instrument wavelength solution.')
         for fiber in self.bundle.fibers:
@@ -358,6 +296,15 @@ class Simulator:
         return obj_spec
 
     def _simulate_observations_single_fiber(self, fiber, spectra):
+        """
+        Simulate the observation of a single fiber.
+
+        Args:
+            fiber (Fiber):
+                Fiber to be simulated
+            spectra (dictionary):
+                dictionary containing the input spectrum for each fiber.
+        """
         spectrum = spectra[fiber.id]
 
         # convert spectra to electrons
@@ -382,8 +329,7 @@ class Simulator:
 
     def simulate_observations(self):
         """
-        Main function of the simulators. It takes everything we have done before, and simulate
-        the data
+        Runs the simulation, parallelizing it of the number of fibers to observe is large enough
         """
 
         log.info("Simulating observations.")
@@ -397,6 +343,10 @@ class Simulator:
                 for fiber in self.bundle.fibers)
 
     def save_outputs(self):
+        """
+        Main function to save the output of the simulation into rss file. Each different output is
+        saved separately.
+        """
 
         log.info("Saving the outputs:")
         for branch in self.spectrograph.branches:
@@ -407,8 +357,14 @@ class Simulator:
             log.info('Calibrated outputs')
             self._save_outputs_flux(branch)
 
-
     def _save_inputs(self, branch):
+        """
+        Save the input spectra for a certain branch to an RSS file.
+
+        Args:
+            branch (Branch):
+                specific spectrograph branch to be saved.
+        """
 
         ids, target, sky = self._reorganize_to_rss_input(branch)
 
@@ -426,18 +382,26 @@ class Simulator:
         wave_hdu.header["BUNIT"] = "Angstrom"
         primary.header["EXT3"] = "WAVE"
 
-        col1 = fits.Column(name="ID", format="10A", array=ids)
-        ids_hdu = fits.BinTableHDU.from_columns([col1], name="FIBERID")
+        ids_hdu = fits.BinTableHDU(ids)
         primary.header["EXT4"] = "FIBERID"
 
         hdul = fits.HDUList([primary, signal_hdu, sky_hdu, wave_hdu, ids_hdu])
 
-        filename = os.path.join(self.outdir, f"{self.source.name}_{branch.name}_{self.bundle.bundle_name}_input.fits")
+        filename = os.path.join(self.outdir,
+                                f"{self.source.name}_{branch.name}_{self.bundle.bundle_name}_" +
+                                "input.fits")
 
         hdul.writeto(filename, overwrite=True)
         log.info(f"{filename} saved.")
 
     def _save_outputs_flux(self, branch):
+        """
+        Save the output flux calibrated spectra for a certain branch to an RSS file.
+
+        Args:
+            branch (Branch):
+                specific spectrograph branch to be saved.
+        """
 
         ids, target, total, noise, sky, snr = self._reorganize_to_rss(branch, self.output_calib)
 
@@ -467,19 +431,27 @@ class Simulator:
         wave_hdu.header["BUNIT"] = "Angstrom"
         primary.header["EXT6"] = "WAVE"
 
-        col1 = fits.Column(name="ID", format="10A", array=ids)
-        ids_hdu = fits.BinTableHDU.from_columns([col1], name="FIBERID")
+        ids_hdu = fits.BinTableHDU(ids)
         primary.header["EXT7"] = "FIBERID"
 
         hdul = fits.HDUList([primary, target_hdu, total_hdu, noise_hdu, stn_hdu, sky_hdu, wave_hdu,
                              ids_hdu])
 
-        filename = os.path.join(self.outdir, f"{self.source.name}_{branch.name}_{self.bundle.bundle_name}_flux.fits")
+        filename = os.path.join(self.outdir,
+                                f"{self.source.name}_{branch.name}_{self.bundle.bundle_name}_" +
+                                "flux.fits")
 
         hdul.writeto(filename, overwrite=True)
         log.info(f"{filename} saved.")
 
     def _save_outputs_with_noise(self, branch):
+        """
+        Save the uncalibrated output spectra for a certain branch to an RSS file.
+
+        Args:
+            branch (Branch):
+                specific spectrograph branch to be saved.
+        """
 
         ids, target, total, noise, sky, snr = self._reorganize_to_rss(branch, self.output_noise)
         primary = self._create_primary_hdu(branch)
@@ -508,20 +480,33 @@ class Simulator:
         wave_hdu.header["BUNIT"] = "Angstrom"
         primary.header["EXT6"] = "WAVE"
 
-        col1 = fits.Column(name="ID", format="10A", array=ids)
-        ids_hdu = fits.BinTableHDU.from_columns([col1], name="FIBERID")
+        ids_hdu = fits.BinTableHDU(ids)
         primary.header["EXT7"] = "FIBERID"
 
         hdul = fits.HDUList([primary, target_hdu, total_hdu, noise_hdu, stn_hdu, sky_hdu, wave_hdu,
                              ids_hdu])
 
         filename = os.path.join(self.outdir,
-                                f"{self.source.name}_{branch.name}_{self.bundle.bundle_name}_realization.fits")
+                                f"{self.source.name}_{branch.name}_{self.bundle.bundle_name}_" +
+                                "realization.fits")
 
         hdul.writeto(filename, overwrite=True)
         log.info(f"{filename} saved.")
 
     def _obj_to_electrons(self, spectrum, fiber_id):
+        """
+        Convert a spectrum in flux units to electrons per second.
+
+        Args:
+            spectrum (OrderedDict):
+                Dictionary containing the spectrum in all the simulated branches
+            fiber_id (int):
+                id of the selected fiber
+
+        Returns:
+            OrderedDict:
+                Dictionary containing the spectra in the observed branches transformed to counts/s
+        """
 
         # Number of object electrons per spectral pixel
         # Returns the total number of electrons in a spectral pixel of width ddisp.
@@ -548,7 +533,10 @@ class Simulator:
         return out
 
     def _to_2d(self, fiber, spectrum):
-        """ Transforming 1D to 2D. Not sure what is happening"""
+        """
+        This function transform the 1D spectrum in a 2D spectrum, to simulate the dispersion
+        on the detector caused by the fiber.
+        """
 
         nypix = int(round_up_to_odd(fiber.nypix.value))
 
@@ -571,6 +559,17 @@ class Simulator:
         return out
 
     def _sky_to_electrons(self, sky_spectrum):
+        """
+        Convert the sky spectrum from flux units to counts per second.
+
+        Args:
+            sky_spectrum (OrderedDict):
+                Input sky spectrum.
+
+        Returns:
+            OrderedDict:
+                Dictionary containing the transformed spectrum
+        """
 
         out = OrderedDict()
         for branch in self.spectrograph.branches:
@@ -585,7 +584,20 @@ class Simulator:
         return out
 
     def _make_noise(self, spectrum, sky):
-        """ compute the noise. Can work with any array size"""
+        """
+        Generate the error array by combining all the different sources of error. Gaussian errors
+        are considered.
+
+        Args:
+            spectrum (OrderedDict):
+                Input spectrum
+            sky (OrderedDict):
+                Input sky spectrum
+
+        Returns:
+            OrderedDict:
+                Dictionary containing the error arrays, one for each simulated branch
+        """
 
         out = OrderedDict()
 
@@ -601,6 +613,21 @@ class Simulator:
         return out
 
     def _extract_aperture(self, spec2d, noise2d, sky2d):
+        """
+        Extract a 1D spectrum from the simulated 2D realizations
+
+        Args:
+            spec2d (OrderedDict):
+                Dictionary containing the 2D spectra to be extracted.
+            noise2d (OrderedDict):
+                Dictionary containing the 2D error arrays to be extracted.
+            sky2d (OrderedDict):
+                Dictionary containing the 2D spectra of the sky to be extracted.
+
+
+        Returns:
+            _type_: _description_
+        """
 
         stnout = OrderedDict()
         sout = OrderedDict()
@@ -638,6 +665,20 @@ class Simulator:
         return {"spectrum": sout, "noise": nout, "snr": stnout, "sky": skyout}
 
     def _add_noise(self, exposure):
+        """
+        Add a gaussian noise to the observed spectra. The noise is added generating an array
+        where each pixel is randomly extracted from a Gaussian distribution with standard
+        deviation equal to the value of the pixel in the error array.
+
+        Args:
+            exposure (OrderedDict):
+                Dictionary containing the spectra and the error array
+
+        Returns:
+            Dict:
+                Dictionary containing the observed spectrum with noise, the target spectrum with
+                noise, the noise array, the sky spectrum with noise, the signal to noise spectrum
+        """
 
         signal_noise = OrderedDict()
         obj_noise = OrderedDict()
@@ -665,6 +706,17 @@ class Simulator:
         }
 
     def _coadd(self, spectrum, sky, noise):
+        """
+        Not Used yet
+
+        Args:
+            spectrum (_type_): _description_
+            sky (_type_): _description_
+            noise (_type_): _description_
+
+        Returns:
+            _type_: _description_
+        """
 
         spec_coadd = OrderedDict()
         sky_coadd = OrderedDict()
@@ -679,6 +731,22 @@ class Simulator:
         return spec_coadd, sky_coadd, noise_coadd
 
     def _reorganize_to_rss_input(self, branch):
+        """
+        Reorganize the input spectra to be saved to an RSS file. Also a table connecting the
+        spectra to the fiber is created.
+
+        Args:
+            branch (Branch):
+                Branche to be saved.
+
+        Returns:
+            astropy.table.Table:
+                Table containing the basic information on the fibers included in the bundle
+            numpy.array:
+                array containing the rearranged observed spectra (target+sky)
+            numpy.array:
+                array containing the rearranged target spectra
+        """
 
         nfibers = self.bundle.nfibers
         fib_id = []
@@ -687,14 +755,41 @@ class Simulator:
         sky = np.zeros((nfibers, branch.wavecoord.npix))
 
         for i, fiber in enumerate(self.bundle.fibers):
+            fib_id.append(fiber.to_table())
 
-            fib_id.append(fiber.id)
             signal[i, :] = self.target_spectra[fiber.id][branch.name]
             sky[i, :] = self.sky[fiber.id][branch.name]
 
-        return np.array(fib_id), signal, sky
+        fib_id = vstack(fib_id)
+        return fib_id, signal, sky
 
     def _reorganize_to_rss(self, branch, exposures):
+        """
+        Reorganize the output spectra to be saved to an RSS file. Also a table connecting the
+        spectra to the fiber is created. It can rearrange both the uncalibrated and the
+        calibrated spectra.
+
+        Args:
+            branch (Branch):
+                Only the spectra of this branch will be rearranged
+            exposures (dict):
+                Dictionary containing the spectra to be rearranged.
+
+        Returns:
+            astropy.table.Table:
+                Table containing the basic information on the fibers included in the bundle
+            numpy.array:
+                array containing the rearranged target spectra
+            numpy.array:
+                array containing the rearranged observed spectra (target+sky)
+            numpy.array:
+                array containing the rearranged noise spectra
+            numpy.array:
+                array containing the rearranged observed spectra (target+sky)
+            numpy.array:
+                array containing the rearranged target spectra
+
+        """
 
         nfibers = self.bundle.nfibers
         fib_id = []
@@ -706,15 +801,16 @@ class Simulator:
         noise_el = np.zeros((nfibers, branch.wavecoord.npix))
         snr = np.zeros((nfibers, branch.wavecoord.npix))
 
-        for i, (fiber_id, spectra) in enumerate(exposures.items()):
-            fib_id.append(fiber_id)
+        for i, spectra in enumerate(exposures.values()):
+            fib_id.append(self.bundle.fibers[i].to_table())
             target_w_noise[i, :] = spectra["target"][branch.name]
             total_w_noise[i, :] = spectra["signal"][branch.name]
             noise_el[i, :] = spectra["noise"][branch.name]
             sky_el[i, :] = spectra["sky"][branch.name]
             snr[i, :] = spectra["snr"][branch.name]
 
-        return np.array(fib_id), target_w_noise, total_w_noise, noise_el, sky_el, snr
+        fib_id = vstack(fib_id)
+        return fib_id, target_w_noise, total_w_noise, noise_el, sky_el, snr
 
     def _create_primary_hdu(self, branch):
 
@@ -732,7 +828,7 @@ class Simulator:
         primary.header["BRANCH"] = branch.name
         primary.header["MOON"] = (self.observation.moon_distance.value,
                                   "Fractional moon illumination")
-        primary.header["DAY-MOON"] = (self.observation.days_from_new_moon,
+        primary.header["DAY-MOON"] = (self.observation.days_moon,
                                       "Days from new moon")
 
         return primary
@@ -783,6 +879,10 @@ class Simulator:
             target_out = np.zeros((self.source.npixels, self.source.npixels))
             total_out = np.zeros((self.source.npixels, self.source.npixels))
             wcs = self.source.wcs
+            head = wcs.to_header()
+
+            head['MIN_WAVE'] = min_wave.value
+            head['MAX_WAVE'] = max_wave.value
 
             # I'm not interpolating to the exact wavelength
 
@@ -795,17 +895,21 @@ class Simulator:
 
             # Just the target
             target_out = self._populate_map(target_out, target_val, ids, wcs)
+
             filename = os.path.join(self.outdir,
                                     f"{self.source.name}_{branch.name}_{self.bundle.bundle_name}_target_map.fits")
-            hdu = fits.PrimaryHDU(data=target_out, header=wcs.to_header())
+            hdu = fits.PrimaryHDU(data=target_out, header=head)
+
             hdu.writeto(filename, overwrite=True)
             log.info(f' Saving {filename}...')
 
             # full spectrum
             total_out = self._populate_map(total_out, total_val, ids, wcs)
+
             filename = os.path.join(self.outdir,
                                     f"{self.source.name}_{branch.name}_{self.bundle.bundle_name}_total_map.fits")
-            hdu = fits.PrimaryHDU(data=total_out, header=wcs.to_header())
+            hdu = fits.PrimaryHDU(data=total_out, header=head)
+
             hdu.writeto(filename, overwrite=True)
             log.info(f' Saving {filename}...')
 
@@ -837,7 +941,7 @@ class Simulator:
         yy, xx = np.mgrid[:map.shape[0], :map.shape[1]]
 
         for fiber in self.bundle.fibers:
-            flux = values[ids == fiber.id]
+            flux = values[ids['id'] == fiber.id]
             fiber_coord = self.source.coord.spherical_offsets_by(fiber.x, fiber.y)
 
             fiber_x, fiber_y = wcs.world_to_pixel(fiber_coord)
