@@ -59,6 +59,9 @@ class LVMField:
             Physical units of the spaxel. Defaults to u.arcsec.
         name (str):
             Name of the field. Defaults to 'LVM_field'
+        ism_params (dict):
+            Dictionary with the parameters defining the properties of the ISM
+            (distance, spec_resolution, sys_velocity, turbulent_sigma)
 
     Attributes:
         name (str):
@@ -72,7 +75,7 @@ class LVMField:
 
     def __init__(self, ra, dec, size, spaxel, unit_ra=u.deg, unit_dec=u.deg,
                  unit_size=u.arcmin, unit_spaxel=u.arcsec,
-                 name='LVM_field'):
+                 name='LVM_field', ism_params=None):
 
         self.name = name
         self.ra = ra * unit_ra
@@ -85,7 +88,12 @@ class LVMField:
                                  self.spaxel.to(u.arcsec)).value).astype(int)
 
         self.wcs = self._create_wcs()
-        self.ism = self._create_ism()
+        self.ism_params = {'distance': 50 * u.kpc, 'spec_resolution': 0.06 * u.Angstrom,
+                           'sys_velocity': 0 * velunit, 'turbulent_sigma' : 10. * velunit}
+        if ism_params is dict:
+            for k, v in ism_params:
+                self.ism_params[k] = v
+        self.ism = self._create_ism(**self.ism_params)
         self.ism_map = None
         self.starlist = None
 
@@ -227,14 +235,14 @@ class LVMField:
             ax (axis):
                 axis where to plot the position of the stars.
         """
-
-        ax.scatter(self.starlist.stars_table['ra'], self.starlist.stars_table['dec'],
-                   transform=ax.get_transform('world'),
-                   marker=(5, 1), c='r')
+        if len(self.starlist.stars_table) > 0:
+            ax.scatter(self.starlist.stars_table['ra'], self.starlist.stars_table['dec'],
+                       transform=ax.get_transform('world'),
+                       marker=(5, 1), c='r')
         pass
 
     def _create_ism(self, distance=50 * u.kpc, spec_resolution=0.06 * u.Angstrom,
-                    sys_velocity=0 * velunit, turbulent_sigma=10. * velunit):
+                    sys_velocity=0 * velunit, turbulent_sigma=10. * velunit, **_):
         """
         Create ISM object related to this LVMField
         """
@@ -288,7 +296,7 @@ class LVMField:
             log.info("Input image in {0}-{1}AA wavelength range "
                      "is saved to {2}".format(wavelength_range[0], wavelength_range[1], save_file))
 
-    def add_nebulae(self, list_of_nebulae=None, load_from_file=None, save_nebulae=None):
+    def add_nebulae(self, list_of_nebulae=None, load_from_file=None, save_nebulae=None, overwrite=True):
         """
         Add nebulae to the LVMField.
 
@@ -318,6 +326,13 @@ class LVMField:
                                         pre-generated Cloudy model (used if spectrum_id is None)
                                 'linerat_constant': False #  if True -> lines ratios doesn't
                                                                 vary across Cloud/Bubble
+                                'continuum_type': 'BB' or 'Model' or 'Poly' # type of the continuum model
+                                'continuum_data': model_id or [poly_coefficients] or Teff # value defining cont. shape
+                                'continuum_flux': 1e-16 * u.erg / u.cm ** 2 / u.s / u.arcsec **2 / u.AA,
+                                'continuum_mag': 22 * u.mag,
+                                'continuum_wl': 5500, # could be also R, V, B,
+                                'ext_law': 'F99',  # Extinction law, one of those used by pyneb (used for dark nebulae)
+                                'ext_rv': 3.1,  # Value of R_V for extinction curve calculation (used for dark nebulae)
                                 }]
             load_from_file: path (asbolute or relative to work_dir) to the file with previously
                             calculated ISM part (preferred if both load_from_file and
@@ -325,6 +340,8 @@ class LVMField:
             save_nebulae: path (asbolute or relative to WORK_DIR or current dir) where to save fits with
                           calculated ISM (only used if list_of_nebulae is present and
                           load_from_file is not)
+            overwrite: if True (default) then the ISM content will be overwritten,
+                       otherwise new nebulae will be added on top of the already generated
 
         """
         loaded = False
@@ -338,6 +355,8 @@ class LVMField:
         else:
             cfile = None
         if cfile is not None:
+            if overwrite and (self.ism.content[0].header.get('Nobj') > 0):
+                self.ism = self._create_ism(**self.ism_params)
             loaded = self.ism.load_nebulae(cfile)
             if loaded:
                 log.info("Nebulae successfully loaded from file")
@@ -346,6 +365,8 @@ class LVMField:
                 return
 
         if list_of_nebulae is not None:
+            if overwrite and (self.ism.content[0].header.get('Nobj') > 0):
+                self.ism = self._create_ism(**self.ism_params)
             loaded = self.ism.generate(list_of_nebulae)
             if loaded and self.ism_map is not None:
                 self._get_ism_map()
@@ -400,10 +421,12 @@ class LVMField:
             rec = ((xx - xc) ** 2 + (yy - yc) ** 2) <= (s ** 2)
             aperture_mask[rec] = index + 1
 
-            if self.starlist is not None:
-                xc_stars = np.round(self.starlist.stars_table['x']).astype(int)
-                yc_stars = np.round(self.starlist.stars_table['y']).astype(int)
-                stars_id = np.flatnonzero(aperture_mask[yc_stars, xc_stars] == (index + 1))
+            if self.starlist is not None and len(self.starlist.stars_table) > 0:
+                # xc_stars = np.round(self.starlist.stars_table['x']).astype(int)
+                # yc_stars = np.round(self.starlist.stars_table['y']).astype(int)
+                # stars_id = np.flatnonzero(aperture_mask[yc_stars, xc_stars] == (index + 1))
+                stars_id = np.flatnonzero((self.starlist.stars_table['x'] - xc) ** 2 +
+                                          (self.starlist.stars_table['y'] - yc) ** 2 <= (s ** 2))
                 for star_id in stars_id:
                     p = interp1d(self.starlist.wave.to(u.AA).value, self.starlist.spectra[star_id], bounds_error=False,
                                  fill_value='extrapolate')

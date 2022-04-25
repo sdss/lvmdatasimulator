@@ -727,7 +727,8 @@ class ISM:
     sys_velocity: velunit = 0 * velunit  # Systemic velocity to center the vel.grid on
     vel_amplitude: velunit = 100 * velunit  # Maximal deviation from the systemic velocity to setup vel.grid
     turbulent_sigma: velunit = 10. * velunit  # turbulence vel. disp. to be used for every nebula unless other specified
-
+    R_V: float = 3.1  # R_V value defining the reddening curve (to be used unless other value is provided for a nebula)
+    ext_law: str = 'F99'  # Reddening law (to be used unless other value is provided for a nebula)
     # last_id: int = 0
     # ext_eps: u.mag = 0.01 * u.mag
     # brt_eps: fluxunit = 1e-20 * fluxunit
@@ -942,7 +943,7 @@ class ISM:
                              'continuum_type', 'continuum_data', 'continuum_flux', 'continuum_mag', 'continuum_wl',
                              'ext_law', 'ext_rv'],
                             [0, 0, 1., 0, self.sys_velocity, self.turbulent_sigma, 0, 0.1, 0, 0, self.distance,
-                             None, None, 0, None, 5500., 'F99', 3.1]):
+                             None, None, 0, None, 5500., self.ext_law, self.R_V]):
                 set_default_dict_values(cur_obj, k, v)
             for k in ['max_brightness', 'max_extinction', 'radius', 'continuum_flux']:
                 if cur_obj[k] < 0:
@@ -1004,7 +1005,8 @@ class ISM:
                 if not cur_obj.get('zorder'):
                     cur_obj['zorder'] = 0
                 if not ((cur_obj.get('RA') and cur_obj.get('DEC')) or
-                        (cur_obj.get('X') and cur_obj.get('Y'))):
+                        (cur_obj.get('X') and cur_obj.get('Y')) or
+                        (cur_obj.get('offset_X') and cur_obj.get('offset_Y'))):
                     log.warning("Wrong set of parameters for the nebula #{0}: skip this one".format(ind_obj))
                     continue
                 if cur_obj['type'] in ['Rectangle', 'Nebula'] and not (('width' in cur_obj) and ('height' in cur_obj)):
@@ -1245,8 +1247,7 @@ class ISM:
                                                           name=hh.header.get('EXTNAME')))
                 return True
 
-    def calc_extinction(self, wavelength=6562.81, x0=0, y0=0, xs=None, ys=None, extension_name=None, logscale=False,
-                        extinction_law='F99', R_V=3.1):
+    def calc_extinction(self, wavelength=6562.81, x0=0, y0=0, xs=None, ys=None, extension_name=None):
         """
         Calculate coefficient to reduce flux due to extinction at given wavelength(s)
 
@@ -1258,9 +1259,6 @@ class ISM:
             wavelength: in angstrom, particular wavelength (or wavelengths)
                 at which the calculations should be performed
             extension_name (str): name of the extension for current dark nebula
-            logscale: True if the wavelength is np.log(wavelength)
-            extinction_law: 'F99' or 'CCM89' or any other extinction law from pyneb
-            R_V:
 
         Returns:
             None (if no any dark nebula at particular location) or np.array of (nlines, ys, xs) shape
@@ -1317,8 +1315,8 @@ class ISM:
                        cur_neb_x0 + self.content[dark_nebula].header.get('X0') - x0:
                        cur_neb_x1 + self.content[dark_nebula].header.get('X0') - x0 + 1
                        ] = self.content[dark_nebula].data[cur_neb_y0: cur_neb_y1 + 1, cur_neb_x0: cur_neb_x1 + 1]
-            cur_extinction_law = extinction_law
-            cur_r_v = R_V
+            cur_extinction_law = self.ext_law
+            cur_r_v = self.R_V
             if self.content[dark_nebula].header.get('EXT_LAW'):
                 cur_extinction_law = self.content[dark_nebula].header.get('EXT_LAW')
             if self.content[dark_nebula].header.get('EXT_RV'):
@@ -1452,10 +1450,10 @@ class ISM:
 
         xx, yy = np.meshgrid(np.arange(aperture_mask.shape[1]), np.arange(aperture_mask.shape[0]))
         pix_in_apertures = aperture_mask > 0
-        xstart = np.min(xx[pix_in_apertures])
-        ystart = np.min(yy[pix_in_apertures])
-        xfin = np.max(xx[pix_in_apertures])
-        yfin = np.max(yy[pix_in_apertures])
+        xstart = np.clip(np.min(xx[pix_in_apertures]) - 1, 0, None)
+        ystart = np.clip(np.min(yy[pix_in_apertures]) - 1, 0, None)
+        xfin = np.clip(np.max(xx[pix_in_apertures]) + 1, None, aperture_mask.shape[1]-1)
+        yfin = np.clip(np.max(yy[pix_in_apertures]) + 1, None, aperture_mask.shape[0]-1)
         aperture_mask_sub = aperture_mask[ystart: yfin + 1, xstart: xfin + 1]
         xx_sub, yy_sub = np.meshgrid(np.arange(xfin - xstart + 1), np.arange(yfin - ystart + 1))
         n_apertures = np.max(aperture_mask)
@@ -1465,19 +1463,6 @@ class ISM:
         radius = fibers_coords[0, 2]
         kern_mask = calc_circular_mask(radius)
         kern = kernels.CustomKernel(kern_mask.reshape((1, kern_mask.shape[0], kern_mask.shape[1])))
-
-        # size = np.round(2 * radius).astype(int)
-        # if size % 2 == 0:
-        #     size += 1
-        # # radius = np.round(np.sqrt(np.sum(aperture_mask == n_apertures) / np.pi)).astype(int)
-        # # size = 2 * radius + 1
-        # # if size % 2 == 0:
-        # #     size += 1
-        # kern_array = np.zeros(shape=(1, size, size), dtype=int)
-        # xx_kern, yy_kern = np.meshgrid(np.arange(size), np.arange(size))
-        # rec = (xx_kern - radius) ** 2 + (yy_kern - radius) ** 2 <= radius ** 2
-        # kern_array[0, yy_kern[rec], xx_kern[rec]] = 1
-        # kern = kernels.CustomKernel(kern_array)
 
         bar = progressbar.ProgressBar(max_value=len(all_extensions_brt)).start()
         for neb_index, cur_ext in enumerate(all_extensions_brt):
@@ -1501,10 +1486,14 @@ class ISM:
             ystart_neb = np.min(yy_neb[cur_mask_in_neb])  # np.clip(np.min(yy_neb[cur_mask_in_neb]) - 2, 0, ny - 1)
             xfin_neb = np.max(xx_neb[cur_mask_in_neb])  # np.clip(np.max(xx_neb[cur_mask_in_neb]) + 2, 0, nx - 1)
             yfin_neb = np.max(yy_neb[cur_mask_in_neb])  # np.clip(np.max(yy_neb[cur_mask_in_neb]) + 2, 0, ny - 1)
-
-            selected_apertures = np.flatnonzero((fibers_coords[:, 0] >= x0) & (fibers_coords[:, 0] <= (x0 + nx)) &
-                                                (fibers_coords[:, 1] >= y0) & (fibers_coords[:, 1] <= (y0 + ny)))
-
+            selected_apertures = np.flatnonzero(((fibers_coords[:, 0] + fibers_coords[:, 2]) >= x0) &
+                                                ((fibers_coords[:, 0] - fibers_coords[:, 2]) <= (x0 + nx - 1)) &
+                                                ((fibers_coords[:, 1] + fibers_coords[:, 2]) >= y0) &
+                                                ((fibers_coords[:, 1] - fibers_coords[:, 2]) <= (y0 + ny - 1)))
+            selected_apertures = np.array([sa for sa in selected_apertures if (sa+1) in aperture_mask_sub], dtype=int)
+            if len(selected_apertures) == 0:
+                bar.update(neb_index + 1)
+                continue
             if self.content[cur_ext].header.get("DARK"):
                 extinction_map = self.content[cur_ext].data[cur_mask_in_neb].reshape((1, yfin_neb - ystart_neb + 1,
                                                                                       xfin_neb - xstart_neb + 1))
@@ -1512,11 +1501,11 @@ class ISM:
                 if self.content[cur_ext].header.get('EXT_LAW'):
                     cur_extinction_law = self.content[cur_ext].header.get('EXT_LAW')
                 else:
-                    cur_extinction_law = 'F99'
+                    cur_extinction_law = self.ext_law
                 if self.content[cur_ext].header.get('EXT_RV'):
                     cur_r_v = self.content[cur_ext].header.get('EXT_RV')
                 else:
-                    cur_r_v = 3.1
+                    cur_r_v = self.R_V
                 data_in_apertures = convolve_fft(extinction_map, kern,
                                                  allow_huge=True, normalize_kernel=True)[
                                     :, aperture_centers[selected_apertures, 1] - ystart_neb - y0,
