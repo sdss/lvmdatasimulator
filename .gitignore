@@ -117,3 +117,6 @@ ENV/
 # huge data directory
 data/*.fits
 run/*
+
+# do not upload docs yet
+docs
