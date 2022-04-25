@@ -184,6 +184,7 @@ class Simulator:
                 File containing the athmospheric extinction curve.
                 Defaults to f'{DATA_DIR}/sky/LVM_LVM160_KLAM.dat'.
         """
+        
         log.info('Reading the atmospheric extinction from file.')
         self.extinction_file = extinction_file
         data = ascii.read(self.extinction_file)
@@ -305,6 +306,7 @@ class Simulator:
             spectra (dictionary):
                 dictionary containing the input spectrum for each fiber.
         """
+        
         spectrum = spectra[fiber.id]
 
         # convert spectra to electrons
