@@ -18,7 +18,12 @@
 
 import numpy as np
 import astropy.units as u
-import functools
+
+import sys
+if (sys.version_info[0]+sys.version_info[1]/10.) < 3.8:
+    from backports.cached_property import cached_property
+else:
+    from functools import cached_property
 
 from collections import OrderedDict
 from scipy import special
@@ -119,7 +124,7 @@ def zp2elam(zp, lam, neobj, ddisp, texp, atel, klam, airmass):
     exponent = 0.4 * (zp + 48.6 + klam * airmass)
     constant = Constants.h * lam * neobj / (ddisp * texp * atel)
 
-    return constant * 10 ** (exponent)
+    return constant * 10 ** exponent
 
 
 def elam2zp(elam, lam, neobj, ddisp, texp, atel, klam, airmass):
@@ -236,7 +241,7 @@ class Simulator:
         if not os.path.isdir(self.outdir):
             os.mkdir(self.outdir)
 
-    @functools.cached_property
+    @cached_property
     def extinction(self, extinction_file=os.path.join(lvmdatasimulator.DATA_DIR, 'sky', 'LVM_LVM160_KLAM.dat')):
         """
         Returns atmospheric extinction coefficient sampled at instrumental wavelengths
@@ -253,7 +258,7 @@ class Simulator:
         log.info('Resample extinction file to instrument wavelength solution.')
         return self._resample_and_convolve(data["col1"], data["col2"])
 
-    @functools.cached_property
+    @cached_property
     def sky(self):
 
         days_moon = self.observation.days_from_new_moon
@@ -318,7 +323,7 @@ class Simulator:
 
         return out_spec
 
-    @functools.cached_property
+    @cached_property
     def target_spectra(self):
         """Extract spectra of the terget from the field object"""
 

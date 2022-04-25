@@ -6,7 +6,11 @@
 # @License: BSD 3-Clause
 # @Copyright: Oleg Egorov, Enrico Congiu
 
-import functools
+import sys
+if (sys.version_info[0]+sys.version_info[1]/10.) < 3.8:
+    from backports.cached_property import cached_property
+else:
+    from functools import cached_property
 import os.path
 
 import astropy.units as u
@@ -90,75 +94,75 @@ class Observation:
         if self.sky_transparency not in ['PHOT', 'CLR', 'THIN']:
             raise ValueError(f'{self.sky_transparency} is not accepted.')
 
-    @functools.cached_property
+    @cached_property
     def localtime(self):
         return self.time + self.utcoffset
 
-    @functools.cached_property
+    @cached_property
     def target_coords(self):
         '''get target coordinates'''
         return SkyCoord(self.ra, self.dec)
 
-    @functools.cached_property
+    @cached_property
     def target_coords_altaz(self):
         '''get target altazimuthal coordinates'''
         return self.target_coords.transform_to(self._altaz)
 
-    @functools.cached_property
+    @cached_property
     def _altaz(self):
         return AltAz(obstime=self.time, location=self.location)
 
-    @functools.cached_property
+    @cached_property
     def total_time(self):
         '''get total exposure time for the observations'''
         return self.nexp * self.exptime
 
-    @functools.cached_property
+    @cached_property
     def moon_coords(self):
         '''get moon coordinates'''
         coord = get_body('moon', time=self.time, location=self.location)
         return coord
 
-    @functools.cached_property
+    @cached_property
     def sun_coords(self):
         '''get sun coordinates'''
         coord = get_body('sun', time=self.time, location=self.location)
         return coord
 
-    @functools.cached_property
+    @cached_property
     def moon_coords_altaz(self):
         '''get moon altazimuthal coordinates'''
         coord = self.moon_coords.transform_to(self._altaz)
         return coord
 
-    @functools.cached_property
+    @cached_property
     def sun_coords_altaz(self):
         '''get sun altazimuthal coordinates'''
         coord = self.sun_coords.transform_to(self._altaz)
         return coord
 
-    @functools.cached_property
+    @cached_property
     def mjd(self):
         '''get modified julian date'''
         return self.time.mjd
 
-    @functools.cached_property
+    @cached_property
     def jd(self):
         '''get julian date'''
         return self.time.jd
 
-    @functools.cached_property
+    @cached_property
     def moon_distance(self):
         '''get distance between the target field and the moon'''
         # this is weird. moon to target is ok, target to moon is not
         return self.moon_coords.separation(self.target_coords)
 
-    @functools.cached_property
+    @cached_property
     def moon_illumination(self):
         '''get moon illumination'''
         return round(moon_illumination(self.time), 3)
 
-    @functools.cached_property
+    @cached_property
     def days_from_new_moon(self):
         '''This is greatly approximated'''
         conversion = np.array([0, 0.01, 0.05, 0.11, 0.19, 0.27, 0.36, 0.46, 0.55,
@@ -166,7 +170,7 @@ class Observation:
         diff = np.abs(conversion - self.moon_illumination)
         return np.argmin(diff)
 
-    @functools.cached_property
+    @cached_property
     def airmass(self):
         '''get airmass of target from coordinates'''
         return self.target_coords_altaz.secz.value

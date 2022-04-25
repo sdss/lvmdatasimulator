@@ -6,8 +6,12 @@
 # @License: BSD 3-Clause
 # @Copyright: Oleg Egorov, Enrico Congiu
 import os.path
-from functools import cached_property
-import functools
+import sys
+if (sys.version_info[0]+sys.version_info[1]/10.) < 3.8:
+    from backports.cached_property import cached_property
+else:
+    from functools import cached_property
+
 import astropy.units as u
 import lvmdatasimulator.wavecoords as w
 
@@ -59,7 +63,7 @@ class LinearSpectrograph(Spectrograph):
     def __init__(self, bundle_name='central'):
         self.bundle_name = bundle_name
 
-    @functools.cached_property
+    @cached_property
     def branches(self):
         return [Branch(name='linear', wavecoord=w.LinearWave())]
 
@@ -69,7 +73,7 @@ class LVMSpectrograph(Spectrograph):
     def __init__(self, bundle_name='central'):
         self.bundle_name = bundle_name
 
-    @functools.cached_property
+    @cached_property
     def branches(self):
         return [Branch(name='blue', wavecoord=w.BlueWave()),
                 Branch(name='red', wavecoord=w.RedWave()),
