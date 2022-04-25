@@ -378,6 +378,51 @@ class LVMField:
             log.warning("Cannot load the nebulae! Check input parameters.")
             return None
 
+    def shift_nebula(self, nebula_id, offset=(0., 0.), units=(u.pixel, u.pixel), save=None):
+        """
+        Shift a nebula position in the FOV
+        :param nebula_id: number of the target component in the ISM storage (starting from 0)
+        :param offset: tuple or list, defining the offset along x or y axes
+        :param units: units of the offsets (in astropy.units values; default are pixels)
+        :param save: path (asbolute or relative to WORK_DIR or current dir) where to save the updated fits file
+        """
+        if (offset[0] == 0) and (offset[1] == 0):
+            log.warning("Both offsets are equal to 0 for nebula id={0}".format(nebula_id))
+            return
+        if self.ism.content[0].header.get('Nobj') < (nebula_id + 1):
+            log.warning("Requested nebula_id={0} is absent in the ISM content".format(nebula_id))
+            return
+        all_extensions = [hdu.header.get('EXTNAME') for hdu in self.ism.content
+                          if (hdu.header.get('EXTNAME') is not None)
+                          and ("COMP_{0}".format(nebula_id) in hdu.header.get('EXTNAME'))]
+        if len(all_extensions) == 0:
+            log.warning("Requested nebula_id={0} is absent in the ISM content".format(nebula_id))
+            return
+        if self.ism.content[all_extensions[0]].header.get('Nebtype') == 'DIG':
+            log.warning("DIG cannot be shifted")
+            return
+        pix_offsets = np.array([0, 0])
+        xyname=['X', 'Y']
+        for ind in range(2):
+            if units[ind] is u.pixel:
+                pix_offsets[ind] = np.round(offset[ind]).astype(int)
+            else:
+                try:
+                    pix_offsets[ind] = np.round((offset[ind] * units[ind]).to(u.arcsec) / self.spaxel).astype(int)
+                except Exception as e:
+                    log.error("Exception raised during the shifting of the nebula_id={0} "
+                              "along the {1} axis: {2}".format(nebula_id, xyname[ind], e))
+                    return
+        for cur_ext in all_extensions:
+            self.ism.content[cur_ext].header['X0'] += pix_offsets[0]
+            self.ism.content[cur_ext].header['Y0'] += pix_offsets[1]
+        self._get_ism_map()
+        if save is not None:
+            if not (save.startswith('/') or save.startswith(r'\\') or save.startswith('.')):
+                save = os.path.join(lvmdatasimulator.WORK_DIR, save)
+            self.ism.save_ism(save)
+        return
+
     def _get_ism_map(self, wavelength=6562.81):
         """
         Create map of ISM part in desired line or wavelength range (default = Halpha)

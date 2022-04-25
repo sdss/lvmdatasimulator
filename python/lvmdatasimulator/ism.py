@@ -1004,9 +1004,10 @@ class ISM:
                 # ==== Check input parameters and do necessary conversions
                 if not cur_obj.get('zorder'):
                     cur_obj['zorder'] = 0
-                if not ((cur_obj.get('RA') and cur_obj.get('DEC')) or
-                        (cur_obj.get('X') and cur_obj.get('Y')) or
-                        (cur_obj.get('offset_X') and cur_obj.get('offset_Y'))):
+                if not ((cur_obj.get('RA') is not None and cur_obj.get('DEC') is not None) or
+                        (cur_obj.get('X') is not None and cur_obj.get('Y') is not None) or
+                        (cur_obj.get('offset_X') is not None and cur_obj.get('offset_Y') is not None) or
+                        (cur_obj.get('offset_RA') is not None and cur_obj.get('offset_DEC') is not None)):
                     log.warning("Wrong set of parameters for the nebula #{0}: skip this one".format(ind_obj))
                     continue
                 if cur_obj['type'] in ['Rectangle', 'Nebula'] and not (('width' in cur_obj) and ('height' in cur_obj)):
@@ -1030,8 +1031,15 @@ class ISM:
                         cur_obj['rad_lim'] = 3.
 
                 if not (cur_obj.get('X') and cur_obj.get('Y')):
-                    radec = SkyCoord(ra=cur_obj.get('RA'), dec=cur_obj.get('DEC'))
-                    x, y = self.wcs.world_to_pixel(radec)
+                    if cur_obj.get('offset_X') and cur_obj.get('offset_Y'):
+                        x = self.width / 2. + cur_obj.get('offset_X')
+                        y = self.height / 2. + cur_obj.get('offset_Y')
+                    elif cur_obj.get('RA') and cur_obj.get('DEC'):
+                        radec = SkyCoord(ra=cur_obj.get('RA'), dec=cur_obj.get('DEC'))
+                        x, y = self.wcs.world_to_pixel(radec)
+                    elif cur_obj.get('offset_RA') and cur_obj.get('offset_DEC'):
+                        x = self.width / 2. - (cur_obj.get('offset_RA') / proj_plane_pixel_scales(self.wcs)[0] / 3600)
+                        y = self.height / 2. + (cur_obj.get('offset_DEC') / proj_plane_pixel_scales(self.wcs)[0] / 3600)
                     x = np.round(x).astype(int)
                     y = np.round(y).astype(int)
                 else:
@@ -1482,10 +1490,10 @@ class ISM:
                                          np.arange(self.content[cur_ext].data.shape[0]))
             cur_mask_in_neb[(xx_neb >= (xstart - x0)) & (xx_neb <= (xfin - x0)) &
                             (yy_neb >= (ystart - y0)) & (yy_neb <= (yfin - y0))] = True
-            xstart_neb = np.min(xx_neb[cur_mask_in_neb])  # np.clip(np.min(xx_neb[cur_mask_in_neb]) - 2, 0, nx - 1)
-            ystart_neb = np.min(yy_neb[cur_mask_in_neb])  # np.clip(np.min(yy_neb[cur_mask_in_neb]) - 2, 0, ny - 1)
-            xfin_neb = np.max(xx_neb[cur_mask_in_neb])  # np.clip(np.max(xx_neb[cur_mask_in_neb]) + 2, 0, nx - 1)
-            yfin_neb = np.max(yy_neb[cur_mask_in_neb])  # np.clip(np.max(yy_neb[cur_mask_in_neb]) + 2, 0, ny - 1)
+            xstart_neb = np.min(xx_neb[cur_mask_in_neb])
+            ystart_neb = np.min(yy_neb[cur_mask_in_neb])
+            xfin_neb = np.max(xx_neb[cur_mask_in_neb])
+            yfin_neb = np.max(yy_neb[cur_mask_in_neb])
             selected_apertures = np.flatnonzero(((fibers_coords[:, 0] + fibers_coords[:, 2]) >= x0) &
                                                 ((fibers_coords[:, 0] - fibers_coords[:, 2]) <= (x0 + nx - 1)) &
                                                 ((fibers_coords[:, 1] + fibers_coords[:, 2]) >= y0) &
