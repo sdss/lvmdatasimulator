@@ -8,9 +8,9 @@
 
 import numpy as np
 from astropy.units import UnitConversionError
-from typing import Union, Tuple
+# from typing import Union, Tuple
 from shapely.geometry import Point, Polygon, box
-from shapely.affinity import scale, rotate
+# from shapely.affinity import scale, rotate
 from pyneb import RedCorr
 
 
@@ -35,9 +35,6 @@ def check_overlap(hdu, out_shape):
             hdu.header['Y0'] >= out_shape[0]) or (hdu.header['X0'] >= out_shape[1]):
         return False
     return True
-
-
-
 
 
 def set_default_dict_values(mydict, key_to_check, default_value):

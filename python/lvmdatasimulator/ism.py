@@ -1440,6 +1440,7 @@ class ISM:
 
     def get_spectrum(self, wl_grid=None, aperture_mask=None, fibers_coords=None):
         if aperture_mask is None or (np.sum(aperture_mask) == 0) or (self.content[0].header['Nobj'] == 0):
+            log.warning("No overlapping detected between the ISM component and the fibers => no spectra extraction")
             return None
         all_extensions = [hdu.header.get('EXTNAME') for hdu in self.content]
         all_extensions_brt = np.array([extname for extname in all_extensions
@@ -1468,8 +1469,8 @@ class ISM:
         aperture_centers = np.round(fibers_coords).astype(int)
         spectrum = np.zeros(shape=(n_apertures, len(wl_grid)), dtype=np.float32)
 
-        radius = fibers_coords[0, 2]
-        kern_mask = calc_circular_mask(radius)
+        fiber_radius = np.median(fibers_coords[:, 2])
+        kern_mask = calc_circular_mask(fiber_radius)
         kern = kernels.CustomKernel(kern_mask.reshape((1, kern_mask.shape[0], kern_mask.shape[1])))
 
         bar = progressbar.ProgressBar(max_value=len(all_extensions_brt)).start()
@@ -1477,8 +1478,8 @@ class ISM:
             cur_neb_in_mask = np.zeros_like(xx_sub)
             y0 = self.content[cur_ext].header.get("Y0")
             x0 = self.content[cur_ext].header.get("X0")
-            nx = self.content[cur_ext].header['NAXIS1']
-            ny = self.content[cur_ext].header['NAXIS2']
+            nx = self.content[cur_ext].header.get('NAXIS1')
+            ny = self.content[cur_ext].header.get('NAXIS2')
             cur_neb_in_mask[(xx_sub >= (x0 - xstart)) & (xx_sub <= (x0 + nx - xstart)) &
                             (yy_sub >= (y0 - ystart)) & (yy_sub <= (y0 + ny - ystart))] = True
             cur_neb_in_mask_ap = cur_neb_in_mask * (aperture_mask_sub > 0)
@@ -1502,9 +1503,26 @@ class ISM:
             if len(selected_apertures) == 0:
                 bar.update(neb_index + 1)
                 continue
+
+            # Here I check if it is necessary to extend all involved arrays to account for fibers at the edges of neb.
+            dx0 = abs(np.clip(np.round(np.min(fibers_coords[selected_apertures, 0] -
+                                              fibers_coords[selected_apertures, 2])).astype(int) - 1 - x0, None, 0))
+            dx1 = np.clip(np.round(np.max(fibers_coords[selected_apertures, 0] +
+                                          fibers_coords[selected_apertures, 2])).astype(int) + 2 - x0 - nx, 0, None)
+            dy0 = abs(np.clip(np.round(np.min(fibers_coords[selected_apertures, 1] -
+                                              fibers_coords[selected_apertures, 2])).astype(int) - 1 - y0, None, 0))
+            dy1 = np.clip(np.round(np.max(fibers_coords[selected_apertures, 1] +
+                                          fibers_coords[selected_apertures, 2])).astype(int) + 2 - y0 - ny, 0, None)
+            if (dx0 > 0) or (dy0 > 0) or (dx1 > 0) or (dy1 > 0):
+                npad = ((0, 0), (dy0, dy1), (dx0, dx1))
+            else:
+                npad = None
+
             if self.content[cur_ext].header.get("DARK"):
                 extinction_map = self.content[cur_ext].data[cur_mask_in_neb].reshape((1, yfin_neb - ystart_neb + 1,
                                                                                       xfin_neb - xstart_neb + 1))
+                if npad is not None:
+                    extinction_map = np.pad(extinction_map, pad_width=npad, mode='constant', constant_values=0)
 
                 if self.content[cur_ext].header.get('EXT_LAW'):
                     cur_extinction_law = self.content[cur_ext].header.get('EXT_LAW')
@@ -1516,8 +1534,8 @@ class ISM:
                     cur_r_v = self.R_V
                 data_in_apertures = convolve_fft(extinction_map, kern,
                                                  allow_huge=True, normalize_kernel=True)[
-                                    :, aperture_centers[selected_apertures, 1] - ystart_neb - y0,
-                                    aperture_centers[selected_apertures, 0] - xstart_neb - x0]
+                                    :, aperture_centers[selected_apertures, 1] - ystart_neb - y0 + dy0,
+                                    aperture_centers[selected_apertures, 0] - xstart_neb - x0 + dx0]
                 data_in_apertures = data_in_apertures.reshape((data_in_apertures.shape[0] * data_in_apertures.shape[1],
                                                                1))
                 spectrum[selected_apertures, :] = \
@@ -1568,13 +1586,19 @@ class ISM:
                         (self.vel_grid.value[:, None, None] - vel[None, :, :]) / disp[None, :, :], 2.) / 2)
                     lsf = (lsf / np.sum(lsf, axis=0)).astype(np.float32)
 
+                if npad is not None:
+                    lsf = np.pad(lsf, pad_width=npad, mode='constant', constant_values=0)
+                    all_fluxes = np.pad(all_fluxes, pad_width=npad, mode='constant', constant_values=0)
+
                 if all_fluxes.shape[0] == 1:
                     data_in_apertures = \
                         convolve_fft(lsf * all_fluxes[0][None, :, :], kern,
                                      allow_huge=True,
                                      normalize_kernel=False)[:,
-                                                             aperture_centers[selected_apertures, 1] - ystart_neb - y0,
-                                                             aperture_centers[selected_apertures, 0] - xstart_neb - x0]
+                                                             aperture_centers[selected_apertures, 1] -
+                                                             ystart_neb - y0 + dy0,
+                                                             aperture_centers[selected_apertures, 0] -
+                                                             xstart_neb - x0 + dx0]
                     data_in_apertures = data_in_apertures.reshape((1, data_in_apertures.shape[0],
                                                                    data_in_apertures.shape[1]))
 
@@ -1595,8 +1619,10 @@ class ISM:
                 else:
                     data_in_apertures = Parallel(n_jobs=lvmdatasimulator.n_process)(
                         delayed(convolve_cube)(lsf * line_data[None, :, :], kern,
-                                               aperture_centers[selected_apertures, 1] - ystart_neb - y0,
-                                               aperture_centers[selected_apertures, 0] - xstart_neb - x0)
+                                               aperture_centers[selected_apertures, 1] -
+                                               ystart_neb - y0 + dy0,
+                                               aperture_centers[selected_apertures, 0] -
+                                               xstart_neb - x0 + dx0)
                         for line_data in all_fluxes)
                     data_in_apertures = np.array(data_in_apertures)
                 data_in_apertures = np.moveaxis(data_in_apertures, 2, 0)
@@ -1646,10 +1672,12 @@ class ISM:
                                                                            xfin_neb - xstart_neb + 1)) / brt_max
                 if brt.shape[0] != 1:
                     brt = brt.reshape((1, brt.shape[0], brt.shape[1]))
+                if npad is not None:
+                    brt = np.pad(brt, pad_width=npad, mode='constant', constant_values=0)
                 data_in_apertures = convolve_fft(brt, kern,
                                                  allow_huge=True, normalize_kernel=False)[
-                                    :, aperture_centers[selected_apertures, 1] - ystart_neb - y0,
-                                    aperture_centers[selected_apertures, 0] - xstart_neb - x0]
+                                    :, aperture_centers[selected_apertures, 1] - ystart_neb - y0 + dy0,
+                                    aperture_centers[selected_apertures, 0] - xstart_neb - x0 + dx0]
                 data_in_apertures = data_in_apertures.reshape((data_in_apertures.shape[0] * data_in_apertures.shape[1],
                                                                1))
                 spectrum[selected_apertures, :] += continuum[None, :] * data_in_apertures
