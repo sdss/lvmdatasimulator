@@ -274,7 +274,18 @@ class Rectangle(Nebula):
     """
     perturb_amplitude: float = 0.0  # Maximal amplitude of perturbations
     turbulent_sigma: velunit = 0 * velunit  # Velocity dispersion due to turbulence; included in calculations of LSF
-    #!!! TO BE FIXED: currently width and height should be in pixels, not in pc.
+
+    def __post_init__(self):
+        self.width = np.round(self.width.to(u.pc) / self.pxscale / 2.).value.astype(int) * 2 + 1
+        self.height = np.round(self.height.to(u.pc) / self.pxscale / 2.).value.astype(int) * 2 + 1
+        if (self.xc is not None) and (self.yc is not None):
+            self.x0 = self.xc - np.round((self.width - 1) / 2).astype(int)
+            self.y0 = self.yc - np.round((self.height - 1) / 2).astype(int)
+        elif (self.x0 is not None) and (self.y0 is not None):
+            self.xc = self.x0 + np.round((self.width - 1) / 2).astype(int)
+            self.yc = self.y0 + np.round((self.height - 1) / 2).astype(int)
+        self._ref_line_id = 0
+        self.linerat_constant = True  # True if the ratio of line fluxes shouldn't change across the nebula
 
 
 @dataclass
@@ -766,13 +777,20 @@ class ISM:
         cont_norm = self.content[my_comp + "_CONTINUUM"].header.get("CONTFLUX")
         cont_norm_wl = self.content[my_comp + "_CONTINUUM"].header.get("CONTWL")
         if cont_type.lower() == 'model':
+            cont_wl_fullrange = continuum[0, :]
+            cont_fullrange = continuum[1, :]
             p = interp1d(continuum[0, :], continuum[1, :], assume_sorted=True,
                          bounds_error=False, fill_value='extrapolate')
             continuum = p(wl_grid)
         elif cont_type.lower() == 'poly':
             p = np.poly1d(continuum)
+            cont_wl_fullrange = np.linspace(3500, 10000, 501)
+            cont_fullrange = p(cont_wl_fullrange)
             continuum = p(wl_grid)
         elif cont_type.lower() == 'bb':
+            cont_wl_fullrange = np.linspace(3500, 10000, 501)
+            cont_fullrange = 1 / cont_wl_fullrange ** 5 / \
+                             (np.exp(6.63e-27 * 3e10 / cont_wl_fullrange / 1e-8 / continuum / 1.38e-16) - 1)
             continuum = 1 / wl_grid ** 5 / (np.exp(6.63e-27 * 3e10 / wl_grid / 1e-8 / continuum / 1.38e-16) - 1)
 
         t_filter = None
@@ -787,14 +805,14 @@ class ISM:
                 t_filter = ascii.read(file_filter, names=['lambda', 'transmission'])
                 cont_norm_wl = np.sum(t_filter['lambda'] * t_filter['transmission']) / np.sum(t_filter['transmission'])
         if t_filter is None:
-            cont_model_max = continuum[np.argmin(abs(wl_grid - cont_norm_wl))]
+            cont_model_max = continuum[np.argmin(abs(cont_wl_fullrange - cont_norm_wl))]
         else:
             dl = np.roll(t_filter['lambda'], -1) - t_filter['lambda']
             dl[-1] = dl[-2]
             w_filter = np.sum(dl * t_filter['transmission'])/np.max(t_filter['transmission'])
             p = interp1d(t_filter['lambda'], t_filter['transmission'], assume_sorted=True,
                          fill_value=0, bounds_error=False)
-            cont_model_max = np.sum(continuum * p(wl_grid)) / w_filter
+            cont_model_max = np.sum(cont_fullrange * p(cont_wl_fullrange)) / w_filter
         if ~np.isfinite(cont_norm) or cont_norm <= 0:
             cont_norm = self.content[my_comp + "_CONTINUUM"].header.get("CONTMAG") * u.ABmag
             cont_norm = cont_norm.to(u.STmag, u.spectral_density(cont_norm_wl * u.AA)).to(u.erg/u.s/u.cm**2/u.AA).value
@@ -1191,7 +1209,7 @@ class ISM:
                         else:
                             wlscale = (np.arange(hdu[0].data.shape[1]) - hdu[0].header['CRPIX1'] + 1
                                        ) * hdu[0].header['CDELT1'] + hdu[0].header['CRVAL1']
-                            continuum = np.vstack(wlscale, hdu[0].data[cur_obj['continuum_data']])
+                            continuum = np.vstack([wlscale, hdu[0].data[cur_obj['continuum_data']]])
                 elif cur_obj['continuum_type'].lower() in ['poly', 'bb']:
                     continuum = cur_obj['continuum_data']
             if continuum is not None:

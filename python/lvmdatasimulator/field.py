@@ -89,9 +89,9 @@ class LVMField:
 
         self.wcs = self._create_wcs()
         self.ism_params = {'distance': 50 * u.kpc, 'spec_resolution': 0.06 * u.Angstrom,
-                           'sys_velocity': 0 * velunit, 'turbulent_sigma' : 10. * velunit}
-        if ism_params is dict:
-            for k, v in ism_params:
+                           'sys_velocity': 0 * velunit, 'turbulent_sigma': 10. * velunit}
+        if type(ism_params) is dict:
+            for k, v in ism_params.items():
                 self.ism_params[k] = v
         self.ism = self._create_ism(**self.ism_params)
         self.ism_map = None
@@ -185,7 +185,8 @@ class LVMField:
 
         self.starlist = StarsList(filename=filename, dir=directory)
 
-    def show(self, obs_coords=None, subplots_kw=None, scatter_kw=None, fibers=None, outname=None):
+    def show(self, obs_coords=None, subplots_kw=None, scatter_kw=None, fibers=None, outname=None,
+             cmap=plt.cm.Oranges, percentile=98.):
         """
         Display the LVM field with overlaid apertures (if needed). This is a work in progress.
 
@@ -200,6 +201,10 @@ class LVMField:
                 structure defining the position and size of aperture(s) for spectra extraction.
             outname (str, optional):
                 name of the file where the output image will be saved (abs. path or relative to WORK_DIR or cur. dir)
+            cmap (plt.cm, optional):
+                colormap to use for imshow
+            percentile (float, optional):
+                percentile to use in ImageNormalize
         """
 
         if obs_coords is None:
@@ -209,9 +214,9 @@ class LVMField:
         fig, ax = plt.subplots(1, 1, subplot_kw=dict(projection=self.wcs))
         if self.ism_map is None:
             self._get_ism_map(wavelength=6562.81)
-        norm = ImageNormalize(self.ism_map, interval=PercentileInterval(98),
+        norm = ImageNormalize(self.ism_map, interval=PercentileInterval(percentile=percentile),
                               stretch=AsinhStretch())
-        img = ax.imshow(self.ism_map, norm=norm, cmap=plt.cm.Oranges)
+        img = ax.imshow(self.ism_map, norm=norm, cmap=cmap)
         if self.starlist is not None:
             self._plot_stars(ax=ax)
         cb = plt.colorbar(img)
