@@ -124,7 +124,12 @@ def convolve_array(to_convolve, kernel, selected_points_x, selected_points_y,
         nchunks = 4
     else:
         nchunks = None
-    nchunks = 12
+
+    if nchunks is None:
+        log.info('Convolving the whole array at once')
+    else:
+        log.info(f'Dividing the array in {nchunks} chunks')
+
     # defining the overlap as the size of the kernel + some room
     overlap = 1.1 * np.max(kernel.shape)
 
@@ -151,13 +156,18 @@ def convolve_array(to_convolve, kernel, selected_points_x, selected_points_y,
 def chunksize(cube, nchunks=4, overlap=40):
 
     overlap = int(overlap)
-    divs = divisors(nchunks)
 
-    id_max = len(divs) // 2
+    if nchunks == np.sqrt(nchunks) ** 2:
+        print(np.sqrt(nchunks))
+        max_chunks = int(np.sqrt(nchunks))
+        min_chunks = int(np.sqrt(nchunks))
+    else:
+        divs = divisors(nchunks)
+        id_max = len(divs) // 2
 
-    # checking how much each dimension should be divided
-    max_chunks = divs[id_max]
-    min_chunks = divs[id_max -1]
+        # checking how much each dimension should be divided
+        max_chunks = divs[id_max]
+        min_chunks = divs[id_max - 1]
 
     original_shape = cube.shape[1: ]  # saving the size of the cube in the y and x dimension
     if original_shape[0] == original_shape[1]:
