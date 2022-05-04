@@ -248,28 +248,6 @@ class Simulator:
 
         out_spec = OrderedDict(results)
 
-        # for fiber in self.bundle.fibers:
-        #     fiber_spec = OrderedDict()
-        #     for branch in self.spectrograph.branches:
-        #         # computing the FWHM of the final kernel (LSF (A) + fiber dispersion (pix))
-        #         lsf_fwhm = branch.lsf_fwhm / disp0  # from A to pix
-
-        #         # fiber dispersion must be converted to match the pixel scale of the tmp axis
-        #         dfib_lam = fiber.dispersion * branch.wavecoord.step / disp0
-
-        #         fwhm = np.sqrt((lsf_fwhm) ** 2 + (dfib_lam) ** 2)
-
-        #         # do both convolutions at the same time
-        #         convolved = convolve_for_gaussian(resampled_v0, fwhm, boundary="extend")
-        #         resampled_v1 = resample_spectrum(branch.wavecoord.wave.value, tmp_lam, convolved)
-
-        #         if unit:
-        #             fiber_spec[branch.name] = resampled_v1 * unit
-        #         else:
-        #             fiber_spec[branch.name] = resampled_v1
-
-        #     out_spec[fiber.id] = fiber_spec
-
         return out_spec
 
     def _resample_and_convolve_loop(self, fiber, disp0, resampled_v0, tmp_lam, unit):
@@ -313,25 +291,8 @@ class Simulator:
             results = Parallel(n_jobs=lvmdatasimulator.n_process)(
                 delayed(self._extract_target_spectra)(fiber, spectra, index, wl_grid)
                 for fiber in self.bundle.fibers)
+
         obj_spec = OrderedDict(results)
-
-            # original = spectra[index == fiber.id, :][0]
-            # # from here, this is a replica of _resample_and_convolve()
-            # # I cannot use the method directly because I cannot use the same spectra for all fibers
-            # disp0 = np.median(wl_grid[1:-1] - wl_grid[0:-2])
-
-            # fiber_spec = OrderedDict()
-
-            # for branch in self.spectrograph.branches:
-            #     lsf_fwhm = branch.lsf_fwhm / disp0  # from A to pix
-            #     dfib_lam = fiber.dispersion * branch.wavecoord.step / disp0
-            #     fwhm = np.sqrt(lsf_fwhm ** 2 + dfib_lam ** 2)
-
-            #     convolved = convolve_for_gaussian(original, fwhm, boundary="extend")
-            #     resampled_v1 = resample_spectrum(branch.wavecoord.wave.value, wl_grid.value,
-            #                                      convolved)
-
-            #     fiber_spec[branch.name] = resampled_v1 * (u.erg / (u.cm ** 2 * u.s * u.AA))
 
         return obj_spec
 
@@ -354,6 +315,8 @@ class Simulator:
                                                 convolved)
 
             fiber_spec[branch.name] = resampled_v1 * (u.erg / (u.cm ** 2 * u.s * u.AA))
+
+        return fiber.id, fiber_spec
 
 
     def _simulate_observations_single_fiber(self, fiber, spectra):
@@ -397,7 +360,6 @@ class Simulator:
 
         log.info("Simulating observations.")
 
-        print(self.bundle.nfibers)
         if self.bundle.nfibers < 10:
             results = [self._simulate_observations_single_fiber(fiber, self.target_spectra)
                       for fiber in self.bundle.fibers]
