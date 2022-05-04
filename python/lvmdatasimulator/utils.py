@@ -6,12 +6,37 @@
 # @License: BSD 3-Clause
 # @Copyright: Oleg Egorov, Enrico Congiu
 
+from dataclasses import dataclass
 import numpy as np
+
 from astropy.units import UnitConversionError
-# from typing import Union, Tuple
+from astropy.convolution import convolve_fft
 from shapely.geometry import Point, Polygon, box
-# from shapely.affinity import scale, rotate
 from pyneb import RedCorr
+from lvmdatasimulator import log
+from sympy import divisors
+
+import sys
+
+
+@dataclass
+class Chunk:
+
+    data: np.array
+    original_position: tuple
+    overlap: tuple
+
+    def __post_init__(self):
+        self.shape = self.data.shape
+
+    def set_data(self, newdata):
+        self.data = newdata
+
+    def __str__(self):
+        return f'Original position: {self.original_position},\nOverlap: {self.overlap}'
+
+    def mean(self):
+        return np.nanmean(self.data)
 
 
 def round_up_to_odd(f):
@@ -98,3 +123,164 @@ def ism_extinction(av=None, wavelength=None, r_v=3.1, ext_law='F99'):
     """
     rc = RedCorr(E_BV=av/r_v, R_V=r_v, law=ext_law)
     return 1. / rc.getCorr(wavelength)
+
+
+def convolve_array(to_convolve, kernel, selected_points_x, selected_points_y,
+                   allow_huge=True, normalize_kernel=False, pix_size=1):
+
+    # deciding how much to divide
+    orig_shape = to_convolve.shape
+    orig_shape_arcsec = orig_shape[1:] * pix_size
+    if max(orig_shape_arcsec) > 1700:
+        nchunks = 12
+    elif max(orig_shape_arcsec) > 1200:
+        nchunks = 9
+    elif max(orig_shape_arcsec) > 660:
+        nchunks = 4
+    else:
+        nchunks = None
+
+    if nchunks is None:
+        log.info('Convolving the whole array at once')
+    else:
+        log.info(f'Dividing the array in {nchunks} chunks')
+
+    # defining the overlap as the size of the kernel + some room
+    overlap = 1.1 * np.max(kernel.shape)
+
+    if nchunks is not None:
+        log.info(f'Dividing the array in {nchunks} with an overlap of {overlap*pix_size} arcsec')
+        # dividing the cube in chuncks before convolving
+        chunks = chunksize(to_convolve, nchunks=nchunks, overlap=overlap)
+        for chunk in chunks:
+            tmp = convolve_fft(chunk.data, kernel, allow_huge=allow_huge,
+                               normalize_kernel=normalize_kernel)
+            chunk.set_data(tmp)
+
+        convolved = reconstruct_cube(chunks, orig_shape)
+
+    else:
+        # convolving the cube in a single try
+        convolved = convolve_fft(to_convolve, kernel, allow_huge=allow_huge,
+                                normalize_kernel=normalize_kernel)
+
+    data_in_aperture = convolved[:, selected_points_y, selected_points_x]
+
+    return data_in_aperture
+
+def chunksize(cube, nchunks=4, overlap=40):
+
+    overlap = int(overlap)
+
+    if nchunks == np.sqrt(nchunks) ** 2:
+        print(np.sqrt(nchunks))
+        max_chunks = int(np.sqrt(nchunks))
+        min_chunks = int(np.sqrt(nchunks))
+    else:
+        divs = divisors(nchunks)
+        id_max = len(divs) // 2
+
+        # checking how much each dimension should be divided
+        max_chunks = divs[id_max]
+        min_chunks = divs[id_max - 1]
+
+    original_shape = cube.shape[1: ]  # saving the size of the cube in the y and x dimension
+    if original_shape[0] == original_shape[1]:
+        min_dim_id = 0
+        max_dim_id = 1
+    else:
+        min_dim_id = np.argmin(original_shape)
+        max_dim_id = np.argmax(original_shape)
+
+    # define chunk size
+    size_min_dim = int(original_shape[min_dim_id] / min_chunks)
+    size_max_dim = int(original_shape[max_dim_id] / max_chunks)
+
+    # define the corners of the chunks without overlap
+    cor_min_dim = np.zeros(min_chunks+1, dtype=int)
+    cor_max_dim = np.zeros(max_chunks+1, dtype=int)
+
+    for i in range(min_chunks):
+        cor_min_dim[i] = i * size_min_dim
+    for i in range(max_chunks):
+        cor_max_dim[i] = i * size_max_dim
+
+    cor_min_dim[-1] = original_shape[min_dim_id]
+    cor_max_dim[-1] = original_shape[max_dim_id]
+
+    original_corners = []
+    for i in range(min_chunks):
+        for j in range(max_chunks):
+            if min_dim_id == 0:
+                corners = ((cor_min_dim[i], cor_min_dim[i+1]+1), (cor_max_dim[j], cor_max_dim[j+1]+1))
+            else:
+                corners = ((cor_max_dim[j], cor_max_dim[j+1]+1), (cor_min_dim[i], cor_min_dim[i+1]+1))
+            original_corners.append(corners)
+
+    assert len(original_corners) == nchunks, f'{len(original_corners)} but {nchunks} chunks'
+
+    chunk_list = []
+
+    for corner in original_corners:
+
+        # defining the new corners
+        y0 = int(corner[0][0])
+        y1 = int(corner[0][1])
+        x0 = int(corner[1][0])
+        x1 = int(corner[1][1])
+
+        if y0 != 0: y0 -= overlap
+        if x0 != 0: x0 -= overlap
+        if y1 < original_shape[0]: y1 += overlap
+        if x1 < original_shape[1]: x1 += overlap
+
+        tmp_chunk = Chunk(cube[:, y0: y1, x0: x1],   # this is the actual array
+                          corner,
+                          overlap)
+
+        chunk_list.append(tmp_chunk)
+
+    return chunk_list
+
+
+def reconstruct_cube(chunks, orig_shape):
+
+    # create the empty cube
+
+    new_cube = np.zeros(orig_shape)
+
+    # loop through the chunks
+    for chunk in chunks:
+        corner = chunk.original_position
+        data = chunk.data
+        shape = chunk.shape
+
+        y0 = 0
+        y1 = shape[1]
+        x0 = 0
+        x1 = shape[2]
+
+        if corner[0][0] != 0: y0 += chunk.overlap
+        if corner[1][0] != 0: x0 += chunk.overlap
+        if corner[0][1] < orig_shape[1]: y1 -= chunk.overlap
+        if corner[1][1] < orig_shape[2]: x1 -= chunk.overlap
+
+        new_cube[:, corner[0][0]: corner[0][1], corner[1][0]: corner[1][1]] = \
+            data[:, y0: y1, x0: x1]
+
+    return new_cube
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

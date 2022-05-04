@@ -29,7 +29,7 @@ from lvmdatasimulator import log
 import progressbar
 from joblib import Parallel, delayed
 from astropy.convolution import convolve_fft, kernels
-from lvmdatasimulator.utils import calc_circular_mask, set_default_dict_values, ism_extinction, check_overlap
+from lvmdatasimulator.utils import calc_circular_mask, convolve_array, set_default_dict_values, ism_extinction, check_overlap
 fluxunit = u.erg / (u.cm ** 2 * u.s * u.arcsec ** 2)
 velunit = u.km / u.s
 
@@ -127,10 +127,6 @@ def find_model_id(file=lvmdatasimulator.CLOUDY_MODELS,
             else:
                 extension_index = extension_index[0]
     return extension_index, check_id
-
-
-def convolve_cube(cube, kernel, selected_points_y, selected_points_x):
-    return convolve_fft(cube, kernel, normalize_kernel=False, allow_huge=True)[:, selected_points_y, selected_points_x]
 
 
 @dataclass
@@ -1456,7 +1452,7 @@ class ISM:
             map_is_empty = False
         return map_2d * (proj_plane_pixel_scales(self.wcs)[0] * 3600) ** 2
 
-    def get_spectrum(self, wl_grid=None, aperture_mask=None, fibers_coords=None):
+    def get_spectrum(self, wl_grid=None, aperture_mask=None, fibers_coords=None, pix_size=1):
         if aperture_mask is None or (np.sum(aperture_mask) == 0) or (self.content[0].header['Nobj'] == 0):
             log.warning("No overlapping detected between the ISM component and the fibers => no spectra extraction")
             return None
@@ -1609,38 +1605,21 @@ class ISM:
                     all_fluxes = np.pad(all_fluxes, pad_width=npad, mode='constant', constant_values=0)
 
                 if all_fluxes.shape[0] == 1:
-                    data_in_apertures = \
-                        convolve_fft(lsf * all_fluxes[0][None, :, :], kern,
-                                     allow_huge=True,
-                                     normalize_kernel=False)[:,
-                                                             aperture_centers[selected_apertures, 1] -
-                                                             ystart_neb - y0 + dy0,
-                                                             aperture_centers[selected_apertures, 0] -
-                                                             xstart_neb - x0 + dx0]
+                    selected_y = aperture_centers[selected_apertures, 1] - ystart_neb - y0
+                    selected_x = aperture_centers[selected_apertures, 0] - xstart_neb - x0
+                    data_in_apertures = convolve_array(lsf * all_fluxes[0][None, :, :],
+                                                       kern, selected_x, selected_y, pix_size)
+      
                     data_in_apertures = data_in_apertures.reshape((1, data_in_apertures.shape[0],
-                                                                   data_in_apertures.shape[1]))
-
-                    # data_convolved = \
-                    #     convolve_fft(lsf * all_fluxes[0][None, :, :], kern,
-                    #                  normalize_kernel=False)
-                    # data_in_apertures = np.zeros(shape=(1, data_convolved.shape[0],
-                    #                                     len(selected_apertures)), dtype=float)
-                    # rec_neb = (xx_neb >= xstart_neb) & (xx_neb <= xfin_neb) &
-                    # (yy_neb >= ystart_neb) & (yy_neb <= yfin_neb)
-                    # xx_neb_sub = xx_neb[rec_neb]
-                    # yy_neb_sub = yy_neb[rec_neb]
-                    # for ind in range(data_in_apertures.shape[1]):
-                    #     p = interp2d(xx_neb_sub, yy_neb_sub, data_convolved[ind, :, :])
-                    #     data_in_apertures[0, ind, :] = p(fibers_coords[selected_apertures, 0] - xstart_neb - x0,
-                    #                                      fibers_coords[selected_apertures, 1] - ystart_neb - y0)
+                                                                  data_in_apertures.shape[1]))
 
                 else:
+
+                    selected_y = aperture_centers[selected_apertures, 1] - ystart_neb - y0
+                    selected_x = aperture_centers[selected_apertures, 0] - xstart_neb - x0
                     data_in_apertures = Parallel(n_jobs=lvmdatasimulator.n_process)(
-                        delayed(convolve_cube)(lsf * line_data[None, :, :], kern,
-                                               aperture_centers[selected_apertures, 1] -
-                                               ystart_neb - y0 + dy0,
-                                               aperture_centers[selected_apertures, 0] -
-                                               xstart_neb - x0 + dx0)
+                        delayed(convolve_array)(lsf * line_data[None, :, :], kern,
+                                               selected_y, selected_x, pix_size)
                         for line_data in all_fluxes)
                     data_in_apertures = np.array(data_in_apertures)
                 data_in_apertures = np.moveaxis(data_in_apertures, 2, 0)
@@ -1649,11 +1628,9 @@ class ISM:
                 else:
                     prf_index = 0
                 flux_norm_in_apertures = data_in_apertures.sum(axis=2)
-                line_prf_in_apertures = data_in_apertures[
-                                        :, prf_index, :].reshape(
-                    (data_in_apertures.shape[0], data_in_apertures.shape[2])) / flux_norm_in_apertures[
-                                                                                :, prf_index].reshape(
-                    data_in_apertures.shape[0], 1)
+                line_prf_in_apertures = data_in_apertures[:, prf_index, :].reshape(
+                    (data_in_apertures.shape[0], data_in_apertures.shape[2])) / \
+                    flux_norm_in_apertures[:, prf_index].reshape(data_in_apertures.shape[0], 1)
 
                 wl_logscale_lsf = np.log(self.vel_grid.value / 2.9979e5 + 1)
                 wl_logscale_lsf_highres = np.arange(np.round((wl_logscale_lsf[-1] - wl_logscale_lsf[0]) * 1e6

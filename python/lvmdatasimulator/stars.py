@@ -19,8 +19,7 @@ from astropy.table import Table, vstack
 from astroquery.gaia import Gaia
 from spectres import spectres
 # from scipy.interpolate import interp1d
-import lvmdatasimulator
-from lvmdatasimulator import log
+from lvmdatasimulator import log, STELLAR_LIBS, WORK_DIR
 
 import os
 
@@ -76,7 +75,7 @@ class StarsList:
             table containing the list of stars and their parameters
     """
 
-    def __init__(self, ra=0, dec=0, radius=1, filename=None, dir=lvmdatasimulator.WORK_DIR,
+    def __init__(self, ra=0, dec=0, radius=1, filename=None, dir=WORK_DIR,
                  unit_ra=u.deg, unit_dec=u.deg, unit_radius=u.arcmin,
                  colnames=['star_id', 'ra', 'dec', 'phot_g_mean_mag', 'phot_bp_mean_mag',
                            'phot_rp_mean_mag', 'teff_val', 'a_g_val', 'e_bp_min_rp_val',
@@ -230,7 +229,7 @@ class StarsList:
         self.stars_table = vstack([self.stars_table, result])
 
     def associate_spectra(self, shift=False, append=False,
-                          library=lvmdatasimulator.STELLAR_LIBS):
+                          library=STELLAR_LIBS):
         """
         Associate spectra to the identifyied stars. It can both associate spectra to the full list
         or append them if the first part of the list have already been processed.
@@ -345,8 +344,7 @@ class StarsList:
             self.spectra[i] = self.spectra[i] * factor
 
     @staticmethod
-    def _get_wavelength_array(filename=lvmdatasimulator.STELLAR_LIBS,
-                              unit=u.AA):
+    def _get_wavelength_array(filename=STELLAR_LIBS, unit=u.AA):
 
         with fits.open(filename) as hdu:
 
@@ -379,7 +377,7 @@ class StarsList:
         self.stars_table['x'].unit = u.pix
         self.stars_table['y'].unit = u.pix
 
-    def save_to_fits(self, outname='starlist.fits.gz', outdir=lvmdatasimulator.WORK_DIR, overwrite=True):
+    def save_to_fits(self, outname='starlist.fits.gz', outdir=WORK_DIR, overwrite=True):
         """
         Save the StarList as a fits file.
 
@@ -429,7 +427,7 @@ class StarsList:
 
         hdul.writeto(filename, overwrite=overwrite)
 
-    def _read_from_fits(self, filename, dir=lvmdatasimulator.WORK_DIR):
+    def _read_from_fits(self, filename, dir=WORK_DIR):
         """
         Read a starlist object from a fits file.
 
