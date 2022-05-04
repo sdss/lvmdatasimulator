@@ -59,6 +59,9 @@ class LVMField:
             Physical units of the spaxel. Defaults to u.arcsec.
         name (str):
             Name of the field. Defaults to 'LVM_field'
+        ism_params (dict):
+            Dictionary with the parameters defining the properties of the ISM
+            (distance, spec_resolution, sys_velocity, turbulent_sigma)
 
     Attributes:
         name (str):
@@ -72,7 +75,7 @@ class LVMField:
 
     def __init__(self, ra, dec, size, spaxel, unit_ra=u.deg, unit_dec=u.deg,
                  unit_size=u.arcmin, unit_spaxel=u.arcsec,
-                 name='LVM_field'):
+                 name='LVM_field', ism_params=None):
 
         self.name = name
         self.ra = ra * unit_ra
@@ -85,7 +88,12 @@ class LVMField:
                                  self.spaxel.to(u.arcsec)).value).astype(int)
 
         self.wcs = self._create_wcs()
-        self.ism = self._create_ism()
+        self.ism_params = {'distance': 50 * u.kpc, 'spec_resolution': 0.06 * u.Angstrom,
+                           'sys_velocity': 0 * velunit, 'turbulent_sigma': 10. * velunit}
+        if type(ism_params) is dict:
+            for k, v in ism_params.items():
+                self.ism_params[k] = v
+        self.ism = self._create_ism(**self.ism_params)
         self.ism_map = None
         self.starlist = None
 
@@ -177,7 +185,8 @@ class LVMField:
 
         self.starlist = StarsList(filename=filename, dir=directory)
 
-    def show(self, obs_coords=None, subplots_kw=None, scatter_kw=None, fibers=None, outname=None):
+    def show(self, obs_coords=None, subplots_kw=None, scatter_kw=None, fibers=None, outname=None,
+             cmap=plt.cm.Oranges, percentile=98.):
         """
         Display the LVM field with overlaid apertures (if needed). This is a work in progress.
 
@@ -192,6 +201,10 @@ class LVMField:
                 structure defining the position and size of aperture(s) for spectra extraction.
             outname (str, optional):
                 name of the file where the output image will be saved (abs. path or relative to WORK_DIR or cur. dir)
+            cmap (plt.cm, optional):
+                colormap to use for imshow
+            percentile (float, optional):
+                percentile to use in ImageNormalize
         """
 
         if obs_coords is None:
@@ -201,9 +214,9 @@ class LVMField:
         fig, ax = plt.subplots(1, 1, subplot_kw=dict(projection=self.wcs))
         if self.ism_map is None:
             self._get_ism_map(wavelength=6562.81)
-        norm = ImageNormalize(self.ism_map, interval=PercentileInterval(98),
+        norm = ImageNormalize(self.ism_map, interval=PercentileInterval(percentile=percentile),
                               stretch=AsinhStretch())
-        img = ax.imshow(self.ism_map, norm=norm, cmap=plt.cm.Oranges)
+        img = ax.imshow(self.ism_map, norm=norm, cmap=cmap)
         if self.starlist is not None:
             self._plot_stars(ax=ax)
         cb = plt.colorbar(img)
@@ -235,14 +248,14 @@ class LVMField:
             ax (axis):
                 axis where to plot the position of the stars.
         """
-
-        ax.scatter(self.starlist.stars_table['ra'], self.starlist.stars_table['dec'],
-                   transform=ax.get_transform('world'),
-                   marker=(5, 1), c='r')
+        if len(self.starlist.stars_table) > 0:
+            ax.scatter(self.starlist.stars_table['ra'], self.starlist.stars_table['dec'],
+                       transform=ax.get_transform('world'),
+                       marker=(5, 1), c='r')
         pass
 
     def _create_ism(self, distance=50 * u.kpc, spec_resolution=0.06 * u.Angstrom,
-                    sys_velocity=0 * velunit, turbulent_sigma=10. * velunit):
+                    sys_velocity=0 * velunit, turbulent_sigma=10. * velunit, **_):
         """
         Create ISM object related to this LVMField
         """
@@ -296,7 +309,7 @@ class LVMField:
             log.info("Input image in {0}-{1}AA wavelength range "
                      "is saved to {2}".format(wavelength_range[0], wavelength_range[1], save_file))
 
-    def add_nebulae(self, list_of_nebulae=None, load_from_file=None, save_nebulae=None):
+    def add_nebulae(self, list_of_nebulae=None, load_from_file=None, save_nebulae=None, overwrite=True):
         """
         Add nebulae to the LVMField.
 
@@ -326,6 +339,13 @@ class LVMField:
                                         pre-generated Cloudy model (used if spectrum_id is None)
                                 'linerat_constant': False #  if True -> lines ratios doesn't
                                                                 vary across Cloud/Bubble
+                                'continuum_type': 'BB' or 'Model' or 'Poly' # type of the continuum model
+                                'continuum_data': model_id or [poly_coefficients] or Teff # value defining cont. shape
+                                'continuum_flux': 1e-16 * u.erg / u.cm ** 2 / u.s / u.arcsec **2 / u.AA,
+                                'continuum_mag': 22 * u.mag,
+                                'continuum_wl': 5500, # could be also R, V, B,
+                                'ext_law': 'F99',  # Extinction law, one of those used by pyneb (used for dark nebulae)
+                                'ext_rv': 3.1,  # Value of R_V for extinction curve calculation (used for dark nebulae)
                                 }]
             load_from_file: path (asbolute or relative to work_dir) to the file with previously
                             calculated ISM part (preferred if both load_from_file and
@@ -333,6 +353,8 @@ class LVMField:
             save_nebulae: path (asbolute or relative to WORK_DIR or current dir) where to save fits with
                           calculated ISM (only used if list_of_nebulae is present and
                           load_from_file is not)
+            overwrite: if True (default) then the ISM content will be overwritten,
+                       otherwise new nebulae will be added on top of the already generated
 
         """
         loaded = False
@@ -346,6 +368,8 @@ class LVMField:
         else:
             cfile = None
         if cfile is not None:
+            if overwrite and (self.ism.content[0].header.get('Nobj') > 0):
+                self.ism = self._create_ism(**self.ism_params)
             loaded = self.ism.load_nebulae(cfile)
             if loaded:
                 log.info("Nebulae successfully loaded from file")
@@ -354,6 +378,8 @@ class LVMField:
                 return
 
         if list_of_nebulae is not None:
+            if overwrite and (self.ism.content[0].header.get('Nobj') > 0):
+                self.ism = self._create_ism(**self.ism_params)
             loaded = self.ism.generate(list_of_nebulae)
             if loaded and self.ism_map is not None:
                 self._get_ism_map()
@@ -364,6 +390,51 @@ class LVMField:
         if not loaded:
             log.warning("Cannot load the nebulae! Check input parameters.")
             return None
+
+    def shift_nebula(self, nebula_id, offset=(0., 0.), units=(u.pixel, u.pixel), save=None):
+        """
+        Shift a nebula position in the FOV
+        :param nebula_id: number of the target component in the ISM storage (starting from 0)
+        :param offset: tuple or list, defining the offset along x or y axes
+        :param units: units of the offsets (in astropy.units values; default are pixels)
+        :param save: path (asbolute or relative to WORK_DIR or current dir) where to save the updated fits file
+        """
+        if (offset[0] == 0) and (offset[1] == 0):
+            log.warning("Both offsets are equal to 0 for nebula id={0}".format(nebula_id))
+            return
+        if self.ism.content[0].header.get('Nobj') < (nebula_id + 1):
+            log.warning("Requested nebula_id={0} is absent in the ISM content".format(nebula_id))
+            return
+        all_extensions = [hdu.header.get('EXTNAME') for hdu in self.ism.content
+                          if (hdu.header.get('EXTNAME') is not None)
+                          and ("COMP_{0}".format(nebula_id) in hdu.header.get('EXTNAME'))]
+        if len(all_extensions) == 0:
+            log.warning("Requested nebula_id={0} is absent in the ISM content".format(nebula_id))
+            return
+        if self.ism.content[all_extensions[0]].header.get('Nebtype') == 'DIG':
+            log.warning("DIG cannot be shifted")
+            return
+        pix_offsets = np.array([0, 0])
+        xyname=['X', 'Y']
+        for ind in range(2):
+            if units[ind] is u.pixel:
+                pix_offsets[ind] = np.round(offset[ind]).astype(int)
+            else:
+                try:
+                    pix_offsets[ind] = np.round((offset[ind] * units[ind]).to(u.arcsec) / self.spaxel).astype(int)
+                except Exception as e:
+                    log.error("Exception raised during the shifting of the nebula_id={0} "
+                              "along the {1} axis: {2}".format(nebula_id, xyname[ind], e))
+                    return
+        for cur_ext in all_extensions:
+            self.ism.content[cur_ext].header['X0'] += pix_offsets[0]
+            self.ism.content[cur_ext].header['Y0'] += pix_offsets[1]
+        self._get_ism_map()
+        if save is not None:
+            if not (save.startswith('/') or save.startswith(r'\\') or save.startswith('.')):
+                save = os.path.join(lvmdatasimulator.WORK_DIR, save)
+            self.ism.save_ism(save)
+        return
 
     def _get_ism_map(self, wavelength=6562.81):
         """
@@ -415,10 +486,12 @@ class LVMField:
             rec = ((xx - xc) ** 2 + (yy - yc) ** 2) <= (s ** 2)
             aperture_mask[rec] = index + 1
 
-            if self.starlist is not None:
-                xc_stars = np.round(self.starlist.stars_table['x']).astype(int)
-                yc_stars = np.round(self.starlist.stars_table['y']).astype(int)
-                stars_id = np.flatnonzero(aperture_mask[yc_stars, xc_stars] == (index + 1))
+            if self.starlist is not None and len(self.starlist.stars_table) > 0:
+                # xc_stars = np.round(self.starlist.stars_table['x']).astype(int)
+                # yc_stars = np.round(self.starlist.stars_table['y']).astype(int)
+                # stars_id = np.flatnonzero(aperture_mask[yc_stars, xc_stars] == (index + 1))
+                stars_id = np.flatnonzero((self.starlist.stars_table['x'] - xc) ** 2 +
+                                          (self.starlist.stars_table['y'] - yc) ** 2 <= (s ** 2))
                 for star_id in stars_id:
                     p = interp1d(self.starlist.wave.to(u.AA).value, self.starlist.spectra[star_id], bounds_error=False,
                                  fill_value='extrapolate')
