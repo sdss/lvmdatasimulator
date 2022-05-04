@@ -173,7 +173,6 @@ def chunksize(cube, nchunks=4, overlap=40):
     overlap = int(overlap)
 
     if nchunks == np.sqrt(nchunks) ** 2:
-        print(np.sqrt(nchunks))
         max_chunks = int(np.sqrt(nchunks))
         min_chunks = int(np.sqrt(nchunks))
     else:
