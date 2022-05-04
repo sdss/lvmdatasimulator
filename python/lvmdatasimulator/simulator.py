@@ -21,6 +21,7 @@ import astropy.units as u
 
 from collections import OrderedDict
 from scipy import special
+from scipy.interpolate import interp1d
 from spectres import spectres
 from astropy.io import ascii, fits
 from astropy.table import vstack
@@ -87,7 +88,7 @@ def epp2flam(lam, fe, ddisp):
     return fe * Constants.h * Constants.c / (lam * ddisp)
 
 
-def resample_spectrum(new_wave, old_wave, flux):
+def resample_spectrum(new_wave, old_wave, flux, fast=True):
     """
     Resample spectrum to a new wavelength grid using the spectres package.
 
@@ -103,8 +104,11 @@ def resample_spectrum(new_wave, old_wave, flux):
         array-like:
             spectrum resampled onto the new_wave axis
     """
-
-    resampled = spectres(new_wave, old_wave, flux)
+    if fast:
+        f = interp1d(old_wave, flux)
+        resampled = f(new_wave)
+    else:
+        resampled = spectres(new_wave, old_wave, flux)
 
     return resampled
 
@@ -147,6 +151,7 @@ class Simulator:
         aperture: u.pix = 4 * u.pix,
         root: str = lvmdatasimulator.WORK_DIR,
         overwrite: bool = True,
+        fast: bool = True
     ):
 
         self.source = source
@@ -157,6 +162,7 @@ class Simulator:
         self.aperture = aperture
         self.root = root
         self.overwrite = overwrite
+        self.fast = fast
 
         # creating empty storage
         self.output_noise = None  # realization with noise
@@ -184,7 +190,7 @@ class Simulator:
                 File containing the athmospheric extinction curve.
                 Defaults to f'{DATA_DIR}/sky/LVM_LVM160_KLAM.dat'.
         """
-        
+
         log.info('Reading the atmospheric extinction from file.')
         self.extinction_file = extinction_file
         data = ascii.read(self.extinction_file)
@@ -236,10 +242,10 @@ class Simulator:
         disp0 = np.median(old_wave[1:-1] - old_wave[0:-2]) * u.AA / u.pix
         tmp_lam = np.arange(np.amin(old_wave), np.amax(old_wave), disp0.value)
 
-        resampled_v0 = resample_spectrum(tmp_lam, old_wave, old_flux)
+        resampled_v0 = resample_spectrum(tmp_lam, old_wave, old_flux, fast=self.fast)
 
 
-        if self.bundle.nfibers < 10:
+        if self.bundle.nfibers < 1800:
             results = [self._resample_and_convolve_loop(fiber, disp0, resampled_v0, tmp_lam, unit)
                        for fiber in self.bundle.fibers]
         else:
@@ -265,7 +271,8 @@ class Simulator:
 
             # do both convolutions at the same time
             convolved = convolve_for_gaussian(resampled_v0, fwhm, boundary="extend")
-            resampled_v1 = resample_spectrum(branch.wavecoord.wave.value, tmp_lam, convolved)
+            resampled_v1 = resample_spectrum(branch.wavecoord.wave.value, tmp_lam, convolved,
+                                             fast=self.fast)
 
             if unit:
                 fiber_spec[branch.name] = resampled_v1 * unit
@@ -285,7 +292,7 @@ class Simulator:
 
         log.info('Resampling spectra to the instrument wavelength solution.')
 
-        if self.bundle.nfibers < 10:
+        if self.bundle.nfibers < 1800:
             results = [self._extract_target_spectra(fiber, spectra, index, wl_grid)
                        for fiber in self.bundle.fibers]
         else:
@@ -313,7 +320,7 @@ class Simulator:
 
             convolved = convolve_for_gaussian(original, fwhm, boundary="extend")
             resampled_v1 = resample_spectrum(branch.wavecoord.wave.value, wl_grid.value,
-                                                convolved)
+                                             convolved, fast=self.fast)
 
             fiber_spec[branch.name] = resampled_v1 * (u.erg / (u.cm ** 2 * u.s * u.AA))
 
@@ -330,7 +337,7 @@ class Simulator:
             spectra (dictionary):
                 dictionary containing the input spectrum for each fiber.
         """
-        
+
         spectrum = spectra[fiber.id]
 
         # convert spectra to electrons
@@ -362,7 +369,7 @@ class Simulator:
 
         log.info("Simulating observations.")
 
-        if self.bundle.nfibers < 10:
+        if self.bundle.nfibers < 1800:
             results = [self._simulate_observations_single_fiber(fiber, self.target_spectra)
                       for fiber in self.bundle.fibers]
         else:
