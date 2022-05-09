@@ -36,8 +36,16 @@ class Observation:
     This class contains the principal informations on the observations to be simulated.
 
     Parameters:
-        name (str):
+        name (str, optional):
             Name of the field. Defaults to 'LVM_field'
+        ra (float, optional):
+            RA of the center of the fiber bundle. Defaults to 0.
+        dec (float, optional):
+            dec of the center of the fiber bundle. Defaults to 0.
+        unit_ra (astropy.unit, optional):
+            unit associated to the right ascension. Defaults to u.deg
+        unit_dec (astropy.unit, optional):
+            unit associated to the declination. Defaults to u.deg
         time (str, optional):
             date and time of the observations in the following format:
             'YYYY-MM-DDTHH:MM:SS.SS'. Defaults to '2022-01-01T00:00:00.00'.
@@ -99,8 +107,10 @@ class Observation:
     """
 
     name: str = 'LVM_field'
-    ra: u.deg = 0.0 * u.deg
-    dec: u.deg = 0.0 * u.deg
+    ra: float = 0.0
+    dec: float = 0.0
+    unit_ra: u = u.deg
+    unit_dec: u = u.deg
     time: str = '2022-01-01T00:00:00.00'  # UT time of observations
     location: EarthLocation = EarthLocation.of_site('lco')
     utcoffset: u.hour = -3 * u.hour  # Correction to local time. It is important to keep it updated
@@ -113,6 +123,12 @@ class Observation:
     sky_template: str = None
 
     def __post_init__(self):
+        # fix the unit of measurements
+        if isinstance(self.ra, (float, int)):
+            self.ra *= self.unit_ra
+        if isinstance(self.dec, (float, int)):
+            self.dec *= self.unit_dec
+
         self.time = Time(self.time, format='isot', scale='utc')  # time of obs.
         if self.sky_transparency not in ['PHOT', 'CLR', 'THIN']:
             raise ValueError(f'{self.sky_transparency} is not accepted.')
