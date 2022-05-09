@@ -26,7 +26,7 @@ from scipy import special
 from scipy.interpolate import interp1d
 from spectres import spectres
 from astropy.io import ascii, fits
-from astropy.table import vstack
+from astropy.table import vstack, Table
 from dataclasses import dataclass
 from astropy.convolution import Gaussian1DKernel, convolve
 
@@ -152,6 +152,7 @@ class Simulator:
         telescope: Telescope,
         aperture: u.pix = 4 * u.pix,
         root: str = lvmdatasimulator.WORK_DIR,
+        input_spectra_names: dict = None,
         overwrite: bool = True,
         fast: bool = True
     ):
@@ -444,7 +445,7 @@ class Simulator:
         wave_hdu.header["BUNIT"] = "Angstrom"
         primary.header["EXT3"] = "WAVE"
 
-        ids_hdu = fits.BinTableHDU(ids)
+        ids_hdu = fits.BinTableHDU(ids, name="FIBERID")
         primary.header["EXT4"] = "FIBERID"
 
         hdul = fits.HDUList([primary, signal_hdu, sky_hdu, wave_hdu, ids_hdu])
@@ -493,7 +494,7 @@ class Simulator:
         wave_hdu.header["BUNIT"] = "Angstrom"
         primary.header["EXT6"] = "WAVE"
 
-        ids_hdu = fits.BinTableHDU(ids)
+        ids_hdu = fits.BinTableHDU(ids, name="FIBERID")
         primary.header["EXT7"] = "FIBERID"
 
         hdul = fits.HDUList([primary, target_hdu, total_hdu, noise_hdu, stn_hdu, sky_hdu, wave_hdu,
@@ -542,7 +543,7 @@ class Simulator:
         wave_hdu.header["BUNIT"] = "Angstrom"
         primary.header["EXT6"] = "WAVE"
 
-        ids_hdu = fits.BinTableHDU(ids)
+        ids_hdu = fits.BinTableHDU(ids, name="FIBERID")
         primary.header["EXT7"] = "FIBERID"
 
         hdul = fits.HDUList([primary, target_hdu, total_hdu, noise_hdu, stn_hdu, sky_hdu, wave_hdu,
@@ -933,7 +934,7 @@ class Simulator:
                 "snr": exposure['snr'],
                 "sky": sky_out}
 
-    def save_output_maps(self, min_wave, max_wave):
+    def save_output_maps(self, wavelength_range, unit_range=u.AA):
 
         log.info('Saving the 2D output maps')
         for branch in self.spectrograph.branches:
@@ -943,13 +944,13 @@ class Simulator:
             wcs = self.source.wcs
             head = wcs.to_header()
 
-            head['MIN_WAVE'] = min_wave.value
-            head['MAX_WAVE'] = max_wave.value
+            head['MIN_WAVE'] = wavelength_range[0]
+            head['MAX_WAVE'] = wavelength_range[1]
 
             # I'm not interpolating to the exact wavelength
 
-            mask1 = branch.wavecoord.wave > min_wave
-            mask2 = branch.wavecoord.wave < max_wave
+            mask1 = branch.wavecoord.wave > wavelength_range[0] * unit_range
+            mask2 = branch.wavecoord.wave < wavelength_range[1] * unit_range
             mask = np.all([mask1, mask2], axis=0)
 
             target_val = np.nansum(target[:, mask], axis=1)

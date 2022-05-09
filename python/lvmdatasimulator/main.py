@@ -1,82 +1,69 @@
-# encoding: utf-8
-#
-# @Author: José Sánchez-Gallego
-# @Date: Oct 12, 2017
-# @Filename: main.py
-# @License: BSD 3-Clause
-# @Copyright: José Sánchez-Gallego
+from email.policy import default
+from lvmdatasimulator.field import LVMField
+from lvmdatasimulator.observation import Observation
+from lvmdatasimulator.telescope import LVM160
+from lvmdatasimulator.instrument import LinearSpectrograph
+from lvmdatasimulator.simulator import Simulator
+from lvmdatasimulator.fibers import FiberBundle
+from astropy.table import Table
+# import imageio
 
-import operator
-
-
-__all__ = ('math', 'MyClass')
-
-
-def math(arg1, arg2, arith_operator='+'):
-    """Performs an arithmetic operation.
-
-    This function accepts to numbers and performs an arithmetic operation
-    with them. The arithmetic operation can be passed as a string. By default,
-    the addition operator is assumed.
-
-    Parameters:
-        arg1,arg2 (float):
-            The numbers that we will sub/subtract/multiply/divide.
-        arith_operator ({'+', '-', '*', '/'}):
-            A string indicating the arithmetic operation to perform.
-
-    Returns:
-        result (float):
-            The result of the arithmetic operation.
-
-    Example:
-      >>> math(2, 2, arith_operator='*')
-      >>> 4
-
-    """
-
-    str_to_operator = {'+': operator.add,
-                       '-': operator.sub,
-                       '*': operator.mul,
-                       '/': operator.truediv}
-
-    return str_to_operator[arith_operator](arg1, arg2)
+import astropy.units as u
+import time
+import argparse
 
 
-class MyClass(object):
-    """A description of the class.
+def run_simulator(params):
 
-    The top docstring in a class describes the class in general, and the
-    parameters to be passed to the class ``__init__``.
+    start = time.time()
+    my_lvmfield = LVMField(ra=params.get('ra', 10),
+                           dec=params.get('dec', -10),
+                           size=params.get('size', 32),
+                           spaxel=params.get('spaxel', 1),
+                           unit_ra=params.get('unit_ra', u.degree),
+                           unit_dec=params.get('unit_dec', u.degree),
+                           unit_size=params.get('unit_size', u.arcmin),
+                           unit_spaxel=params.get('unit_spaxel', u.arcsec),
+                           name=params.get('name', 'LVM_Field'))
 
-    Parameters:
-        arg1 (float):
-            The first argument.
-        arg2 (int):
-            The second argument.
-        kwarg1 (str):
-            A keyword argument.
+    if params.get('nebulae_from_file', None) is not None:
+        my_lvmfield.add_nebulae(load_from_file=params['nebulae_from_file'])
+    else:
+        my_lvmfield.add_nebulae(params['nebulae'],
+                                save_nebulae=params.get('nebulae_name', 'LVM_field_nebulae'))
 
-    Attributes:
-        name (str): A description of what names gives acces to.
+    my_lvmfield.generate_gaia_stars(gmag_limit=params.get('gmag_limit', 17),
+                                    shift=params.get('shift', False),
+                                    save=params.get('save', True),
+                                    filename=params.get('starlist_name', None))
 
-    """
+    my_lvmfield.get_map(wavelength_range=params.get('wavelength_range', [6550, 6570]),
+                        unit_range=params.get('unit_range', u.AA),
+                        save_file=params.get('save_file', 'outputs/LVM_Field_input.fits'))
 
-    def __init__(self, arg1, arg2, kwarg1='a'):
+    obs = Observation(name=params.get('name', 'LVM_field'),
+                      ra=params.get('ra_bundle', 10),
+                      dec=params.get('dec_bundle', -10),
+                      unit_ra=params.get('unit_ra_bundle', u.deg),
+                      unit_dec=params.get('unit_dec_bundle', u.deg),
+                      time=params.get('time', '2022-01-01T00:00:00.00'),
+                      utcoffset=params.get('utcoffset', -3 * u.hour),
+                      exptime=params.get('exptime', 900.0 * u.s),
+                      airmass=params.get('airmass', None),
+                      days_moon=params.get('days_moon', None),
+                      sky_template=params.get('sky_template', None))
+    tel = LVM160()
+    spec = LinearSpectrograph()
+    bundle = FiberBundle(bundle_name=params.get('bundle_name', 'full'),
+                         nrings=params.get('nrings', 24),
+                         angle=params.get('angle', 0),
+                         custom_fibers=params.get('custom_fibers', None))
 
-        self.name = arg1
+    sim = Simulator(my_lvmfield, obs, spec, bundle, tel, fast=params.get('fast', True))
+    sim.simulate_observations()
+    sim.save_outputs()
+    sim.save_output_maps(wavelength_range=params.get('wavelength_range', [6550, 6570]),
+                         unit_range=params.get('unit_range', u.AA))
+    print('Elapsed time: {:0.1f}' .format(time.time()-start))
 
-    def do_something(self):
-        """A description of what this method does."""
 
-        pass
-
-    def do_something_else(self, param):
-        """A description of what this method does.
-
-        If the class only has one or two arguments, you can describe them
-        inline. ``param`` is the parameter that we use to do something else.
-
-        """
-
-        pass
