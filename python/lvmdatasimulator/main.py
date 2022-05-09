@@ -10,7 +10,6 @@ from astropy.table import Table
 
 import astropy.units as u
 import time
-import argparse
 
 
 def run_simulator(params):
