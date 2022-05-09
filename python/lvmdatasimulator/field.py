@@ -267,7 +267,7 @@ class LVMField:
                    spec_resolution=spec_resolution,
                    sys_velocity=sys_velocity)
 
-    def get_map(self, wavelength_range=None, save_file=None):
+    def get_map(self, wavelength_range=None, unit_range=u.AA, save_file=None):
         """
         Create the input map of the field in the selected wavelength range
 
@@ -279,9 +279,14 @@ class LVMField:
         if wavelength_range is None:
             log.info("Input map is produced for default lambda = 6562.81")
             wavelength_range = 6562.81
+        else:
+            for i in range(len(wavelength_range)):
+                wavelength_range[i] *= unit_range
+                wavelength_range[i] = wavelength_range[i].to(u.AA).value
+
         wavelength_range = np.atleast_1d(wavelength_range)
         if len(wavelength_range) == 1:
-            wavelength_range = np.array([wavelength_range[0] - 0.01, wavelength_range[1] + 0.01])
+            wavelength_range = np.array([wavelength_range[0] - 0.01, wavelength_range[0] + 0.01])
         if self.starlist is not None:
             xc_stars = np.round(self.starlist.stars_table['x']).astype(int)
             yc_stars = np.round(self.starlist.stars_table['y']).astype(int)
