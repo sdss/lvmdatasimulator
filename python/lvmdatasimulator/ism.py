@@ -152,6 +152,7 @@ class Nebula:
     perturb_scale: int = 0 * u.pc  # Spatial scale of correlated perturbations
     perturb_amplitude: float = 0.1  # Maximal amplitude of perturbations
     _npix_los: int = 1  # full size along line of sight in pixels
+    nchunks: int = -1 # number of chuncks to use for the convolution. If negative, select automatically
 
     def __post_init__(self):
         if (self.xc is not None) and (self.yc is not None):
@@ -823,6 +824,7 @@ class ISM:
         self.content[-1].header['X0'] = (obj_to_add.x0, "Position in the field of view")
         self.content[-1].header['Y0'] = (obj_to_add.y0, "Position in the field of view")
         self.content[-1].header['Zorder'] = (zorder, "Z-order in the field of view")
+        self.content[-1].header['NCHUNKS'] = (obj_to_add.nchunks, "N of chunks for convolution")
         if type(obj_to_add) in [Bubble, Cloud]:
             self.content[-1].header['Radius'] = (obj_to_add.radius.to_value(u.pc), "Radius of the nebula, pc")
             self.content[-1].header['PertOrd'] = (obj_to_add.perturb_degree, "Degree to produce random perturbations")
@@ -1608,20 +1610,29 @@ class ISM:
                     selected_y = aperture_centers[selected_apertures, 1] - ystart_neb - y0
                     selected_x = aperture_centers[selected_apertures, 0] - xstart_neb - x0
                     data_in_apertures = convolve_array(lsf * all_fluxes[0][None, :, :],
-                                                       kern, selected_x, selected_y, pix_size)
-      
+                        kern, selected_x, selected_y, pix_size,
+                        nchunks=self.content[cur_ext].header.get("NCHUNKS"))
                     data_in_apertures = data_in_apertures.reshape((1, data_in_apertures.shape[0],
                                                                   data_in_apertures.shape[1]))
+                    hdu = fits.PrimaryHDU(data=data_in_apertures)
+                    hdu.writeto(f'./data_{neb_index}.fits', overwrite=True)
 
                 else:
 
                     selected_y = aperture_centers[selected_apertures, 1] - ystart_neb - y0
                     selected_x = aperture_centers[selected_apertures, 0] - xstart_neb - x0
-                    data_in_apertures = Parallel(n_jobs=lvmdatasimulator.n_process)(
-                        delayed(convolve_array)(lsf * line_data[None, :, :], kern,
-                                               selected_y, selected_x, pix_size)
-                        for line_data in all_fluxes)
+                    # data_in_apertures = Parallel(n_jobs=lvmdatasimulator.n_process)(
+                    #     delayed(convolve_array)(lsf * line_data[None, :, :], kern,
+                    #                            selected_y, selected_x, pix_size)
+                    #     for line_data in all_fluxes)
+                    data_in_apertures = [convolve_array(lsf * line_data[None, :, :], kern,
+                        selected_y, selected_x, pix_size,
+                        nchunks=self.content[cur_ext].header.get("NCHUNKS"))
+                        for line_data in all_fluxes]
                     data_in_apertures = np.array(data_in_apertures)
+                    hdu = fits.PrimaryHDU(data=data_in_apertures)
+                    hdu.writeto(f'./data_{neb_index}.fits', overwrite=True)
+
                 data_in_apertures = np.moveaxis(data_in_apertures, 2, 0)
                 if data_in_apertures.shape[1] > 1:
                     prf_index = np.flatnonzero(all_wavelength == 6562.81)

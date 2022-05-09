@@ -126,21 +126,23 @@ def ism_extinction(av=None, wavelength=None, r_v=3.1, ext_law='F99'):
 
 
 def convolve_array(to_convolve, kernel, selected_points_x, selected_points_y,
-                   allow_huge=True, normalize_kernel=False, pix_size=1):
+                   allow_huge=True, normalize_kernel=False, pix_size=1, nchunks=-1):
 
     # deciding how much to divide
     orig_shape = to_convolve.shape
     orig_shape_arcsec = orig_shape[1:] * pix_size
-    if max(orig_shape_arcsec) > 1700:
-        nchunks = 12
-    elif max(orig_shape_arcsec) > 1200:
-        nchunks = 9
-    elif max(orig_shape_arcsec) > 660:
-        nchunks = 4
-    else:
-        nchunks = None
 
-    if nchunks is None:
+    if nchunks == -1:
+        if max(orig_shape_arcsec) > 1700:
+            nchunks = 12
+        elif max(orig_shape_arcsec) > 1200:
+            nchunks = 9
+        elif max(orig_shape_arcsec) > 660:
+            nchunks = 4
+        else:
+            nchunks = 1
+
+    if nchunks is 1:
         log.info('Convolving the whole array at once')
     else:
         log.info(f'Dividing the array in {nchunks} chunks')
@@ -148,7 +150,7 @@ def convolve_array(to_convolve, kernel, selected_points_x, selected_points_y,
     # defining the overlap as the size of the kernel + some room
     overlap = 1.1 * np.max(kernel.shape)
 
-    if nchunks is not None:
+    if nchunks > 1:
         log.info(f'Dividing the array in {nchunks} with an overlap of {overlap*pix_size} arcsec')
         # dividing the cube in chuncks before convolving
         chunks = chunksize(to_convolve, nchunks=nchunks, overlap=overlap)
