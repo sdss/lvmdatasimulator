@@ -16,9 +16,11 @@
 # 2020-09-28: New zeropoints and bug fixes ported from Guillermo's code
 # 2021-04-08: added 'run_lvmetc' function to facilitate importing this as a package
 
+from lvmdatasimulator import fibers
 import numpy as np
 import astropy.units as u
 
+from multiprocessing import Pool
 from collections import OrderedDict
 from scipy import special
 from scipy.interpolate import interp1d
@@ -245,19 +247,25 @@ class Simulator:
         resampled_v0 = resample_spectrum(tmp_lam, old_wave, old_flux, fast=self.fast)
 
 
-        if self.bundle.nfibers < 1800:
-            results = [self._resample_and_convolve_loop(fiber, disp0, resampled_v0, tmp_lam, unit)
+        if self.fast:
+            results = [self._resample_and_convolve_loop((fiber, disp0, resampled_v0, tmp_lam, unit))
                        for fiber in self.bundle.fibers]
         else:
-            results = Parallel(n_jobs=lvmdatasimulator.n_process)(
-                delayed(self._resample_and_convolve_loop)(fiber, disp0, resampled_v0,
-                tmp_lam, unit) for fiber in self.bundle.fibers)
+            with Pool(lvmdatasimulator.n_process) as pool:
+                results = pool.map(self._resample_and_convolve_loop, [(fiber, disp0, resampled_v0,
+                tmp_lam, unit) for fiber in self.bundle.fibers])
 
         out_spec = OrderedDict(results)
 
         return out_spec
 
-    def _resample_and_convolve_loop(self, fiber, disp0, resampled_v0, tmp_lam, unit):
+    def _resample_and_convolve_loop(self, param): #fiber, disp0, resampled_v0, tmp_lam, unit):
+
+        fiber = param[0]
+        disp0 = param[1]
+        resampled_v0 = param[2]
+        tmp_lam = param[3]
+        unit = param[4]
 
         fiber_spec = OrderedDict()
         for branch in self.spectrograph.branches:
@@ -292,19 +300,23 @@ class Simulator:
 
         log.info('Resampling spectra to the instrument wavelength solution.')
 
-        if self.bundle.nfibers < 1800:
-            results = [self._extract_target_spectra(fiber, spectra, index, wl_grid)
+        if self.fast:
+            results = [self._extract_target_spectra((fiber, spectra, index, wl_grid))
                        for fiber in self.bundle.fibers]
         else:
-            results = Parallel(n_jobs=lvmdatasimulator.n_process)(
-                delayed(self._extract_target_spectra)(fiber, spectra, index, wl_grid)
-                for fiber in self.bundle.fibers)
+            with Pool(lvmdatasimulator.n_process) as pool:
+                results = pool.map(self._extract_target_spectra, [(fiber, spectra, index, wl_grid)
+                for fiber in self.bundle.fibers])
 
         obj_spec = OrderedDict(results)
 
         return obj_spec
 
-    def _extract_target_spectra(self, fiber, spectra, index, wl_grid):
+    def _extract_target_spectra(self, param): #fiber, spectra, index, wl_grid):
+        fiber = param[0]
+        spectra = param[1]
+        index = param[2]
+        wl_grid = param[3]
 
         original = spectra[index == fiber.id, :][0]
         # from here, this is a replica of _resample_and_convolve()
@@ -327,7 +339,7 @@ class Simulator:
         return fiber.id, fiber_spec
 
 
-    def _simulate_observations_single_fiber(self, fiber, spectra):
+    def _simulate_observations_single_fiber(self, param): #fiber, spectra):
         """
         Simulate the observation of a single fiber.
 
@@ -337,6 +349,9 @@ class Simulator:
             spectra (dictionary):
                 dictionary containing the input spectrum for each fiber.
         """
+
+        fiber = param[0]
+        spectra = param[1]
 
         spectrum = spectra[fiber.id]
 
@@ -369,13 +384,13 @@ class Simulator:
 
         log.info("Simulating observations.")
 
-        if self.bundle.nfibers < 1800:
-            results = [self._simulate_observations_single_fiber(fiber, self.target_spectra)
+        if self.fast:
+            results = [self._simulate_observations_single_fiber((fiber, self.target_spectra))
                       for fiber in self.bundle.fibers]
         else:
-            results = Parallel(n_jobs=lvmdatasimulator.n_process)(
-                delayed(self._simulate_observations_single_fiber)(fiber, self.target_spectra)
-                for fiber in self.bundle.fibers)
+            with Pool(lvmdatasimulator.n_process) as pool:
+                results = pool.map(self._simulate_observations_single_fiber, [(fiber, self.target_spectra)
+                for fiber in self.bundle.fibers])
 
         # reorganize outputs
         ids = []
@@ -937,8 +952,8 @@ class Simulator:
             mask2 = branch.wavecoord.wave < max_wave
             mask = np.all([mask1, mask2], axis=0)
 
-            target_val = target[:, mask].sum(axis=1)
-            total_val = total[:, mask].sum(axis=1)
+            target_val = np.nansum(target[:, mask], axis=1)
+            total_val = np.nansum(total[:, mask], axis=1)
 
             # Just the target
             target_out = self._populate_map(target_out, target_val, ids, wcs)
