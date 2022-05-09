@@ -14,6 +14,13 @@ import argparse
 
 
 def run_simulator(params):
+    """
+    Main function to run the simulation of an LVM field.
+
+    Args:
+        params (dict):
+        Dictionary containing all the input needed to run the simulator
+    """
 
     start = time.time()
     my_lvmfield = LVMField(ra=params.get('ra', 10),
