@@ -179,9 +179,9 @@ class Simulator:
         if not os.path.isdir(self.outdir):
             os.mkdir(self.outdir)
 
-        self.extinction = self.extract_extinction()
-        self.sky = self.extract_sky()
-        self.target_spectra = self.extract_target_spectra()
+        self.extinction = None
+        self.sky = None
+        self.target_spectra = None
 
     def extract_extinction(self, extinction_file=os.path.join(lvmdatasimulator.DATA_DIR, 'sky',
                                                               'LVM_LVM160_KLAM.dat')):
@@ -384,6 +384,9 @@ class Simulator:
         """
 
         log.info("Simulating observations.")
+        self.extinction = self.extract_extinction()
+        self.sky = self.extract_sky()
+        self.target_spectra = self.extract_target_spectra()
 
         if self.fast:
             results = [self._simulate_observations_single_fiber((fiber, self.target_spectra))
