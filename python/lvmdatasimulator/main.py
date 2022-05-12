@@ -54,7 +54,7 @@ def save_input_params(params):
                    unit_dec_bundle=u.deg,
                    time='2022-01-01T00:00:00.00',  # UT time of observations
                    utcoffset=-4 * u.hour,  # Correction to local time. It is important to keep it updated
-                   exptime=900.0 * u.s,  # exposure time in s
+                   exptimes=[900],  # exposure times in s
                    airmass= None,
                    days_moon= None,
                    sky_template= None,
@@ -139,7 +139,7 @@ def run_simulator(params):
                       unit_dec=params.get('unit_dec_bundle', u.deg),
                       time=params.get('time', '2022-01-01T00:00:00.00'),
                       utcoffset=params.get('utcoffset', -3 * u.hour),
-                      exptime=params.get('exptime', 900.0 * u.s),
+                      exptimes=params.get('exptimes', 900.0 * u.s),
                       airmass=params.get('airmass', None),
                       days_moon=params.get('days_moon', None),
                       sky_template=params.get('sky_template', None))

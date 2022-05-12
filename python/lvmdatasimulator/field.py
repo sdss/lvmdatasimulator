@@ -308,7 +308,7 @@ class LVMField:
             if self.ism.content[0].header['Nobj'] > 0:
                 self.ism_map += self.ism.get_map(wavelength=wavelength_range, get_continuum=True)
 
-            save_file = f'{self.name}_{wavelength_range[0]}_{wavelength_range[1]}_input_map.fits'
+            save_file = f'{self.name}_{int(wavelength_range[0])}_{int(wavelength_range[1])}_input_map.fits'
             cur_save_file = os.path.join(lvmdatasimulator.WORK_DIR, save_file)
             header = self.wcs.to_header()
             header['LAMRANGE'] = ("{0}-{1}".format(wavelength_range[0], wavelength_range[1]),

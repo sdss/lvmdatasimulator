@@ -168,8 +168,8 @@ class Simulator:
         self.fast = fast
 
         # creating empty storage
-        self.output_noise = None  # realization with noise
-        self.output_calib = None  # flux calibrated
+        self.output_noise = OrderedDict()  # realization with noise
+        self.output_calib = OrderedDict()  # flux calibrated
         # self.output_coadd = OrderedDict()
 
         self.outdir = os.path.join(self.root, "outputs")
@@ -353,17 +353,18 @@ class Simulator:
 
         fiber = param[0]
         spectra = param[1]
+        exptime = param[2]
 
         spectrum = spectra[fiber.id]
 
         # convert spectra to electrons
-        tmp_target = self._obj_to_electrons(spectrum, fiber.id)  # from units to electrons
-        tmp_sky = self._sky_to_electrons(self.sky[fiber.id])
+        tmp_target = self._obj_to_electrons(spectrum, fiber.id, exptime)  # from units to electrons
+        tmp_sky = self._sky_to_electrons(self.sky[fiber.id], exptime)
 
         # create 2D spectra
         tmp_target_2d = self._to_2d(fiber, tmp_target)
         tmp_sky_2d = self._to_2d(fiber, tmp_sky)
-        tmp_noise_2d = self._make_noise(tmp_target_2d, tmp_sky_2d)
+        tmp_noise_2d = self._make_noise(tmp_target_2d, tmp_sky_2d, exptime)
 
         # extract apertures
         single_exposure = self._extract_aperture(tmp_target_2d, tmp_noise_2d, tmp_sky_2d)
@@ -373,7 +374,7 @@ class Simulator:
         # self.output_noise[fiber.id] = realization_noise
 
         # flux calibrate
-        calibrated = self._flux_calibration(fiber.id, realization_noise)
+        calibrated = self._flux_calibration(fiber.id, realization_noise, exptime)
         # self.output_calib[fiber.id] = calibrated
 
         return (fiber.id, realization_noise, calibrated)
@@ -388,25 +389,30 @@ class Simulator:
         self.sky = self.extract_sky()
         self.target_spectra = self.extract_target_spectra()
 
-        if self.fast:
-            results = [self._simulate_observations_single_fiber((fiber, self.target_spectra))
-                      for fiber in self.bundle.fibers]
-        else:
-            with Pool(lvmdatasimulator.n_process) as pool:
-                results = pool.map(self._simulate_observations_single_fiber, [(fiber, self.target_spectra)
-                for fiber in self.bundle.fibers])
+        for exptime in self.observation.exptimes:
+            exptime_unit = exptime * u.s
+            if self.fast:
+                results = [self._simulate_observations_single_fiber((fiber, self.target_spectra,
+                                                                     exptime_unit))
+                        for fiber in self.bundle.fibers]
+            else:
+                with Pool(lvmdatasimulator.n_process) as pool:
+                    results = pool.map(self._simulate_observations_single_fiber, [(fiber,
+                                                                                   self.target_spectra,
+                                                                                   exptime_unit)
+                    for fiber in self.bundle.fibers])
 
-        # reorganize outputs
-        ids = []
-        noises = []
-        calibs = []
-        for item in results:
-            ids.append(item[0])
-            noises.append(item[1])
-            calibs.append(item[2])
+            # reorganize outputs
+            ids = []
+            noises = []
+            calibs = []
+            for item in results:
+                ids.append(item[0])
+                noises.append(item[1])
+                calibs.append(item[2])
 
-        self.output_noise = OrderedDict(zip(ids, noises))
-        self.output_calib = OrderedDict(zip(ids, calibs))
+            self.output_noise[exptime] = OrderedDict(zip(ids, noises))
+            self.output_calib[exptime] = OrderedDict(zip(ids, calibs))
 
     def save_outputs(self):
         """
@@ -454,8 +460,8 @@ class Simulator:
         hdul = fits.HDUList([primary, signal_hdu, sky_hdu, wave_hdu, ids_hdu])
 
         filename = os.path.join(self.outdir,
-                                f"{self.source.name}_{branch.name}_{self.bundle.bundle_name}_" +
-                                "input.fits")
+                                f"{self.source.name}_{branch.name}_{self.bundle.bundle_name}"
+                                + "_input.fits")
 
         hdul.writeto(filename, overwrite=True)
         log.info(f"{filename} saved.")
@@ -469,46 +475,48 @@ class Simulator:
                 specific spectrograph branch to be saved.
         """
 
-        ids, target, total, noise, sky, snr = self._reorganize_to_rss(branch, self.output_calib)
+        for exptime in self.observation.exptimes:
+            ids, target, total, noise, sky, snr = self._reorganize_to_rss(branch,
+                                                                          self.output_calib[exptime])
 
-        primary = self._create_primary_hdu(branch)
+            primary = self._create_primary_hdu(branch, exptime)
 
-        target_hdu = fits.ImageHDU(data=target, name="TARGET")
-        target_hdu.header["BUNIT"] = "erg/ (cm2 s A)"
-        primary.header["EXT1"] = "TARGET"
+            target_hdu = fits.ImageHDU(data=target, name="TARGET")
+            target_hdu.header["BUNIT"] = "erg/ (cm2 s A)"
+            primary.header["EXT1"] = "TARGET"
 
-        total_hdu = fits.ImageHDU(data=total, name="TOTAL")
-        total_hdu.header["BUNIT"] = "erg/ (cm2 s A)"
-        primary.header["EXT2"] = "TOTAL"
+            total_hdu = fits.ImageHDU(data=total, name="TOTAL")
+            total_hdu.header["BUNIT"] = "erg/ (cm2 s A)"
+            primary.header["EXT2"] = "TOTAL"
 
-        noise_hdu = fits.ImageHDU(data=noise, name="ERR")
-        noise_hdu.header["BUNIT"] = "erg/ (cm2 s A)"
-        primary.header["EXT3"] = "ERR"
+            noise_hdu = fits.ImageHDU(data=noise, name="ERR")
+            noise_hdu.header["BUNIT"] = "erg/ (cm2 s A)"
+            primary.header["EXT3"] = "ERR"
 
-        stn_hdu = fits.ImageHDU(data=snr, name="SNR")
-        stn_hdu.header["BUNIT"] = ""
-        primary.header["EXT4"] = "SNR"
+            stn_hdu = fits.ImageHDU(data=snr, name="SNR")
+            stn_hdu.header["BUNIT"] = ""
+            primary.header["EXT4"] = "SNR"
 
-        sky_hdu = fits.ImageHDU(data=sky, name="SKY")
-        sky_hdu.header["BUNIT"] = "erg/ (cm2 s A)"
-        primary.header["EXT5"] = "SKY"
+            sky_hdu = fits.ImageHDU(data=sky, name="SKY")
+            sky_hdu.header["BUNIT"] = "erg/ (cm2 s A)"
+            primary.header["EXT5"] = "SKY"
 
-        wave_hdu = fits.ImageHDU(data=branch.wavecoord.wave.value, name="WAVE")
-        wave_hdu.header["BUNIT"] = "Angstrom"
-        primary.header["EXT6"] = "WAVE"
+            wave_hdu = fits.ImageHDU(data=branch.wavecoord.wave.value, name="WAVE")
+            wave_hdu.header["BUNIT"] = "Angstrom"
+            primary.header["EXT6"] = "WAVE"
 
-        ids_hdu = fits.BinTableHDU(ids, name="FIBERID")
-        primary.header["EXT7"] = "FIBERID"
+            ids_hdu = fits.BinTableHDU(ids, name="FIBERID")
+            primary.header["EXT7"] = "FIBERID"
 
-        hdul = fits.HDUList([primary, target_hdu, total_hdu, noise_hdu, stn_hdu, sky_hdu, wave_hdu,
-                             ids_hdu])
+            hdul = fits.HDUList([primary, target_hdu, total_hdu, noise_hdu, stn_hdu, sky_hdu, wave_hdu,
+                                ids_hdu])
 
-        filename = os.path.join(self.outdir,
-                                f"{self.source.name}_{branch.name}_{self.bundle.bundle_name}_" +
-                                "flux.fits")
+            filename = os.path.join(self.outdir,
+                                    f"{self.source.name}_{branch.name}_{self.bundle.bundle_name}_"
+                                    + f"{exptime}_flux.fits")
 
-        hdul.writeto(filename, overwrite=True)
-        log.info(f"{filename} saved.")
+            hdul.writeto(filename, overwrite=True)
+            log.info(f"{filename} saved.")
 
     def _save_outputs_with_noise(self, branch):
         """
@@ -518,48 +526,49 @@ class Simulator:
             branch (Branch):
                 specific spectrograph branch to be saved.
         """
+        for exptime in self.observation.exptimes:
+            ids, target, total, noise, sky, snr = self._reorganize_to_rss(branch,
+                                                      self.output_noise[exptime])
+            primary = self._create_primary_hdu(branch, exptime)
 
-        ids, target, total, noise, sky, snr = self._reorganize_to_rss(branch, self.output_noise)
-        primary = self._create_primary_hdu(branch)
+            target_hdu = fits.ImageHDU(data=target, name="TARGET")
+            target_hdu.header["BUNIT"] = "e/pix"
+            primary.header["EXT1"] = "TARGET"
 
-        target_hdu = fits.ImageHDU(data=target, name="TARGET")
-        target_hdu.header["BUNIT"] = "e/pix"
-        primary.header["EXT1"] = "TARGET"
+            total_hdu = fits.ImageHDU(data=total, name="TOTAL")
+            total_hdu.header["BUNIT"] = "e/pix"
+            primary.header["EXT2"] = "TOTAL"
 
-        total_hdu = fits.ImageHDU(data=total, name="TOTAL")
-        total_hdu.header["BUNIT"] = "e/pix"
-        primary.header["EXT2"] = "TOTAL"
+            noise_hdu = fits.ImageHDU(data=noise, name="ERR")
+            noise_hdu.header["BUNIT"] = "e/pix"
+            primary.header["EXT3"] = "ERR"
 
-        noise_hdu = fits.ImageHDU(data=noise, name="ERR")
-        noise_hdu.header["BUNIT"] = "e/pix"
-        primary.header["EXT3"] = "ERR"
+            stn_hdu = fits.ImageHDU(data=snr, name="SNR")
+            stn_hdu.header["BUNIT"] = ""
+            primary.header["EXT4"] = "SNR"
 
-        stn_hdu = fits.ImageHDU(data=snr, name="SNR")
-        stn_hdu.header["BUNIT"] = ""
-        primary.header["EXT4"] = "SNR"
+            sky_hdu = fits.ImageHDU(data=sky, name="SKY")
+            sky_hdu.header["BUNIT"] = "e/pix"
+            primary.header["EXT5"] = "SKY"
 
-        sky_hdu = fits.ImageHDU(data=sky, name="SKY")
-        sky_hdu.header["BUNIT"] = "e/pix"
-        primary.header["EXT5"] = "SKY"
+            wave_hdu = fits.ImageHDU(data=branch.wavecoord.wave.value, name="WAVE")
+            wave_hdu.header["BUNIT"] = "Angstrom"
+            primary.header["EXT6"] = "WAVE"
 
-        wave_hdu = fits.ImageHDU(data=branch.wavecoord.wave.value, name="WAVE")
-        wave_hdu.header["BUNIT"] = "Angstrom"
-        primary.header["EXT6"] = "WAVE"
+            ids_hdu = fits.BinTableHDU(ids, name="FIBERID")
+            primary.header["EXT7"] = "FIBERID"
 
-        ids_hdu = fits.BinTableHDU(ids, name="FIBERID")
-        primary.header["EXT7"] = "FIBERID"
+            hdul = fits.HDUList([primary, target_hdu, total_hdu, noise_hdu, stn_hdu, sky_hdu, wave_hdu,
+                                ids_hdu])
 
-        hdul = fits.HDUList([primary, target_hdu, total_hdu, noise_hdu, stn_hdu, sky_hdu, wave_hdu,
-                             ids_hdu])
+            filename = os.path.join(self.outdir,
+                                    f"{self.source.name}_{branch.name}_{self.bundle.bundle_name}_"
+                                    + f"{exptime}_realization.fits")
 
-        filename = os.path.join(self.outdir,
-                                f"{self.source.name}_{branch.name}_{self.bundle.bundle_name}_" +
-                                "realization.fits")
+            hdul.writeto(filename, overwrite=True)
+            log.info(f"{filename} saved.")
 
-        hdul.writeto(filename, overwrite=True)
-        log.info(f"{filename} saved.")
-
-    def _obj_to_electrons(self, spectrum, fiber_id):
+    def _obj_to_electrons(self, spectrum, fiber_id, exptime):
         """
         Convert a spectrum in flux units to electrons per second.
 
@@ -587,7 +596,7 @@ class Simulator:
                                   branch.wavecoord.step)
 
             # compute constant
-            constant = self.observation.exptime * branch.efficiency *\
+            constant = exptime * branch.efficiency *\
                 self.telescope.aperture_area
 
             # atmospheric extinction
@@ -624,7 +633,7 @@ class Simulator:
 
         return out
 
-    def _sky_to_electrons(self, sky_spectrum):
+    def _sky_to_electrons(self, sky_spectrum, exptime):
         """
         Convert the sky spectrum from flux units to counts per second.
 
@@ -644,12 +653,12 @@ class Simulator:
                              branch.wavecoord.step)
 
             # compute constant
-            constant = self.observation.exptime * branch.efficiency * self.telescope.aperture_area
+            constant = exptime * branch.efficiency * self.telescope.aperture_area
             out[branch.name] = sky_e * constant * u.electron
 
         return out
 
-    def _make_noise(self, spectrum, sky):
+    def _make_noise(self, spectrum, sky, exptime):
         """
         Generate the error array by combining all the different sources of error. Gaussian errors
         are considered.
@@ -671,7 +680,7 @@ class Simulator:
         # ron = np.random.randn(spectrum[branch.name].shape) * branch.ron
 
         for branch in self.spectrograph.branches:
-            dark = branch.dark * self.observation.exptime
+            dark = branch.dark * exptime
             out[branch.name] = np.sqrt(spectrum[branch.name].value + sky[branch.name].value +
                                        branch.ron.value ** 2 + dark.value) * \
                 spectrum[branch.name].unit
@@ -878,7 +887,7 @@ class Simulator:
         fib_id = vstack(fib_id)
         return fib_id, target_w_noise, total_w_noise, noise_el, sky_el, snr
 
-    def _create_primary_hdu(self, branch):
+    def _create_primary_hdu(self, branch, exptime=None):
 
         primary = fits.PrimaryHDU()
         primary.header["TARGET"] = self.source.name
@@ -890,7 +899,8 @@ class Simulator:
                                  "Altitude of the target")
         primary.header["AIRMASS"] = self.observation.airmass
         primary.header["MJD"] = (self.observation.mjd, "MJD at start")
-        primary.header["EXPTIME"] = self.observation.exptime.value
+        if exptime is not None:
+            primary.header["EXPTIME"] = exptime
         primary.header["BRANCH"] = branch.name
         primary.header["MOON"] = (self.observation.moon_distance.value,
                                   "Fractional moon illumination")
@@ -899,7 +909,7 @@ class Simulator:
 
         return primary
 
-    def _flux_calibration(self, fiber_id, exposure):
+    def _flux_calibration(self, fiber_id, exposure, exptime):
 
         signal_out = OrderedDict()
         target_out = OrderedDict()
@@ -908,7 +918,7 @@ class Simulator:
 
         for branch in self.spectrograph.branches:
             # this remove the signature of the instruments and goes back to the real spectrum
-            fluxcalib = self.observation.exptime * branch.efficiency *\
+            fluxcalib = exptime * branch.efficiency *\
                 self.telescope.aperture_area
             telluric = self.extinction[fiber_id][branch.name] * self.observation.airmass
 
@@ -964,46 +974,50 @@ class Simulator:
             for branch in self.spectrograph.branches:
                 if branch.wavecoord.start < wavelength_range[0] * unit_range \
                     and branch.wavecoord.end > wavelength_range[1] * unit_range:
+                    for exptime in self.observation.exptimes:
+                        ids, target, total, _, _, _ = self._reorganize_to_rss(branch,
+                                                                              self.output_calib[exptime])
+                        target_out = np.zeros((self.source.npixels, self.source.npixels))
+                        total_out = np.zeros((self.source.npixels, self.source.npixels))
+                        wcs = self.source.wcs
+                        head = wcs.to_header()
 
-                    ids, target, total, _, _, _ = self._reorganize_to_rss(branch, self.output_calib)
-                    target_out = np.zeros((self.source.npixels, self.source.npixels))
-                    total_out = np.zeros((self.source.npixels, self.source.npixels))
-                    wcs = self.source.wcs
-                    head = wcs.to_header()
+                        head['MIN_WAVE'] = wavelength_range[0]
+                        head['MAX_WAVE'] = wavelength_range[1]
 
-                    head['MIN_WAVE'] = wavelength_range[0]
-                    head['MAX_WAVE'] = wavelength_range[1]
+                        # I'm not interpolating to the exact wavelength
 
-                    # I'm not interpolating to the exact wavelength
+                        mask1 = branch.wavecoord.wave > wavelength_range[0] * unit_range
+                        mask2 = branch.wavecoord.wave < wavelength_range[1] * unit_range
+                        mask = np.all([mask1, mask2], axis=0)
 
-                    mask1 = branch.wavecoord.wave > wavelength_range[0] * unit_range
-                    mask2 = branch.wavecoord.wave < wavelength_range[1] * unit_range
-                    mask = np.all([mask1, mask2], axis=0)
+                        target_val = np.nansum(target[:, mask], axis=1)
+                        total_val = np.nansum(total[:, mask], axis=1)
 
-                    target_val = np.nansum(target[:, mask], axis=1)
-                    total_val = np.nansum(total[:, mask], axis=1)
+                        # Just the target
+                        target_out = self._populate_map(target_out, target_val, ids, wcs)
 
-                    # Just the target
-                    target_out = self._populate_map(target_out, target_val, ids, wcs)
+                        filename = os.path.join(self.outdir,
+                            f"{self.source.name}_{branch.name}_{self.bundle.bundle_name}"\
+                            + f"_{int(wavelength_range[0])}_{int(wavelength_range[1])}"
+                            + f"_{exptime}s_target_map.fits")
 
-                    filename = os.path.join(self.outdir,
-                        f"{self.source.name}_{branch.name}_{self.bundle.bundle_name}"\
-                        +f"_{wavelength_range[0]}_{wavelength_range[1]}_target_map.fits")
+                        hdu = fits.PrimaryHDU(data=target_out, header=head)
 
-                    hdu = fits.PrimaryHDU(data=target_out, header=head)
+                        hdu.writeto(filename, overwrite=True)
+                        log.info(f' Saving {filename}...')
 
-                    hdu.writeto(filename, overwrite=True)
-                    log.info(f' Saving {filename}...')
+                        # full spectrum
+                        total_out = self._populate_map(total_out, total_val, ids, wcs)
 
-                    # full spectrum
-                    total_out = self._populate_map(total_out, total_val, ids, wcs)
+                        filename = os.path.join(self.outdir,
+                            f"{self.source.name}_{branch.name}_{self.bundle.bundle_name}"
+                            + f"_{int(wavelength_range[0])}_{int(wavelength_range[1])}"
+                            + f"_{exptime}s_total_map.fits")
+                        hdu = fits.PrimaryHDU(data=total_out, header=head)
 
-                    filename = os.path.join(self.outdir,
-                                            f"{self.source.name}_{branch.name}_{self.bundle.bundle_name}_total_map.fits")
-                    hdu = fits.PrimaryHDU(data=total_out, header=head)
-
-                    hdu.writeto(filename, overwrite=True)
-                    log.info(f' Saving {filename}...')
+                        hdu.writeto(filename, overwrite=True)
+                        log.info(f' Saving {filename}...')
 
                 else:
                     log.warning(f'Selected range out of {branch.name} range.')
