@@ -16,7 +16,7 @@ import os.path
 import astropy.units as u
 import numpy as np
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from astropy.time import Time
 from astropy.coordinates import get_body, EarthLocation, AltAz, SkyCoord
 from astroplan import moon_illumination
@@ -36,8 +36,16 @@ class Observation:
     This class contains the principal informations on the observations to be simulated.
 
     Parameters:
-        name (str):
+        name (str, optional):
             Name of the field. Defaults to 'LVM_field'
+        ra (float, optional):
+            RA of the center of the fiber bundle. Defaults to 0.
+        dec (float, optional):
+            dec of the center of the fiber bundle. Defaults to 0.
+        unit_ra (astropy.unit, optional):
+            unit associated to the right ascension. Defaults to u.deg
+        unit_dec (astropy.unit, optional):
+            unit associated to the declination. Defaults to u.deg
         time (str, optional):
             date and time of the observations in the following format:
             'YYYY-MM-DDTHH:MM:SS.SS'. Defaults to '2022-01-01T00:00:00.00'.
@@ -46,8 +54,8 @@ class Observation:
             LCO.
         utcoffset (astropy.quantity, optional):
             offset of the location time with respect to UTC in hours. Defaults to -3 * u.hours
-        exptime (astropy.quantity, optional):
-            Exposure time of a single exposure in seconds. Defaults to 900s.
+        exptimes (astropy.quantity, optional):
+            list of exposure time of a single exposure in seconds. Defaults to 900s.
         nexp (int, optional):
             number of exposures to be acquired in this position. Defaults to 1.
         seeing (astropy.quantity, optional):
@@ -99,12 +107,14 @@ class Observation:
     """
 
     name: str = 'LVM_field'
-    ra: u.deg = 0.0 * u.deg
-    dec: u.deg = 0.0 * u.deg
+    ra: float = 0.0
+    dec: float = 0.0
+    unit_ra: u = u.deg
+    unit_dec: u = u.deg
     time: str = '2022-01-01T00:00:00.00'  # UT time of observations
     location: EarthLocation = EarthLocation.of_site('lco')
     utcoffset: u.hour = -3 * u.hour  # Correction to local time. It is important to keep it updated
-    exptime: u.s = 900.0 * u.s  # exposure time in s
+    exptimes: list[int] = field(default_factory=lambda: ['900'])  # exposure time in s
     nexp: int = 1  # number of exposures
     seeing: u.arcsec = 1 * u.arcsec  # seeing at zenit in the V-band (5500 A?)
     sky_transparency: str = 'PHOT'
@@ -113,6 +123,14 @@ class Observation:
     sky_template: str = None
 
     def __post_init__(self):
+        # fix the unit of measurements
+        if isinstance(self.ra, (float, int)):
+            self.ra *= self.unit_ra
+        if isinstance(self.dec, (float, int)):
+            self.dec *= self.unit_dec
+        if not isinstance(self.exptimes, (list)):
+            self.exptimes = [self.exptimes]
+
         self.time = Time(self.time, format='isot', scale='utc')  # time of obs.
         if self.sky_transparency not in ['PHOT', 'CLR', 'THIN']:
             raise ValueError(f'{self.sky_transparency} is not accepted.')

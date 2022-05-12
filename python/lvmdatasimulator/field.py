@@ -267,47 +267,55 @@ class LVMField:
                    spec_resolution=spec_resolution,
                    sys_velocity=sys_velocity)
 
-    def get_map(self, wavelength_range=None, save_file=None):
+    def get_map(self, wavelength_ranges=None, unit_range=u.AA):
         """
         Create the input map of the field in the selected wavelength range
 
-        :param wavelength_range: exact wavelength or minimal and maximal wavelength (in angstom) for the map extraction
+        :param wavelength_ranges: exact wavelength or minimal and maximal wavelength (in angstom) for the map extraction
         :param save_file: name of the fits-file where the generated map will be stored
             (absolute path or relative to WORK_DIR or current directory)
         """
-        self.ism_map = np.zeros(shape=(self.npixels, self.npixels), dtype=float)
-        if wavelength_range is None:
-            log.info("Input map is produced for default lambda = 6562.81")
-            wavelength_range = 6562.81
-        wavelength_range = np.atleast_1d(wavelength_range)
-        if len(wavelength_range) == 1:
-            wavelength_range = np.array([wavelength_range[0] - 0.01, wavelength_range[1] + 0.01])
-        if self.starlist is not None:
-            xc_stars = np.round(self.starlist.stars_table['x']).astype(int)
-            yc_stars = np.round(self.starlist.stars_table['y']).astype(int)
-            wl_grid = np.linspace(wavelength_range[0], wavelength_range[1], 10)
-            for star_id, xy in enumerate(zip(xc_stars, yc_stars)):
-                if (xy[0] >= self.npixels) or (xy[1] >= self.npixels) or (xy[0] < 0) or (xy[1] < 0):
-                    continue
-                p = interp1d(self.starlist.wave.to(u.AA).value, self.starlist.spectra[star_id], bounds_error=False,
-                             fill_value='extrapolate')
-                # !!! APPLY EXTINCTION BY DARK NEBULAE TO STARS !!!
-                self.ism_map[xy[1], xy[0]] += np.sum(p(wl_grid) * (wl_grid[1] - wl_grid[0]))
 
-        if self.ism.content[0].header['Nobj'] > 0:
-            self.ism_map += self.ism.get_map(wavelength=wavelength_range, get_continuum=True)
+        # default value is Ha
+        if wavelength_ranges is None:
+            wavelength_ranges = [6562.81]
 
-        if save_file is not None:
-            if save_file.startswith("/") or save_file.startswith("\\") or save_file.startswith("."):
-                cur_save_file = save_file
-            else:
-                cur_save_file = os.path.join(lvmdatasimulator.WORK_DIR, save_file)
+        if isinstance(wavelength_ranges[0], (float, int)) and len(wavelength_ranges) == 1:
+            wavelength_ranges = [[wavelength_range[0] - 0.01, wavelength_range[0] + 0.01]]
+        elif isinstance(wavelength_ranges[0], (float, int)):
+            wavelength_ranges = [wavelength_ranges]
+
+        for wavelength_range in wavelength_ranges:
+
+            self.ism_map = np.zeros(shape=(self.npixels, self.npixels), dtype=float)
+            for i in range(len(wavelength_range)):
+                wavelength_range[i] *= unit_range
+                wavelength_range[i] = wavelength_range[i].to(u.AA).value
+
+            wavelength_range = np.atleast_1d(wavelength_range)
+            if self.starlist is not None:
+                xc_stars = np.round(self.starlist.stars_table['x']).astype(int)
+                yc_stars = np.round(self.starlist.stars_table['y']).astype(int)
+                wl_grid = np.linspace(wavelength_range[0], wavelength_range[1], 10)
+                for star_id, xy in enumerate(zip(xc_stars, yc_stars)):
+                    if (xy[0] >= self.npixels) or (xy[1] >= self.npixels) or (xy[0] < 0) or (xy[1] < 0):
+                        continue
+                    p = interp1d(self.starlist.wave.to(u.AA).value, self.starlist.spectra[star_id], bounds_error=False,
+                                fill_value='extrapolate')
+                    # !!! APPLY EXTINCTION BY DARK NEBULAE TO STARS !!!
+                    self.ism_map[xy[1], xy[0]] += np.sum(p(wl_grid) * (wl_grid[1] - wl_grid[0]))
+
+            if self.ism.content[0].header['Nobj'] > 0:
+                self.ism_map += self.ism.get_map(wavelength=wavelength_range, get_continuum=True)
+
+            save_file = f'{self.name}_{int(wavelength_range[0])}_{int(wavelength_range[1])}_input_map.fits'
+            cur_save_file = os.path.join(lvmdatasimulator.WORK_DIR, save_file)
             header = self.wcs.to_header()
             header['LAMRANGE'] = ("{0}-{1}".format(wavelength_range[0], wavelength_range[1]),
-                                  "Wavelength range used for image extraction")
+                                "Wavelength range used for image extraction")
             fits.writeto(cur_save_file, data=self.ism_map, header=header, overwrite=True)
             log.info("Input image in {0}-{1}AA wavelength range "
-                     "is saved to {2}".format(wavelength_range[0], wavelength_range[1], save_file))
+                    "is saved to {2}".format(wavelength_range[0], wavelength_range[1], save_file))
 
     def add_nebulae(self, list_of_nebulae=None, load_from_file=None, save_nebulae=None, overwrite=True):
         """
