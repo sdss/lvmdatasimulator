@@ -937,47 +937,76 @@ class Simulator:
                 "snr": exposure['snr'],
                 "sky": sky_out}
 
-    def save_output_maps(self, wavelength_range, unit_range=u.AA):
+    def save_output_maps(self, wavelength_ranges, unit_range=u.AA):
+        """
+        Save 2D images of the observed field in all the provided wavelength ranges.
+        To better show the results of the simulation, the flux observed by each fiber is reported
+        inside a circle with the same diameter of the fiber.
+        For this reason, these images are more a qualitative way to visualize the results of the
+        observations and not a scientific product.
+
+        Args:
+            wavelength_ranges (list):
+                Wavelength ranges to extract from the simulated data. Each wavelength range should
+                be provided as a list, e.g. [[wave1_0, wave1_1], [wave2_0, wave2_1]]. If only one
+                range should be extracted, it can be provided as a single list (i.e. [wave0, wave1])
+            unit_range (astropy.unit, optional):
+                wavelength units used to define the wavelength ranges. All ranges should be
+                defined using the same units. Defaults to u.AA.
+        """
 
         log.info('Saving the 2D output maps')
-        for branch in self.spectrograph.branches:
-            ids, target, total, _, _, _ = self._reorganize_to_rss(branch, self.output_calib)
-            target_out = np.zeros((self.source.npixels, self.source.npixels))
-            total_out = np.zeros((self.source.npixels, self.source.npixels))
-            wcs = self.source.wcs
-            head = wcs.to_header()
 
-            head['MIN_WAVE'] = wavelength_range[0]
-            head['MAX_WAVE'] = wavelength_range[1]
+        if isinstance(wavelength_ranges[0], (float, int)):
+            wavelength_ranges = [wavelength_ranges]
 
-            # I'm not interpolating to the exact wavelength
+        for wavelength_range in wavelength_ranges:
+            for branch in self.spectrograph.branches:
+                if branch.wavecoord.start < wavelength_range[0] * unit_range \
+                    and branch.wavecoord.end > wavelength_range[1] * unit_range:
 
-            mask1 = branch.wavecoord.wave > wavelength_range[0] * unit_range
-            mask2 = branch.wavecoord.wave < wavelength_range[1] * unit_range
-            mask = np.all([mask1, mask2], axis=0)
+                    ids, target, total, _, _, _ = self._reorganize_to_rss(branch, self.output_calib)
+                    target_out = np.zeros((self.source.npixels, self.source.npixels))
+                    total_out = np.zeros((self.source.npixels, self.source.npixels))
+                    wcs = self.source.wcs
+                    head = wcs.to_header()
 
-            target_val = np.nansum(target[:, mask], axis=1)
-            total_val = np.nansum(total[:, mask], axis=1)
+                    head['MIN_WAVE'] = wavelength_range[0]
+                    head['MAX_WAVE'] = wavelength_range[1]
 
-            # Just the target
-            target_out = self._populate_map(target_out, target_val, ids, wcs)
+                    # I'm not interpolating to the exact wavelength
 
-            filename = os.path.join(self.outdir,
-                                    f"{self.source.name}_{branch.name}_{self.bundle.bundle_name}_target_map.fits")
-            hdu = fits.PrimaryHDU(data=target_out, header=head)
+                    mask1 = branch.wavecoord.wave > wavelength_range[0] * unit_range
+                    mask2 = branch.wavecoord.wave < wavelength_range[1] * unit_range
+                    mask = np.all([mask1, mask2], axis=0)
 
-            hdu.writeto(filename, overwrite=True)
-            log.info(f' Saving {filename}...')
+                    target_val = np.nansum(target[:, mask], axis=1)
+                    total_val = np.nansum(total[:, mask], axis=1)
 
-            # full spectrum
-            total_out = self._populate_map(total_out, total_val, ids, wcs)
+                    # Just the target
+                    target_out = self._populate_map(target_out, target_val, ids, wcs)
 
-            filename = os.path.join(self.outdir,
-                                    f"{self.source.name}_{branch.name}_{self.bundle.bundle_name}_total_map.fits")
-            hdu = fits.PrimaryHDU(data=total_out, header=head)
+                    filename = os.path.join(self.outdir,
+                        f"{self.source.name}_{branch.name}_{self.bundle.bundle_name}"\
+                        +f"_{wavelength_range[0]}_{wavelength_range[1]}_target_map.fits")
 
-            hdu.writeto(filename, overwrite=True)
-            log.info(f' Saving {filename}...')
+                    hdu = fits.PrimaryHDU(data=target_out, header=head)
+
+                    hdu.writeto(filename, overwrite=True)
+                    log.info(f' Saving {filename}...')
+
+                    # full spectrum
+                    total_out = self._populate_map(total_out, total_val, ids, wcs)
+
+                    filename = os.path.join(self.outdir,
+                                            f"{self.source.name}_{branch.name}_{self.bundle.bundle_name}_total_map.fits")
+                    hdu = fits.PrimaryHDU(data=total_out, header=head)
+
+                    hdu.writeto(filename, overwrite=True)
+                    log.info(f' Saving {filename}...')
+
+                else:
+                    log.warning(f'Selected range out of {branch.name} range.')
 
         self._print_fibers_to_ds9_regions()
 
