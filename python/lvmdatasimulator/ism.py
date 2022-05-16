@@ -29,7 +29,8 @@ from lvmdatasimulator import log
 import progressbar
 from joblib import Parallel, delayed
 from astropy.convolution import convolve_fft, kernels
-from lvmdatasimulator.utils import calc_circular_mask, convolve_array, set_default_dict_values, ism_extinction, check_overlap
+from lvmdatasimulator.utils import calc_circular_mask, convolve_array, set_default_dict_values, \
+    ism_extinction, check_overlap, assign_units
 fluxunit = u.erg / (u.cm ** 2 * u.s * u.arcsec ** 2)
 velunit = u.km / u.s
 
@@ -141,8 +142,10 @@ class Nebula:
     yc: int = None  # Center of the region in the field of view, pix
     x0: int = 0  # Coordinates of the bottom-left corner in the field of view, pix
     y0: int = 0  # Coordinates of the bottom-left corner in the field of view, pix
-    width: int = 101  # full width of cartesian grid, pix (should be odd)
-    height: int = 101  # full height of cartesian grid, pix (should be odd)
+    pix_width: int = None  # full width of cartesian grid, pix (should be odd)
+    pix_height: int = None  # full height of cartesian grid, pix (should be odd)
+    width: u.pc = 0 * u.pc  # width of the nebula in pc (not used if pix_width is set up)
+    height: u.pc = 0 * u.pc  # height of the nebula in pc (not used if pix_height is set up)
     pxscale: u.pc = 0.01 * u.pc  # pixel size in pc
     spectrum_id: int = None  # ID of a template Cloudy emission spectrum for this nebula
     sys_velocity: velunit = 0 * velunit  # Systemic velocity
@@ -152,25 +155,63 @@ class Nebula:
     perturb_scale: int = 0 * u.pc  # Spatial scale of correlated perturbations
     perturb_amplitude: float = 0.1  # Maximal amplitude of perturbations
     _npix_los: int = 1  # full size along line of sight in pixels
-    nchunks: int = -1 # number of chuncks to use for the convolution. If negative, select automatically
+    nchunks: int = -1  # number of chuncks to use for the convolution. If negative, select automatically
 
     def __post_init__(self):
-        if (self.xc is not None) and (self.yc is not None):
-            self.x0 = self.xc - np.round((self.width - 1) / 2).astype(int)
-            self.y0 = self.yc - np.round((self.height - 1) / 2).astype(int)
-        elif (self.x0 is not None) and (self.y0 is not None):
-            self.xc = self.x0 + np.round((self.width - 1) / 2).astype(int)
-            self.yc = self.y0 + np.round((self.height - 1) / 2).astype(int)
+        self._assign_all_units()
+        self._assign_position_params()
         self._ref_line_id = 0
         self.linerat_constant = True  # True if the ratio of line fluxes shouldn't change across the nebula
 
+    def _assign_all_units(self):
+        whole_list_properties = ['pxscale', 'sys_velocity', 'turbulent_sigma', 'max_brightness', 'max_extinction',
+                                 'perturb_scale', 'radius', 'PA', 'length', 'width', 'vel_gradient', 'r_eff',
+                                 'vel_rot', 'expansion_velocity', 'spectral_axis']
+        whole_list_units = [u.pc, velunit, velunit, fluxunit, u.mag, u.pc, u.pc, u.degree, u.pc, u.pc,
+                            (velunit / u.pc), u.kpc, velunit, velunit, velunit]
+        cur_list_properties = []
+        cur_list_units = []
+        for prp, unit in zip(whole_list_properties, whole_list_units):
+            if hasattr(self, prp):
+                cur_list_properties.append(prp)
+                cur_list_units.append(unit)
+        assign_units(self, cur_list_properties, cur_list_units)
+
+    def _assign_position_params(self, conversion_type='rect'):
+        if conversion_type == 'rect':
+            for v in ['height', 'width']:
+                if self.__getattribute__(f'pix_{v}') is None:
+                    val = np.round((self.__getattribute__(v) / self.pxscale).value / 2.).astype(int) * 2 + 1
+                else:
+                    val = np.round(self.__getattribute__(f'pix_{v}') / 2.).astype(int) * 2 + 1
+                setattr(self, f'pix_{v}', val)
+        elif conversion_type == 'ellipse':
+            self.pix_width = (np.round(np.abs(self.radius / self.pxscale * np.sin(self.PA)) +
+                              np.abs(self.radius / self.pxscale *
+                                     self.ax_ratio * np.cos(self.PA))).astype(int) * 2 + 1).value
+            self.pix_height = (np.round(np.abs(self.radius / self.pxscale * np.cos(self.PA)) +
+                               np.abs(self.radius / self.pxscale *
+                                      self.ax_ratio * np.sin(self.PA))).astype(int) * 2 + 1).value
+        elif conversion_type == 'galaxy':
+            self.pix_width = (np.round(np.abs(self.r_max * np.sin(self.PA)) +
+                                       np.abs(self.r_max * self.ax_ratio * np.cos(self.PA))).astype(int) * 2 + 1).value
+            self.pix_height = (np.round(np.abs(self.r_max * np.cos(self.PA)) +
+                                        np.abs(self.r_max * self.ax_ratio * np.sin(self.PA))).astype(int) * 2 + 1).value
+
+        if (self.xc is not None) and (self.yc is not None):
+            self.x0 = self.xc - np.round((self.pix_width - 1) / 2).astype(int)
+            self.y0 = self.yc - np.round((self.pix_height - 1) / 2).astype(int)
+        elif (self.x0 is not None) and (self.y0 is not None):
+            self.xc = self.x0 + np.round((self.pix_width - 1) / 2).astype(int)
+            self.yc = self.y0 + np.round((self.pix_height - 1) / 2).astype(int)
+
     @cached_property
     def _cartesian_x_grid(self):
-        return np.arange(self.width) * self.pxscale
+        return np.arange(self.pix_width) * self.pxscale
 
     @cached_property
     def _cartesian_y_grid(self):
-        return np.arange(self.height) * self.pxscale
+        return np.arange(self.pix_height) * self.pxscale
 
     @cached_property
     def _cartesian_z_grid(self):
@@ -185,11 +226,12 @@ class Nebula:
         """
         Method to obtain the brightness (or density) distribution of the nebula in cartesian coordinates
         """
-        brt = np.ones(shape=(self.height, self.width, self._npix_los), dtype=float) / self._npix_los
+        brt = np.ones(shape=(self.pix_height, self.pix_width, self._npix_los), dtype=float) / self._npix_los
         if (self.perturb_scale > 0) and (self.perturb_amplitude > 0):
             pertscale = (self.perturb_scale / self.pxscale).value
-            perturb = np.random.uniform(-1, 1, (self.height, self.width)) * self.perturb_amplitude / self._npix_los
-            xx, yy = np.meshgrid(np.arange(self.width), np.arange(self.height))
+            perturb = np.random.uniform(-1, 1, (self.pix_height, self.pix_width)
+                                        ) * self.perturb_amplitude / self._npix_los
+            xx, yy = np.meshgrid(np.arange(self.pix_width), np.arange(self.pix_height))
             f = np.exp(-2 * (xx ** 2 + yy ** 2) / pertscale)
             perturb = 4 / np.sqrt(np.pi) / pertscale * np.fft.ifft2(np.fft.fft2(perturb) * np.fft.fft2(f)).real
             brt += (perturb[:, :, None] - np.median(perturb))
@@ -273,14 +315,8 @@ class Rectangle(Nebula):
     turbulent_sigma: velunit = 0 * velunit  # Velocity dispersion due to turbulence; included in calculations of LSF
 
     def __post_init__(self):
-        self.width = np.round(self.width.to(u.pc) / self.pxscale / 2.).value.astype(int) * 2 + 1
-        self.height = np.round(self.height.to(u.pc) / self.pxscale / 2.).value.astype(int) * 2 + 1
-        if (self.xc is not None) and (self.yc is not None):
-            self.x0 = self.xc - np.round((self.width - 1) / 2).astype(int)
-            self.y0 = self.yc - np.round((self.height - 1) / 2).astype(int)
-        elif (self.x0 is not None) and (self.y0 is not None):
-            self.xc = self.x0 + np.round((self.width - 1) / 2).astype(int)
-            self.yc = self.y0 + np.round((self.height - 1) / 2).astype(int)
+        self._assign_all_units()
+        self._assign_position_params()
         self._ref_line_id = 0
         self.linerat_constant = True  # True if the ratio of line fluxes shouldn't change across the nebula
 
@@ -298,19 +334,9 @@ class Ellipse(Nebula):
     ax_ratio: float = 1.  # ratio of minor/major axes
 
     def __post_init__(self):
-        self.width = (np.round(np.abs(self.radius.to(u.pc) / self.pxscale * np.sin(self.PA)) +
-                               np.abs(self.radius.to(u.pc) / self.pxscale *
-                                      self.ax_ratio * np.cos(self.PA))).astype(int) * 2 + 1).value
-        self.height = (np.round(np.abs(self.radius.to(u.pc) / self.pxscale * np.cos(self.PA)) +
-                                np.abs(self.radius.to(u.pc) / self.pxscale *
-                                       self.ax_ratio * np.sin(self.PA))).astype(int) * 2 + 1).value
+        self._assign_all_units()
         self._npix_los = 1
-        if (self.xc is not None) and (self.yc is not None):
-            self.x0 = (self.xc - np.round((self.width - 1) / 2)).astype(int)
-            self.y0 = (self.yc - np.round((self.height - 1) / 2)).astype(int)
-        elif (self.x0 is not None) and (self.y0 is not None):
-            self.xc = (self.x0 + np.round((self.width - 1) / 2)).astype(int)
-            self.yc = (self.y0 + np.round((self.height - 1) / 2)).astype(int)
+        self._assign_position_params(conversion_type='ellipse')
         self._ref_line_id = 0
         self.linerat_constant = True  # True if the ratio of line fluxes shouldn't change across the nebula
 
@@ -319,18 +345,18 @@ class Ellipse(Nebula):
         """
         Method to obtain the brightness (or density) distribution of the nebula in cartesian coordinates
         """
-        xx, yy = np.meshgrid(np.arange(self.width), np.arange(self.height))
-        brt = np.ones(shape=(self.height, self.width), dtype=np.float32)
+        xx, yy = np.meshgrid(np.arange(self.pix_width), np.arange(self.pix_height))
+        brt = np.ones(shape=(self.pix_height, self.pix_width), dtype=np.float32)
         angle = (self.PA + 90 * u.degree).to(u.radian).value
-        xct = (xx - (self.width - 1) / 2) * np.cos(angle) + \
-              (yy - (self.height - 1) / 2) * np.sin(angle)
-        yct = (xx - (self.width - 1) / 2) * np.sin(angle) - \
-              (yy - (self.height - 1) / 2) * np.cos(angle)
+        xct = (xx - (self.pix_width - 1) / 2) * np.cos(angle) + \
+              (yy - (self.pix_height - 1) / 2) * np.sin(angle)
+        yct = (xx - (self.pix_width - 1) / 2) * np.sin(angle) - \
+              (yy - (self.pix_height - 1) / 2) * np.cos(angle)
         rmaj = (self.radius.to(u.pc) / self.pxscale.to(u.pc)).value
         rmin = (self.radius.to(u.pc) / self.pxscale.to(u.pc)).value * self.ax_ratio
         rec = (xct ** 2 / rmaj ** 2) + (yct ** 2 / rmin ** 2) >= 1
         brt[rec] = 0
-        brt = brt.reshape((self.height, self.width, 1))
+        brt = brt.reshape((self.pix_height, self.pix_width, 1))
         return brt
 
 
@@ -340,16 +366,10 @@ class Circle(Ellipse):
     Class defining a simple circular component.
     """
     def __post_init__(self):
+        self._assign_all_units()
         self.ax_ratio = 1.
-        self.width = int(np.round(self.radius.to(u.pc) / self.pxscale * 2).value) + 1
-        self.height = int(np.round(self.radius.to(u.pc) / self.pxscale * 2).value) + 1
         self._npix_los = 1
-        if (self.xc is not None) and (self.yc is not None):
-            self.x0 = (self.xc - np.round((self.width - 1) / 2)).astype(int)
-            self.y0 = (self.yc - np.round((self.height - 1) / 2)).astype(int)
-        elif (self.x0 is not None) and (self.y0 is not None):
-            self.xc = (self.x0 + np.round((self.width - 1) / 2)).astype(int)
-            self.yc = (self.y0 + np.round((self.height - 1) / 2)).astype(int)
+        self._assign_position_params(conversion_type='ellipse')
         self._ref_line_id = 0
         self.linerat_constant = True  # True if the ratio of line fluxes shouldn't change across the nebula
 
@@ -358,10 +378,10 @@ class Circle(Ellipse):
 class Filament(Nebula):
     """
     Class of an isotropic cylindrical shape filament.
-    Defined by its position, lenght, PA, radius, maximal optical depth
+    Defined by its position, length, PA, radius, maximal optical depth
     if it is emission-type filament, then maximal brightness
     """
-    PA: u.degree = -40 * u.degree  # position angle of the filament
+    PA: u.degree = 90 * u.degree  # position angle of the filament
     length: u.pc = 10 * u.pc  # full length of the filament
     width: u.pc = 0.1 * u.pc  # full width (diameter) of the filament
     vel_gradient: (velunit / u.pc) = 0  # velocity gradient along the filament (to be added)
@@ -371,6 +391,7 @@ class Filament(Nebula):
     _npix_los: int = 101
 
     def __post_init__(self):
+        self._assign_all_units()
         if self._rad_bins == 0:
             self._rad_bins = np.ceil(self.width.to(u.pc).value / self.pxscale.to(u.pc).value * 5).astype(int)
         if (self.xc is not None) and (self.yc is not None):
@@ -472,18 +493,10 @@ class Galaxy(Nebula):
     vel_rot: velunit = 0 * velunit  # Rotational velocity (not implemented yet)
 
     def __post_init__(self):
+        self._assign_all_units()
         self._npix_los = 1
         self.r_max = self.r_eff.to(u.pc).value / self.pxscale.to(u.pc).value * self.rad_lim
-        self.width = (np.round(np.abs(self.r_max * np.sin(self.PA)) +
-                               np.abs(self.r_max * self.ax_ratio * np.cos(self.PA))).astype(int) * 2 + 1).value
-        self.height = (np.round(np.abs(self.r_max * np.cos(self.PA)) +
-                                np.abs(self.r_max * self.ax_ratio * np.sin(self.PA))).astype(int) * 2 + 1).value
-        if (self.xc is not None) and (self.yc is not None):
-            self.x0 = (self.xc - np.round((self.width - 1) / 2)).astype(int)
-            self.y0 = (self.yc - np.round((self.height - 1) / 2)).astype(int)
-        elif (self.x0 is not None) and (self.y0 is not None):
-            self.xc = (self.x0 + np.round((self.width - 1) / 2)).astype(int)
-            self.yc = (self.y0 + np.round((self.height - 1) / 2)).astype(int)
+        self._assign_position_params(conversion_type='galaxy')
         self._ref_line_id = 0
         self.linerat_constant = True  # True if the ratio of line fluxes shouldn't change across the nebula
 
@@ -492,17 +505,17 @@ class Galaxy(Nebula):
         """
         Method to obtain the brightness (or density) distribution of the nebula in cartesian coordinates
         """
-        xx, yy = np.meshgrid(np.arange(self.width), np.arange(self.height))
+        xx, yy = np.meshgrid(np.arange(self.pix_width), np.arange(self.pix_height))
         angle = (self.PA + 90 * u.degree).to(u.radian).value
         mod = Sersic2D(amplitude=1, r_eff=(self.r_eff.to(u.pc) / self.pxscale.to(u.pc)).value,
-                       n=self.n, x_0=(self.width - 1) / 2, y_0=(self.height - 1) / 2,
+                       n=self.n, x_0=(self.pix_width - 1) / 2, y_0=(self.pix_height - 1) / 2,
                        ellip=1 - self.ax_ratio, theta=angle)
         brt = mod(xx, yy)
 
-        xct = (xx - (self.width - 1) / 2) * np.cos(angle) + \
-              (yy - (self.height - 1) / 2) * np.sin(angle)
-        yct = (xx - (self.width - 1) / 2) * np.sin(angle) - \
-              (yy - (self.height - 1) / 2) * np.cos(angle)
+        xct = (xx - (self.pix_width - 1) / 2) * np.cos(angle) + \
+              (yy - (self.pix_height - 1) / 2) * np.sin(angle)
+        yct = (xx - (self.pix_width - 1) / 2) * np.sin(angle) - \
+              (yy - (self.pix_height - 1) / 2) * np.cos(angle)
         rmaj = self.rad_lim * (self.r_eff.to(u.pc) / self.pxscale.to(u.pc)).value
         rmin = self.rad_lim * (self.r_eff.to(u.pc) / self.pxscale.to(u.pc)).value * self.ax_ratio
         mask = np.ones_like(brt, dtype=np.float32)
@@ -510,7 +523,7 @@ class Galaxy(Nebula):
         mask[rec] = 0
         mask = convolve_fft(mask, kernels.Gaussian2DKernel(3.), fill_value=0, allow_huge=True)
         brt = brt * mask
-        brt = brt.reshape(self.height, self.width, 1)
+        brt = brt.reshape(self.pix_height, self.pix_width, 1)
         return brt
 
 
@@ -539,6 +552,7 @@ class Cloud(Nebula):
     _npix_los: int = 100
 
     def __post_init__(self):
+        self._assign_all_units()
         if self._rad_bins == 0:
             self._rad_bins = np.ceil(self.radius.to(u.pc).value / self.pxscale.to(u.pc).value * 3).astype(int)
         delta = np.round((len(self._cartesian_y_grid) - 1) / 2).astype(int)
@@ -727,8 +741,8 @@ class ISM:
     Class defining the ISM contribution to the field of view
     """
     wcs: WCS
-    width: int = 400  # Width of field of view in pixels
-    height: int = 400  # Width of field of view in pixels
+    width: int = 401  # Width of field of view in pixels
+    height: int = 401  # Width of field of view in pixels
     spec_resolution: u.Angstrom = 0.06 * u.Angstrom  # Spectral resolution of the simulation
     npix_line: int = 1  # Minimal number of pixels for a resolution element at wl = 10000A for construction of vel.grid
     distance: u.kpc = 50 * u.kpc  # Distance to the object for further conversion between arcsec and pc
@@ -743,6 +757,8 @@ class ISM:
     # vel_contrib_eps: float = 1e-3
 
     def __post_init__(self):
+        assign_units(self, ['vel_amplitude', 'turbulent_sigma', 'sys_velocity', 'distance', 'spec_resolution'],
+                     [velunit, velunit, velunit, u.kpc, u.Angstrom])
         self.content = fits.HDUList()
         self.content.append(fits.PrimaryHDU(header=self.wcs.to_header(), data=np.zeros(shape=(2, 2), dtype=int)))
         self.vel_grid = np.linspace(-self.vel_amplitude + self.sys_velocity,
@@ -786,8 +802,8 @@ class ISM:
             continuum = p(wl_grid)
         elif cont_type.lower() == 'bb':
             cont_wl_fullrange = np.linspace(3500, 10000, 501)
-            cont_fullrange = 1 / cont_wl_fullrange ** 5 / \
-                             (np.exp(6.63e-27 * 3e10 / cont_wl_fullrange / 1e-8 / continuum / 1.38e-16) - 1)
+            cont_fullrange = 1 / cont_wl_fullrange ** 5 / (
+                    np.exp(6.63e-27 * 3e10 / cont_wl_fullrange / 1e-8 / continuum / 1.38e-16) - 1)
             continuum = 1 / wl_grid ** 5 / (np.exp(6.63e-27 * 3e10 / wl_grid / 1e-8 / continuum / 1.38e-16) - 1)
 
         t_filter = None
@@ -829,8 +845,33 @@ class ISM:
             self.content[-1].header['Radius'] = (obj_to_add.radius.to_value(u.pc), "Radius of the nebula, pc")
             self.content[-1].header['PertOrd'] = (obj_to_add.perturb_degree, "Degree to produce random perturbations")
             self.content[-1].header['PertAmp'] = (obj_to_add.perturb_amplitude, "Max amplitude of random perturb.")
+        if type(obj_to_add) in [DIG, Nebula, Rectangle, Ellipse, Circle]:
+            self.content[-1].header['PertScl'] = (obj_to_add.perturb_scale.to_value(u.pc),
+                                                  "Scale of the random perturbations, pc")
+            self.content[-1].header['PertAmp'] = (obj_to_add.perturb_amplitude, "Max amplitude of random perturb.")
         if type(obj_to_add) in [Filament]:
             self.content[-1].header['Width'] = (obj_to_add.width.to_value(u.pc), 'Width of the filament, pc')
+            self.content[-1].header['Length'] = (obj_to_add.length.to_value(u.pc), 'Length of the filament, pc')
+
+        # if type(obj_to_add) in [Filament]:#, Nebula, Ellipse, Circle, DIG, Rectangle]:
+            if obj_to_add.vel_gradient is not None:
+                self.content[-1].header['Vgrad'] = (obj_to_add.vel_gradient.to_value(velunit / u.pc),
+                                                    'Velocity gradient, km/s per pc')
+        if type(obj_to_add) in [Nebula, Rectangle]:
+            self.content[-1].header['Width'] = (obj_to_add.width.to_value(u.pc), 'Width of the nebula, pc')
+            self.content[-1].header['Height'] = (obj_to_add.height.to_value(u.pc), 'Height of the nebula, pc')
+        if type(obj_to_add) in [Ellipse, Filament, Galaxy]:
+            self.content[-1].header['PA'] = (obj_to_add.PA.to_value(u.degree), 'Position angle, degree')
+        if type(obj_to_add) in [Galaxy]:
+            self.content[-1].header['Reff'] = (obj_to_add.r_eff.to_value(u.kpc), 'Effective radius of the galaxy, kpc')
+            self.content[-1].header['NSersic'] = (obj_to_add.n, 'Sersic index')
+            self.content[-1].header['Rlim'] = (obj_to_add.r_lim, 'Limiting distance in Reff')
+            self.content[-1].header['Vrot'] = (obj_to_add.vel_rot.to_value(velunit),
+                                               'Rotational velocity at Reff, km/s')
+        if type(obj_to_add) in [Ellipse, Circle]:
+            self.content[-1].header['Radius'] = (obj_to_add.radus.to_value(u.kpc), 'Radius (major axis), pc')
+        if type(obj_to_add) in [Ellipse, Galaxy]:
+            self.content[-1].header['AxRat'] = (obj_to_add.ax_ratio, "Axis ratio")
         if (obj_to_add.max_brightness <= 0) and (obj_to_add.max_extinction > 0):
             self.content[-1].header['MaxExt'] = (obj_to_add.max_extinction.value, "Max extinction, mag/pix")
         elif obj_to_add.max_brightness > 0:
@@ -920,7 +961,7 @@ class ISM:
                                 RA: "08h12m13s",
                                 DEC: "-20d14m13s",
                                 'perturb_degree': 8, # max. order of spherical harmonics to generate inhomogeneities
-                                'p  erturb_amplitude': 0.1, # relative max. amplitude of inhomogeneities,
+                                'perturb_amplitude': 0.1, # relative max. amplitude of inhomogeneities,
                                 'perturb_scale': 200 * u.pc,  # spatial scale to generate inhomogeneities (DIG only)
                                 'distance': 50 * u.kpc,  # distance to the nebula (default is from ISM)
                                 'cloudy_id': None,  # id of pre-generated Cloudy model
@@ -943,7 +984,8 @@ class ISM:
             return None
         all_objects = [cobj for cobj in all_objects if cobj.get('type') in ['Nebula', 'Bubble', 'Galaxy',
                                                                             'Filament', 'DIG', 'Cloud',
-                                                                            'Rectangle', 'Circle', 'Ellipse']]
+                                                                            'Rectangle', 'Circle', 'Ellipse',
+                                                                            'CustomNeb']]
         n_objects = len(all_objects)
         log.info("Start generating {} nebulae".format(n_objects))
         bar = progressbar.ProgressBar(max_value=n_objects).start()
@@ -952,15 +994,19 @@ class ISM:
         for ind_obj, cur_obj in enumerate(all_objects):
             bar.update(ind_obj)
             # Setup default parameters for missing keywords
-            for k, v in zip(['max_brightness', 'max_extinction', 'thickness',
-                             'expansion_velocity', 'sys_velocity',
-                             'turbulent_sigma', 'perturb_degree',
-                             'perturb_amplitude', 'perturb_scale', 'radius', 'distance',
-                             'continuum_type', 'continuum_data', 'continuum_flux', 'continuum_mag', 'continuum_wl',
-                             'ext_law', 'ext_rv'],
-                            [0, 0, 1., 0, self.sys_velocity, self.turbulent_sigma, 0, 0.1, 0, 0, self.distance,
-                             None, None, 0, None, 5500., self.ext_law, self.R_V]):
-                set_default_dict_values(cur_obj, k, v)
+            for k, v, unit in zip(['max_brightness', 'max_extinction', 'thickness',
+                                   'expansion_velocity', 'sys_velocity',
+                                   'turbulent_sigma', 'perturb_degree',
+                                   'perturb_amplitude', 'perturb_scale', 'radius', 'distance',
+                                   'continuum_type', 'continuum_data', 'continuum_flux', 'continuum_mag',
+                                   'continuum_wl', 'ext_law', 'ext_rv', 'vel_gradient', 'vel_rot'],
+                                  [0, 0, 1., 0, self.sys_velocity, self.turbulent_sigma, 0, 0.1, 0, 0, self.distance,
+                                   None, None, 0, None, 5500., self.ext_law, self.R_V, 0, 0],
+                                  [fluxunit, u.mag, None, velunit, velunit, velunit, None, None,
+                                   u.pc, u.pc, u.kpc, None, None, fluxunit, None, u.Angstrom,
+                                   None, None, velunit / u.pc, velunit]):
+                set_default_dict_values(cur_obj, k, v, unit=unit)
+
             for k in ['max_brightness', 'max_extinction', 'radius', 'continuum_flux']:
                 if cur_obj[k] < 0:
                     cur_obj[k] = 0
@@ -999,7 +1045,7 @@ class ISM:
                     cur_obj['linerat_constant'] = True
 
             if cur_obj['type'] == 'DIG':
-                if not cur_obj.get('max_brightness'):
+                if cur_obj.get('max_brightness') is None or cur_obj.get('max_brightness') <= 0:
                     log.warning("Wrong set of parameters for the nebula #{0}: skip this one".format(ind_obj))
                     continue
                 if not cur_obj.get('zorder'):
@@ -1014,7 +1060,7 @@ class ISM:
                                        pxscale=self.pxscale * (cur_obj['distance'].to(u.pc) / self.distance.to(u.pc)),
                                        perturb_scale=cur_obj['perturb_scale'],
                                        perturb_amplitude=cur_obj['perturb_amplitude'],
-                                       width=self.width, height=self.height,
+                                       pix_width=self.width, pix_height=self.height,
                                        )
             else:
                 # ==== Check input parameters and do necessary conversions
@@ -1119,7 +1165,7 @@ class ISM:
                                                 width=cur_obj['width'],
                                                 length=cur_obj['length'],
                                                 PA=cur_obj['PA'],
-                                                vel_gradient=0,
+                                                vel_gradient=cur_obj.get('vel_gradient'),
                                                 spectrum_id=cloudy_model_index,
                                                 turbulent_sigma=cur_obj['turbulent_sigma'],
                                                 sys_velocity=cur_obj['sys_velocity'],
@@ -1136,7 +1182,7 @@ class ISM:
                                               ax_ratio=cur_obj['ax_ratio'],
                                               PA=cur_obj['PA'],
                                               n=cur_obj['n'],
-                                              vel_rot=0,
+                                              vel_rot=cur_obj.get('vel_rot'),
                                               spectrum_id=cloudy_model_index,
                                               turbulent_sigma=cur_obj['turbulent_sigma'],
                                               sys_velocity=cur_obj['sys_velocity'],
@@ -1173,14 +1219,14 @@ class ISM:
                                               )
                 elif cur_obj['type'] == "Rectangle" or (cur_obj['type'] == "Nebula"):
                     generated_object = Rectangle(xc=x, yc=y,
-                                                 width=cur_obj.get('width'), height=cur_obj.get('width'),
+                                                 width=cur_obj.get('width'), height=cur_obj.get('height'),
                                                  max_brightness=cur_obj.get('max_brightness'),
                                                  max_extinction=cur_obj.get('max_extinction'),
                                                  spectrum_id=cloudy_model_index,
                                                  turbulent_sigma=cur_obj['turbulent_sigma'],
                                                  sys_velocity=cur_obj['sys_velocity'],
                                                  pxscale=self.pxscale * (cur_obj['distance'].to(u.pc) /
-                                                                      self.distance.to(u.pc)),
+                                                                         self.distance.to(u.pc)),
                                                  perturb_scale=cur_obj['perturb_scale'],
                                                  perturb_amplitude=cur_obj['perturb_amplitude'],
                                               )
@@ -1194,7 +1240,9 @@ class ISM:
                     lr = "Variable"
                 add_fits_kw = {"Model_ID": cloudy_model_id, "LineRat": lr}
             else:
-                add_fits_kw = None
+                add_fits_kw = {}
+
+            add_fits_kw["Distance"] = (cur_obj['distance'].to_value(u.kpc), "Distance to the nebula, kpc")
 
             continuum = None
             if cur_obj['continuum_type'] is not None and cur_obj['continuum_data'] is not None \
@@ -1534,6 +1582,9 @@ class ISM:
             else:
                 npad = None
 
+            selected_y = fibers_coords[selected_apertures, 1] - ystart_neb - y0 + dy0
+            selected_x = fibers_coords[selected_apertures, 0] - xstart_neb - x0 + dx0
+
             if self.content[cur_ext].header.get("DARK"):
                 extinction_map = self.content[cur_ext].data[cur_mask_in_neb].reshape((1, yfin_neb - ystart_neb + 1,
                                                                                       xfin_neb - xstart_neb + 1))
@@ -1548,10 +1599,16 @@ class ISM:
                     cur_r_v = self.content[cur_ext].header.get('EXT_RV')
                 else:
                     cur_r_v = self.R_V
-                data_in_apertures = convolve_fft(extinction_map, kern,
-                                                 allow_huge=True, normalize_kernel=True)[
-                                    :, aperture_centers[selected_apertures, 1] - ystart_neb - y0 + dy0,
-                                    aperture_centers[selected_apertures, 0] - xstart_neb - x0 + dx0]
+
+                data_in_apertures = convolve_array(extinction_map,
+                                                   kern, selected_x, selected_y, pix_size,
+                                                   nchunks=self.content[cur_ext].header.get("NCHUNKS"),
+                                                   normalize_kernel=True)
+
+                # data_in_apertures = convolve_fft(extinction_map, kern,
+                #                                  allow_huge=True, normalize_kernel=True)[
+                #                     :, aperture_centers[selected_apertures, 1] - ystart_neb - y0 + dy0,
+                #                     aperture_centers[selected_apertures, 0] - xstart_neb - x0 + dx0]
                 data_in_apertures = data_in_apertures.reshape((data_in_apertures.shape[0] * data_in_apertures.shape[1],
                                                                1))
                 spectrum[selected_apertures, :] = \
@@ -1607,11 +1664,11 @@ class ISM:
                     all_fluxes = np.pad(all_fluxes, pad_width=npad, mode='constant', constant_values=0)
 
                 if all_fluxes.shape[0] == 1:
-                    selected_y = aperture_centers[selected_apertures, 1] - ystart_neb - y0
-                    selected_x = aperture_centers[selected_apertures, 0] - xstart_neb - x0
+                    # selected_y = fibers_coords[selected_apertures, 1] - ystart_neb - y0 + dy0
+                    # selected_x = fibers_coords[selected_apertures, 0] - xstart_neb - x0 + dx0
                     data_in_apertures = convolve_array(lsf * all_fluxes[0][None, :, :],
-                        kern, selected_x, selected_y, pix_size,
-                        nchunks=self.content[cur_ext].header.get("NCHUNKS"))
+                                                       kern, selected_x, selected_y, pix_size,
+                                                       nchunks=self.content[cur_ext].header.get("NCHUNKS"))
                     data_in_apertures = data_in_apertures.reshape((1, data_in_apertures.shape[0],
                                                                   data_in_apertures.shape[1]))
                     hdu = fits.PrimaryHDU(data=data_in_apertures)
@@ -1619,16 +1676,16 @@ class ISM:
 
                 else:
 
-                    selected_y = aperture_centers[selected_apertures, 1] - ystart_neb - y0
-                    selected_x = aperture_centers[selected_apertures, 0] - xstart_neb - x0
+                    # selected_y = fibers_coords[selected_apertures, 1] - ystart_neb - y0 + dy0
+                    # selected_x = fibers_coords[selected_apertures, 0] - xstart_neb - x0 + dx0
                     # data_in_apertures = Parallel(n_jobs=lvmdatasimulator.n_process)(
                     #     delayed(convolve_array)(lsf * line_data[None, :, :], kern,
                     #                            selected_y, selected_x, pix_size)
                     #     for line_data in all_fluxes)
                     data_in_apertures = [convolve_array(lsf * line_data[None, :, :], kern,
-                        selected_y, selected_x, pix_size,
-                        nchunks=self.content[cur_ext].header.get("NCHUNKS"))
-                        for line_data in all_fluxes]
+                                                        selected_y, selected_x, pix_size,
+                                                        nchunks=self.content[cur_ext].header.get("NCHUNKS"))
+                                         for line_data in all_fluxes]
                     data_in_apertures = np.array(data_in_apertures)
                     hdu = fits.PrimaryHDU(data=data_in_apertures)
                     hdu.writeto(f'./data_{neb_index}.fits', overwrite=True)
@@ -1680,10 +1737,15 @@ class ISM:
                     brt = brt.reshape((1, brt.shape[0], brt.shape[1]))
                 if npad is not None:
                     brt = np.pad(brt, pad_width=npad, mode='constant', constant_values=0)
-                data_in_apertures = convolve_fft(brt, kern,
-                                                 allow_huge=True, normalize_kernel=False)[
-                                    :, aperture_centers[selected_apertures, 1] - ystart_neb - y0 + dy0,
-                                    aperture_centers[selected_apertures, 0] - xstart_neb - x0 + dx0]
+                # selected_y = fibers_coords[selected_apertures, 1] - ystart_neb - y0 + dy0
+                # selected_x = fibers_coords[selected_apertures, 0] - xstart_neb - x0 + dx0
+                data_in_apertures = convolve_array(brt,
+                                                   kern, selected_x, selected_y, pix_size,
+                                                   nchunks=self.content[cur_ext].header.get("NCHUNKS"))
+                # data_in_apertures = convolve_fft(brt, kern,
+                #                                  allow_huge=True, normalize_kernel=False)[
+                #                     :, aperture_centers[selected_apertures, 1] - ystart_neb - y0 + dy0,
+                #                     aperture_centers[selected_apertures, 0] - xstart_neb - x0 + dx0]
                 data_in_apertures = data_in_apertures.reshape((data_in_apertures.shape[0] * data_in_apertures.shape[1],
                                                                1))
                 spectrum[selected_apertures, :] += continuum[None, :] * data_in_apertures

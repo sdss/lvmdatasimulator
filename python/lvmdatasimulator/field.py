@@ -21,6 +21,7 @@ from lvmdatasimulator.stars import StarsList
 from lvmdatasimulator.ism import ISM
 import os
 from lvmdatasimulator import log
+from lvmdatasimulator.utils import assign_units
 from scipy.interpolate import interp1d
 
 
@@ -84,8 +85,13 @@ class LVMField:
         self.size = size * unit_size
         self.radius = self.size / 2  # to generate the star list
         self.spaxel = spaxel * unit_spaxel
+
+        assign_units(self, ['spaxel', 'radius', 'size', 'ra', 'dec'],
+                     [u.arcsec, u.arcmin, u.arcmin, u.degree, u.degree])
+
         self.npixels = np.round((self.size.to(u.arcsec) /
-                                 self.spaxel.to(u.arcsec)).value).astype(int)
+                                 self.spaxel.to(u.arcsec)).value/2.).astype(int) * 2 + 1
+        # made this odd for consistency with demands for some Nebulae (e.g. DIG)
 
         self.wcs = self._create_wcs()
         self.ism_params = {'distance': 50 * u.kpc, 'spec_resolution': 0.06 * u.Angstrom,
@@ -96,6 +102,7 @@ class LVMField:
         self.ism = self._create_ism(**self.ism_params)
         self.ism_map = None
         self.starlist = None
+
 
     def _create_wcs(self):
         """
@@ -131,6 +138,8 @@ class LVMField:
                 shift the spectra according to the radial velocity of the stars. Defaults to False.
             save (bool, optional):
                 If True save the list of stars to file. Defaults to True.
+            filename (str, optional):
+                If set, then read already fetched stars from the file
             directory (str, optional):
                 Directory containing the file. Defaults to WORK_DIR defined in config file
         """
@@ -159,8 +168,8 @@ class LVMField:
             save (bool, optional):
                 Save the starlist to file. Defaults to False.
             parameters (dictionary, optional):
-                Dictionary containig the parameters to pass to the StarsList.add_star() method.
-                Since more than one star can be generate simultaneously with this method, each
+                Dictionary containing the parameters to pass to the StarsList.add_star() method.
+                Since more than one star can be generated simultaneously with this method, each
                 type of parameter must be provided as lists. If no dictionary is provided, a
                 single star is created with standard parameters.
                 Defaults to {}.
@@ -270,10 +279,8 @@ class LVMField:
     def get_map(self, wavelength_ranges=None, unit_range=u.AA):
         """
         Create the input map of the field in the selected wavelength range
-
-        :param wavelength_ranges: exact wavelength or minimal and maximal wavelength (in angstom) for the map extraction
-        :param save_file: name of the fits-file where the generated map will be stored
-            (absolute path or relative to WORK_DIR or current directory)
+        :param wavelength_ranges: exact wavelength or minimal and maximal wavelength for the map extraction
+        :param unit_range: unit of the wavelength (default is angstrom)
         """
 
         # default value is Ha
@@ -281,7 +288,7 @@ class LVMField:
             wavelength_ranges = [6562.81]
 
         if isinstance(wavelength_ranges[0], (float, int)) and len(wavelength_ranges) == 1:
-            wavelength_ranges = [[wavelength_range[0] - 0.01, wavelength_range[0] + 0.01]]
+            wavelength_ranges = [[wavelength_ranges[0] - 0.01, wavelength_ranges[0] + 0.01]]
         elif isinstance(wavelength_ranges[0], (float, int)):
             wavelength_ranges = [wavelength_ranges]
 
@@ -301,7 +308,7 @@ class LVMField:
                     if (xy[0] >= self.npixels) or (xy[1] >= self.npixels) or (xy[0] < 0) or (xy[1] < 0):
                         continue
                     p = interp1d(self.starlist.wave.to(u.AA).value, self.starlist.spectra[star_id], bounds_error=False,
-                                fill_value='extrapolate')
+                                 fill_value='extrapolate')
                     # !!! APPLY EXTINCTION BY DARK NEBULAE TO STARS !!!
                     self.ism_map[xy[1], xy[0]] += np.sum(p(wl_grid) * (wl_grid[1] - wl_grid[0]))
 
@@ -312,10 +319,10 @@ class LVMField:
             cur_save_file = os.path.join(lvmdatasimulator.WORK_DIR, save_file)
             header = self.wcs.to_header()
             header['LAMRANGE'] = ("{0}-{1}".format(wavelength_range[0], wavelength_range[1]),
-                                "Wavelength range used for image extraction")
+                                  "Wavelength range used for image extraction")
             fits.writeto(cur_save_file, data=self.ism_map, header=header, overwrite=True)
             log.info("Input image in {0}-{1}AA wavelength range "
-                    "is saved to {2}".format(wavelength_range[0], wavelength_range[1], save_file))
+                     "is saved to {2}".format(wavelength_range[0], wavelength_range[1], save_file))
 
     def add_nebulae(self, list_of_nebulae=None, load_from_file=None, save_nebulae=None, overwrite=True):
         """
