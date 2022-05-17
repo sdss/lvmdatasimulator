@@ -12,6 +12,7 @@ import pickle
 
 import os
 
+
 def save_input_params(params):
     """
     Print the values used to run the simulator to file
@@ -119,7 +120,8 @@ def run_simulator(params):
         my_lvmfield.add_nebulae(load_from_file=params['nebulae_from_file'])
     else:
         if params['nebulae'] is None:
-            log.error('No nebulae defined, aborting the simulation')
+            raise ValueError('No nebulae defined, aborting the simulation')
+
 
         my_lvmfield.add_nebulae(params['nebulae'],
                                 save_nebulae=params.get('nebulae_name', 'LVM_field_nebulae'))
