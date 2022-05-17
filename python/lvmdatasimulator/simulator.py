@@ -379,7 +379,7 @@ class Simulator:
 
         return (fiber.id, realization_noise, calibrated)
 
-    def simulate_observations(self):
+    def simulate_observations(self, exptimes=None):
         """
         Runs the simulation, parallelizing it of the number of fibers to observe is large enough
         """
@@ -389,7 +389,15 @@ class Simulator:
         self.sky = self.extract_sky()
         self.target_spectra = self.extract_target_spectra()
 
-        for exptime in self.observation.exptimes:
+        if exptimes is None:
+            exptimes = self.observation.exptimes
+        else:
+            if not isinstance(exptimes, list):
+                exptimes = [exptimes]
+            log.warning('New exposure times have been provided. Overwriting the ones included in '
+                        + 'Observation')
+
+        for exptime in exptimes:
             exptime_unit = exptime * u.s
             if self.fast:
                 results = [self._simulate_observations_single_fiber((fiber, self.target_spectra,
