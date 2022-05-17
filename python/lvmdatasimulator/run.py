@@ -92,7 +92,7 @@ def open_input_params(filename):
 
     return params
 
-def run_simulator(params):
+def run_simulator_1d(params):
     """
     Main function to run the simulation of an LVM field.
 
