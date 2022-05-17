@@ -197,6 +197,13 @@ class Nebula:
                                        np.abs(self.r_max * self.ax_ratio * np.cos(self.PA))).astype(int) * 2 + 1).value
             self.pix_height = (np.round(np.abs(self.r_max * np.cos(self.PA)) +
                                         np.abs(self.r_max * self.ax_ratio * np.sin(self.PA))).astype(int) * 2 + 1).value
+        elif conversion_type == 'cylinder':
+            self.pix_width = (np.ceil((self.length * np.abs(np.sin(self.PA)) +
+                                       self.width * np.abs(np.cos(self.PA))) / self.pxscale / 2.
+                                      ).astype(int) * 2 + 1).value
+            self.pix_height = (np.ceil((self.length * np.abs(np.cos(self.PA)) +
+                                       self.width * np.abs(np.sin(self.PA))) / self.pxscale / 2.
+                                       ).astype(int) * 2 + 1).value
 
         if (self.xc is not None) and (self.yc is not None):
             self.x0 = self.xc - np.round((self.pix_width - 1) / 2).astype(int)
@@ -378,8 +385,54 @@ class Circle(Ellipse):
 class Filament(Nebula):
     """
     Class of an isotropic cylindrical shape filament.
+    Defined by its position, length, PA, radius, maximal optical depth.
+    If it is emission-type filament, then also maximal brightness is required.
+    Velocity gradient also can be set up
+    """
+    PA: u.degree = 90 * u.degree  # position angle of the filament
+    length: u.pc = 10 * u.pc  # full length of the filament
+    width: u.pc = 0.1 * u.pc  # full width (diameter) of the filament
+    vel_gradient: (velunit / u.pc) = 0  # velocity gradient along the filament (to be added)
+    _theta_bins: int = 50
+    _rad_bins: int = 0
+    _h_bins: int = 2
+    _npix_los: int = 101
+
+    def __post_init__(self):
+        self._assign_all_units()
+        self._assign_position_params(conversion_type='cylinder')
+        self._npix_los = 1
+        self._ref_line_id = 0
+        self.linerat_constant = True  # True if the ratio of line fluxes shouldn't change across the nebula
+
+    @cached_property
+    def _brightness_3d_cartesian(self):
+        """
+        Method to obtain the brightness (or density) distribution of the nebula in cartesian coordinates
+        """
+        xx, yy = np.meshgrid(np.arange(self.pix_width), np.arange(self.pix_height))
+        brt = np.zeros_like(xx, dtype=np.float32)
+
+        xct = (xx - (self.pix_width - 1) / 2) * np.cos(self.PA + 90 * u.degree) + \
+              (yy - (self.pix_height - 1) / 2) * np.sin(self.PA + 90 * u.degree)
+        yct = (xx - (self.pix_width - 1) / 2) * np.sin(self.PA + 90 * u.degree) - \
+              (yy - (self.pix_height - 1) / 2) * np.cos(self.PA + 90 * u.degree)
+
+        rad = ((self.width / self.pxscale).value / 2.)
+        len_px = ((self.length / self.pxscale).value / 2.)
+        rec = (np.abs(yct) <= rad) & (np.abs(xct) <= len_px)
+        brt[rec] = np.sqrt(1. - (yct[rec] / rad) ** 2)
+        brt = brt.reshape((self.pix_height, self.pix_width, 1))
+        return brt
+
+
+@dataclass
+class _ObsoleteFilament(Nebula):
+    """
+    Class of an isotropic cylindrical shape filament.
     Defined by its position, length, PA, radius, maximal optical depth
     if it is emission-type filament, then maximal brightness
+    NB: this class is obsolete, but might be considered later in case of implementation of varying line ratios
     """
     PA: u.degree = 90 * u.degree  # position angle of the filament
     length: u.pc = 10 * u.pc  # full length of the filament
