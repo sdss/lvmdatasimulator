@@ -15,8 +15,41 @@ from shapely.geometry import Point, Polygon, box
 from pyneb import RedCorr
 from lvmdatasimulator import log
 from sympy import divisors
-
+from scipy.interpolate import interp2d, RectBivariateSpline
 import sys
+
+
+def assign_units(my_object, variables, default_units):
+    """
+    Convert every involved variables to the astropy.units assuming the default prescriptions and equivalencies
+    :param my_object : Object to check the properties
+    :param variables: list of names of properties to check. If my_object is None, then it is the list of variables
+    :param default_units: units to assign for each variable/property
+    :return: object with the updated properties, or the updated list with variables
+    """
+    out_list = []
+    for ind, curvar in enumerate(variables):
+        if my_object is None and curvar is None:
+            out_list.append(None)
+            continue
+        elif my_object is not None and my_object.__getattribute__(curvar) is None:
+            continue
+        try:
+            if my_object is None:
+                out_list.append(curvar << default_units[ind])
+            else:
+                my_object.__setattr__(curvar, (my_object.__getattribute__(curvar) << default_units[ind]))
+        except UnitConversionError:
+            if my_object is not None:
+                add_str = f' of {my_object.__class__.__name__}'
+            else:
+                add_str = ""
+            log.error(f"Wrong unit for parameter {curvar}{add_str} ({my_object.__getattribute__(curvar).unit}, "
+                      f"but should be {default_units[ind]})")
+    if my_object is None:
+        return out_list
+    else:
+        return my_object
 
 
 @dataclass
@@ -62,16 +95,19 @@ def check_overlap(hdu, out_shape):
     return True
 
 
-def set_default_dict_values(mydict, key_to_check, default_value):
+def set_default_dict_values(mydict, key_to_check, default_value, unit=None):
     """
     Checks the dictionary for the keyword and set the default values if it is missing
     :param mydict: dictionary to be checked
     :param key_to_check: keyword to check
     :param default_value: default value to be used if keyword is missing
+    :param unit: astropy.unit to be use for considered value
     :return: modified dictionary
     """
     if key_to_check not in mydict:
         mydict[key_to_check] = default_value
+    if unit is not None and not isinstance(mydict[key_to_check], str):
+        mydict[key_to_check] = (mydict[key_to_check] << unit)
 
 
 def calc_circular_mask(radius, center=None, size=None):
@@ -166,9 +202,17 @@ def convolve_array(to_convolve, kernel, selected_points_x, selected_points_y,
         convolved = convolve_fft(to_convolve, kernel, allow_huge=allow_huge,
                                 normalize_kernel=normalize_kernel)
 
-    data_in_aperture = convolved[:, selected_points_y, selected_points_x]
+    # data_in_aperture = convolved[:, np.round(selected_points_y).astype(int), np.round(selected_points_x).astype(int)]
+    data_in_aperture = np.zeros(shape=(convolved.shape[0], len(selected_points_x)),
+                                dtype=np.float32)
+    xx, yy = (np.arange(convolved.shape[2]), np.arange(convolved.shape[1]))
+
+    for ind, conv_slice in enumerate(convolved):
+        p = RectBivariateSpline(xx, yy, conv_slice.T, kx=1, ky=1)
+        data_in_aperture[ind, :] = p.ev(selected_points_x, selected_points_y)
 
     return data_in_aperture
+
 
 def chunksize(cube, nchunks=4, overlap=40):
 
