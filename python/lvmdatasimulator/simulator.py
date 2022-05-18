@@ -978,6 +978,13 @@ class Simulator:
         if isinstance(wavelength_ranges[0], (float, int)):
             wavelength_ranges = [wavelength_ranges]
 
+        # applying the units of measurement and converting to angstrom
+        for wavelength_range in wavelength_ranges:
+            wavelength_range[0] = wavelength_range[0] * unit_range
+            wavelength_range[0] = wavelength_range[0].to(u.AA).value
+            wavelength_range[1] = wavelength_range[1] * unit_range
+            wavelength_range[1] = wavelength_range[1].to(u.AA).value
+
         for wavelength_range in wavelength_ranges:
             for branch in self.spectrograph.branches:
                 if branch.wavecoord.start < wavelength_range[0] * unit_range \
