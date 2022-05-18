@@ -141,7 +141,7 @@ def run_simulator_1d(params):
                       unit_dec=params.get('unit_dec_bundle', u.deg),
                       time=params.get('time', '2022-01-01T00:00:00.00'),
                       utcoffset=params.get('utcoffset', -3 * u.hour),
-                      exptimes=params.get('exptimes', 900.0 * u.s),
+                      exptimes=params.get('exptimes', 900.0),
                       airmass=params.get('airmass', None),
                       days_moon=params.get('days_moon', None),
                       sky_template=params.get('sky_template', None))
