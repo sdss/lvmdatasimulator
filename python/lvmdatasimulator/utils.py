@@ -106,7 +106,7 @@ def set_default_dict_values(mydict, key_to_check, default_value, unit=None):
     """
     if key_to_check not in mydict:
         mydict[key_to_check] = default_value
-    if unit is not None:
+    if unit is not None and not isinstance(mydict[key_to_check], str):
         mydict[key_to_check] = (mydict[key_to_check] << unit)
 
 

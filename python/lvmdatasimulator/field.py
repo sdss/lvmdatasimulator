@@ -95,14 +95,14 @@ class LVMField:
 
         self.wcs = self._create_wcs()
         self.ism_params = {'distance': 50 * u.kpc, 'spec_resolution': 0.06 * u.Angstrom,
-                           'sys_velocity': 0 * velunit, 'turbulent_sigma': 10. * velunit}
+                           'sys_velocity': 0 * velunit, 'turbulent_sigma': 20. * velunit, 'preserve_kinematics': False,
+                           'R_V': 3.1, 'ext_law': 'F99', 'vel_amplitude': 150 * velunit}
         if type(ism_params) is dict:
             for k, v in ism_params.items():
                 self.ism_params[k] = v
         self.ism = self._create_ism(**self.ism_params)
         self.ism_map = None
         self.starlist = None
-
 
     def _create_wcs(self):
         """
@@ -264,17 +264,27 @@ class LVMField:
         pass
 
     def _create_ism(self, distance=50 * u.kpc, spec_resolution=0.06 * u.Angstrom,
-                    sys_velocity=0 * velunit, turbulent_sigma=10. * velunit, **_):
+                    sys_velocity=0 * velunit, turbulent_sigma=20. * velunit, vel_amplitude=150 * velunit,
+                    preserve_kinematics=False,
+                    R_V=3.1, ext_law='F99', **_):
         """
         Create ISM object related to this LVMField
         """
+        if preserve_kinematics:
+            npix_line = 3
+        else:
+            npix_line = 1
         return ISM(self.wcs,
                    width=self.npixels,
                    height=self.npixels,
                    turbulent_sigma=turbulent_sigma,
                    distance=distance,
                    spec_resolution=spec_resolution,
-                   sys_velocity=sys_velocity)
+                   sys_velocity=sys_velocity,
+                   npix_line=npix_line,
+                   vel_amplitude=vel_amplitude,
+                   R_V=R_V, ext_law=ext_law
+                   )
 
     def get_map(self, wavelength_ranges=None, unit_range=u.AA):
         """
@@ -399,12 +409,21 @@ class LVMField:
             if loaded and self.ism_map is not None:
                 self._get_ism_map()
             if loaded and save_nebulae is not None:
-                if not (save_nebulae.startswith('/') or save_nebulae.startswith(r'\\') or save_nebulae.startswith('.')):
-                    save_nebulae = os.path.join(lvmdatasimulator.WORK_DIR, save_nebulae)
-                self.ism.save_ism(save_nebulae)
+                self.save_ism(save_nebulae)
         if not loaded:
             log.warning("Cannot load the nebulae! Check input parameters.")
             return None
+
+    def save_ism(self, filename):
+        """
+        Save ISM content to the file
+        """
+        if filename is None:
+            log.warning("Cannot save the nebulae! Check input parameters.")
+            return
+        if not (filename.startswith('/') or filename.startswith(r'\\') or filename.startswith('.')):
+            self.ism.save_ism(os.path.join(lvmdatasimulator.WORK_DIR, filename))
+            log.info(f"ISM content saved to {filename}")
 
     def shift_nebula(self, nebula_id, offset=(0., 0.), units=(u.pixel, u.pixel), save=None):
         """
@@ -446,9 +465,7 @@ class LVMField:
             self.ism.content[cur_ext].header['Y0'] += pix_offsets[1]
         self._get_ism_map()
         if save is not None:
-            if not (save.startswith('/') or save.startswith(r'\\') or save.startswith('.')):
-                save = os.path.join(lvmdatasimulator.WORK_DIR, save)
-            self.ism.save_ism(save)
+            self.save_ism(save)
         return
 
     def _get_ism_map(self, wavelength=6562.81):
