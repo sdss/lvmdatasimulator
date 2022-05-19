@@ -14,40 +14,37 @@ To install the package, please run
 
 ```git clone --recursive https://github.com/sdss/lvmdatasimulator```
 
-Don't forget to download all necessary files with the pre-computed grids of models. 
+Don't forget to download all necessary files with the pre-computed grids of models.
 The details are given in this [notebook](examples/LVM_data_simulator_tutorial1.ipynb)
 
 
 ## How to use the code
 
-Shortly, the current version of the code has three main blocks:
+Shortly, the current version of the code can be divided three main sections:
 - **Source field**, which produces the 2 fits files containing the stellar and ISM components that are used further for simulations.
-- **Instrumentation and observational conditions** -with this part of the code the user can configure the properties of the LVM instrument
-  (e.g., number of the fibers to use in simulations, their location etc.) and of the observing conditions (e.g. sky brightness, exposure times)
-- **Simulator** join all these together and produce the output "observed" spectra and images from the generated "source field"  
+- **Instrumentation and observing conditions** -with this part of the code the user can configure the properties of the LVM instrument (e.g., number of the fibers to use in simulations, their location etc.), of the sky conditions (e.g. Sky conditions, airmass, etc ) and the details of the observations (e.g. exposure time)
+- **Simulator** join all these together and produce the output "observed" spectra and images from the generated "source field"
 
 The detailed documentation of these blocks will be added later to this readme.
-At the moment, we prepared three tutorials for users on how to use the code.
+At the moment, we prepared two tutorials for users on how to use the code.
 
-- [Tutorial #1](examples/LVM_data_simulator_tutorial1.ipynb) describes the necessary steps to properly 
-install and configure the package and overview the very basic steps to run the simulations.
-- [Tutorial #2](examples/LVM_data_simulator_tutorial2.ipynb) explains in more details how to configure the source field, 
-simulate different types of nebulae. It has two major parts. One describes the very simplified simulations, 
-while another considers different aspects on how to deal with the varying line rations and gas kinematics.
-- [Tutorial #3](examples/LVM_data_simulator_tutorial3.ipynb) is intended to better describe the different setup of the 
-insrumentation and observation properties. It also explains the output files. 
+- [Tutorial #1](examples/LVM_data_simulator_tutorial1.ipynb) describes the necessary steps to properly install and configure the package and overview the very basic steps to run the simulations.
+- [Tutorial #2](examples/LVM_data_simulator_tutorial2.ipynb) explains in more details how to configure the source field, simulate different types of nebulae. It has two major parts. One describes the very simplified simulations, while another considers different aspects on how to deal with the varying line rations and gas kinematics.
 
-  
+A third tutorial focusing on the setup of the instrument and of the observations will be prepared soon.
+
+
+
 ### Major limitations of the current version:
 
 
 - Source field:
   - Nebular continuum is not present in the existing Cloudy models; accounting for it is not implemented yet
   - Pre-generated shocks models are absent
-  - Central ionizing source is not produced in the output. 
-  If needed, it is possible to add the star with corresponding parameters. 
+  - Central ionizing source is not produced in the output.
+  If needed, it is possible to add the star with corresponding parameters.
   - Addition of the stars overwrite the previously fetched or generated starlist
-- Interstellar extinction from the produced dark clouds:  
+- Interstellar extinction from the produced dark clouds:
   - Works for ISM, but not for background stars
   - In the output maps and spectra it is based on the mean value of Av in the fiber, not accounting for the density variations within a fiber
 - Line-of-sight velocities:
