@@ -1131,7 +1131,8 @@ class ISM:
                                 'n_brightest_lines': 10,  # only this number of the brightest lines will be evaluated
                                 'linerat_constant': False #  if True -> lines ratios don't vary across Cloud/Bubble
                                 'continuum_type': 'BB' or 'Model' or 'Poly' # type of the continuum model
-                                'continuum_data': model_id or [poly_coefficients] or Teff # value defining cont. shape
+                                'continuum_data': model_id or [poly_coefficients] or Teff or dict with "wl" and "flux"
+                                                # value defining cont. shape
                                 'continuum_flux': 1e-16 * u.erg / u.cm ** 2 / u.s / u.arcsec **2 / u.AA,
                                 'continuum_mag': 22 * u.mag,
                                 'continuum_wl': 5500, # could be also R, V, B,
@@ -1439,14 +1440,22 @@ class ISM:
             if cur_obj['continuum_type'] is not None and cur_obj['continuum_data'] is not None \
                     and cur_obj['continuum_type'].lower() in ['bb', 'poly', 'model']:
 
-                if cur_obj['continuum_type'].lower() == 'model' and lvmdatasimulator.CONTINUUM_MODELS is not None:
-                    with fits.open(lvmdatasimulator.CONTINUUM_MODELS) as hdu:
-                        if cur_obj['continuum_data'] >= hdu[0].data.shape[0]:
-                            log.warning("Wrong continuum model ID for nebula #{0}".format(obj_id))
+                if cur_obj['continuum_type'].lower() == 'model':
+                    if isinstance(cur_obj['continuum_data'], dict) and ('wl' in cur_obj['continuum_data']) and \
+                            ('flux' in cur_obj['continuum_data']):
+                        if len(cur_obj['continuum_data']['wl']) != len(cur_obj['continuum_data']['flux']):
+                            log.error("Number of wavelength and flux points is inconsistent for continuum")
                         else:
-                            wlscale = (np.arange(hdu[0].data.shape[1]) - hdu[0].header['CRPIX1'] + 1
-                                       ) * hdu[0].header['CDELT1'] + hdu[0].header['CRVAL1']
-                            continuum = np.vstack([wlscale, hdu[0].data[cur_obj['continuum_data']]])
+                            wlscale = cur_obj['continuum_data']['wl']
+                            continuum = np.vstack([wlscale, cur_obj['continuum_data']['flux']])
+                    elif ~isinstance(cur_obj['continuum_data'], dict) and lvmdatasimulator.CONTINUUM_MODELS is not None:
+                        with fits.open(lvmdatasimulator.CONTINUUM_MODELS) as hdu:
+                            if cur_obj['continuum_data'] >= hdu[0].data.shape[0]:
+                                log.warning("Wrong continuum model ID for nebula #{0}".format(obj_id))
+                            else:
+                                wlscale = (np.arange(hdu[0].data.shape[1]) - hdu[0].header['CRPIX1'] + 1
+                                           ) * hdu[0].header['CDELT1'] + hdu[0].header['CRVAL1']
+                                continuum = np.vstack([wlscale, hdu[0].data[cur_obj['continuum_data']]])
                 elif cur_obj['continuum_type'].lower() in ['poly', 'bb']:
                     continuum = cur_obj['continuum_data']
             if continuum is not None:
