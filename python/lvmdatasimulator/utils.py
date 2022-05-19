@@ -417,6 +417,46 @@ def save_cloudy_models(path_to_models, models_rootname, fileout=None):
     hdul.writeto(fileout, overwrite=True)
 
 
+def save_continuum_sb99_model(path_to_models, fileout):
+    """
+    With this script we saved the default Starburst99 output models to the format used in lvmdatasimulator.
+    Could be used as an example of how to produce the models in appropriate format
+    """
+    from scipy.interpolate import interp1d
+    models = []
+    letters = ['a', 'b', 'c', 'd', 'e']
+    for ind in range(5):
+        models.append(Table.read(os.path.join(path_to_models,"fig1{}.dat".format(letters[ind])),
+                                 header_start=2, format='ascii'))
+    wl = models[0]['WAVELENGTH']
+    dl = 20.
+    l0 = 3000
+    l1 = 11000
+    z = [0.04, 0.02, 0.008, 0.004, 0.001]
+    wlscale = np.linspace(l0, l1, np.round((l1 - l0) / dl).astype(int) + 1)
+    models_interp = []
+    tab_description = Table(names=['ID', 'Name', 'Description'], dtype=[int, str, str])
+    model_index = 0
+    for ind in range(5):
+        cols = models[ind].colnames
+        for col in cols[1:]:
+            p = interp1d(wl, 10 ** models[ind][col], assume_sorted=True)
+            models_interp.append(p(wlscale))
+            tab_description.add_row([model_index, 'Z{:.3f}_t{}'.format(z[ind], col.replace("Myr", "")),
+                                     'Starburst99: Z={:.3f}, age={}, M=1e6, inst, '
+                                     'IMF_alpha=2.35, Mup=100, Mlow=1'.format(
+                                         z[ind], col)])
+            model_index += 1
+
+    models_interp = np.array(models_interp)
+    hdu = fits.HDUList([fits.PrimaryHDU(models_interp), fits.BinTableHDU(tab_description, name='Summary')])
+    hdu[0].header['CRVAL1'] = (l0, "Start wavelength")
+    hdu[0].header['CDELT1'] = (dl, "Wavelength step")
+    hdu[0].header['CRPIX1'] = 1
+    hdu[0].header['CTYPE1'] = "WAV-AWAV"
+    hdu[0].header['CUNIT1'] = 'Angstrom'
+    hdu.writeto(fileout, overwrite=True)
+
 
 
 
