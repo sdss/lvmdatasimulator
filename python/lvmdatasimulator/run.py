@@ -5,10 +5,10 @@ from lvmdatasimulator.instrument import LinearSpectrograph
 from lvmdatasimulator.simulator import Simulator
 from lvmdatasimulator.fibers import FiberBundle
 from lvmdatasimulator import log, WORK_DIR
+from astropy.io.misc import yaml
 
 import astropy.units as u
 import time
-import pickle
 
 import os
 
@@ -75,20 +75,20 @@ def save_input_params(params):
         if key not in params:
             params[key] = default[key]
 
-    outname = '{}_input_parameters.pickle' .format(params['name'])
+    outname = '{}_input_parameters.yml' .format(params['name'])
     log.info(f'Saving input parameters to {outname}')
 
     outname = os.path.join(WORK_DIR, outname)  # putting it in the WORK directory
-    with open(outname, 'wb') as fp:
-        pickle.dump(params, fp)
+    with open(outname, 'w') as fp:
+        yaml.dump(params, fp)
 
 
 def open_input_params(filename):
 
     log.info(f'Reading input parameters from {filename}')
     filename = os.path.join(WORK_DIR, filename)
-    with open(filename, 'rb') as fp:
-        params = pickle.load(fp)
+    with open(filename, 'r') as fp:
+        params = yaml.load(fp)
 
     return params
 
