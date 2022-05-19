@@ -200,6 +200,7 @@ class Nebula:
     height: u.pc = 0 * u.pc  # height of the nebula in pc (not used if pix_height is set up)
     pxscale: u.pc = 0.01 * u.pc  # pixel size in pc
     spectrum_id: int = None  # ID of a template Cloudy emission spectrum for this nebula
+    n_brightest_lines: int = None  # limit the number of the lines to the first N brightest
     sys_velocity: velunit = 0 * velunit  # Systemic velocity
     turbulent_sigma: velunit = 10 * velunit  # Velocity dispersion due to turbulence; included in calculations of LSF
     max_brightness: fluxunit = 1e-15 * fluxunit
@@ -309,6 +310,11 @@ class Nebula:
             with fits.open(lvmdatasimulator.CLOUDY_MODELS) as hdu:
                 flux_ratios = hdu[self.spectrum_id].data[1:, 1]
                 index_ha = np.flatnonzero(hdu[self.spectrum_id].data[1:, 0] == 6562.81)
+                if self.n_brightest_lines is not None and \
+                        (self.n_brightest_lines > 0) and (self.n_brightest_lines < len(flux_ratios)):
+                    indexes_sorted = np.argsort(flux_ratios)[::-1]
+                    flux_ratios = flux_ratios[indexes_sorted[: self.n_brightest_lines]]
+                index_ha = np.flatnonzero(hdu[self.spectrum_id].data[1:, 0][indexes_sorted] == 6562.81)
                 if len(index_ha) == 1:
                     self._ref_line_id = index_ha[0]
 
@@ -766,6 +772,11 @@ class Cloud(Nebula):
                      self.radius * (1 - self.thickness)
             fluxes = hdu[self.spectrum_id].data[1:, 2:]
             index_ha = np.flatnonzero(hdu[self.spectrum_id].data[1:, 0] == 6562.81)
+            if self.n_brightest_lines is not None and \
+                    (self.n_brightest_lines > 0) and (self.n_brightest_lines < len(fluxes)):
+                indexes_sorted = np.argsort(hdu[self.spectrum_id].data[1:, 1])[::-1]
+                fluxes = fluxes[indexes_sorted[:self.n_brightest_lines], :]
+                index_ha = np.flatnonzero(hdu[self.spectrum_id].data[1:, 0][indexes_sorted] == 6562.81)
             if len(index_ha) == 1:
                 self._ref_line_id = index_ha[0]
 
@@ -1018,6 +1029,7 @@ class ISM:
         self.content[-1].header['TurbVel'] = (obj_to_add.turbulent_sigma.to_value(velunit),
                                               "ISM Velocity dispersion, km/s")
         self.content[-1].header['SpecID'] = (obj_to_add.spectrum_id, "Ref. spectrum ID in model grid")
+        self.content[-1].header['NLines'] = (obj_to_add.n_brightest_lines, "Maximal number of lines to use")
         if cur_wavelength:
             self.content[-1].header['Lambda'] = (cur_wavelength, "Current line wavelength")
         if add_fits_kw is not None:
@@ -1057,6 +1069,10 @@ class ISM:
             if brt_4d is not None:
                 with fits.open(lvmdatasimulator.CLOUDY_MODELS) as hdu:
                     wl_list = hdu[obj_to_add.spectrum_id].data[1:, 0]
+                    if obj_to_add.n_brightest_lines is not None and \
+                            (obj_to_add.n_brightest_lines > 0) and (obj_to_add.n_brightest_lines < len(wl_list)):
+                        wl_list = wl_list[np.argsort(hdu[obj_to_add.spectrum_id].data[1:, 1]
+                                                     )[::-1][: obj_to_add.n_brightest_lines]]
                 for line_ind in range(brt_4d.shape[0]):
                     self._add_fits_extension(name="Comp_{0}_Flux_{1}".format(obj_id, wl_list[line_ind]),
                                              value=brt_4d[line_ind],
@@ -1064,8 +1080,13 @@ class ISM:
                                              cur_wavelength=wl_list[line_ind])
             elif obj_to_add.spectrum_id is not None and obj_to_add.linerat_constant:
                 with fits.open(lvmdatasimulator.CLOUDY_MODELS) as hdu:
+                    data_save = hdu[obj_to_add.spectrum_id].data[1:, :2]
+                    if obj_to_add.n_brightest_lines is not None and \
+                            (obj_to_add.n_brightest_lines > 0) and \
+                            (obj_to_add.n_brightest_lines < len(hdu[obj_to_add.spectrum_id].data[1:, 0])):
+                            data_save = data_save[np.argsort(data_save[:, 1])[::-1][: obj_to_add.n_brightest_lines]]
                     self._add_fits_extension(name="Comp_{0}_FluxRatios".format(obj_id),
-                                             value=hdu[obj_to_add.spectrum_id].data[1:, :2].T,
+                                             value=data_save.T,
                                              obj_to_add=obj_to_add, zorder=zorder, add_fits_kw=add_fits_kw)
 
         if type(obj_to_add) == Bubble:
@@ -1107,9 +1128,11 @@ class ISM:
                                 'cloudy_id': None,  # id of pre-generated Cloudy model
                                 'cloudy_params': {'Z': 0.5, 'qH': 49., 'nH': 10, 'Teff': 30000, 'Rin': 0},  #
                                     parameters defining the pre-generated Cloudy model (used if spectrum_id is None)
+                                'n_brightest_lines': 10,  # only this number of the brightest lines will be evaluated
                                 'linerat_constant': False #  if True -> lines ratios don't vary across Cloud/Bubble
                                 'continuum_type': 'BB' or 'Model' or 'Poly' # type of the continuum model
-                                'continuum_data': model_id or [poly_coefficients] or Teff # value defining cont. shape
+                                'continuum_data': model_id or [poly_coefficients] or Teff or dict with "wl" and "flux"
+                                                # value defining cont. shape
                                 'continuum_flux': 1e-16 * u.erg / u.cm ** 2 / u.s / u.arcsec **2 / u.AA,
                                 'continuum_mag': 22 * u.mag,
                                 'continuum_wl': 5500, # could be also R, V, B,
@@ -1144,12 +1167,13 @@ class ISM:
                                    'turbulent_sigma', 'perturb_degree',
                                    'perturb_amplitude', 'perturb_scale', 'radius', 'distance',
                                    'continuum_type', 'continuum_data', 'continuum_flux', 'continuum_mag',
-                                   'continuum_wl', 'ext_law', 'ext_rv', 'vel_gradient', 'vel_rot', 'vel_pa'],
+                                   'continuum_wl', 'ext_law', 'ext_rv', 'vel_gradient', 'vel_rot', 'vel_pa',
+                                   'n_brightest_lines'],
                                   [0, 0, 1., 0, self.sys_velocity, self.turbulent_sigma, 0, 0.1, 0, 0, self.distance,
-                                   None, None, 0, None, 5500., self.ext_law, self.R_V, 0, 0, kin_pa_default],
+                                   None, None, 0, None, 5500., self.ext_law, self.R_V, 0, 0, kin_pa_default, None],
                                   [fluxunit, u.mag, None, velunit, velunit, velunit, None, None,
                                    u.pc, u.pc, u.kpc, None, None, fluxunit, None, u.Angstrom,
-                                   None, None, velunit / u.pc, velunit, u.degree]):
+                                   None, None, velunit / u.pc, velunit, u.degree, None]):
                 set_default_dict_values(cur_obj, k, v, unit=unit)
 
             for k in ['max_brightness', 'max_extinction', 'radius', 'continuum_flux']:
@@ -1203,6 +1227,7 @@ class ISM:
                                        vel_gradient=cur_obj['vel_gradient'],
                                        vel_pa=cur_obj['vel_pa'],
                                        spectrum_id=cloudy_model_index,
+                                       n_brightest_lines=cur_obj['n_brightest_lines'],
                                        pxscale=self.pxscale * (cur_obj['distance'].to(u.pc) / self.distance.to(u.pc)),
                                        perturb_scale=cur_obj['perturb_scale'],
                                        perturb_amplitude=cur_obj['perturb_amplitude'],
@@ -1286,6 +1311,7 @@ class ISM:
                                               turbulent_sigma=cur_obj['turbulent_sigma'],
                                               sys_velocity=cur_obj['sys_velocity'],
                                               spectrum_id=cloudy_model_index,
+                                              n_brightest_lines=cur_obj['n_brightest_lines'],
                                               linerat_constant=cur_obj['linerat_constant'],
                                               )
                 elif cur_obj['type'] == "Cloud":
@@ -1299,6 +1325,7 @@ class ISM:
                                              perturb_degree=cur_obj['perturb_degree'],
                                              perturb_amplitude=cur_obj['perturb_amplitude'],
                                              spectrum_id=cloudy_model_index,
+                                             n_brightest_lines=cur_obj['n_brightest_lines'],
                                              turbulent_sigma=cur_obj['turbulent_sigma'],
                                              sys_velocity=cur_obj['sys_velocity'],
                                              linerat_constant=cur_obj['linerat_constant'],
@@ -1316,6 +1343,7 @@ class ISM:
                                                 vel_gradient=cur_obj['vel_gradient'],
                                                 vel_pa=cur_obj['vel_pa'],
                                                 spectrum_id=cloudy_model_index,
+                                                n_brightest_lines=cur_obj['n_brightest_lines'],
                                                 turbulent_sigma=cur_obj['turbulent_sigma'],
                                                 sys_velocity=cur_obj['sys_velocity'],
                                                 pxscale=self.pxscale * (cur_obj['distance'].to(u.pc) /
@@ -1334,6 +1362,7 @@ class ISM:
                                               vel_rot=cur_obj.get('vel_rot'),
                                               vel_pa=cur_obj['vel_pa'],
                                               spectrum_id=cloudy_model_index,
+                                              n_brightest_lines=cur_obj['n_brightest_lines'],
                                               turbulent_sigma=cur_obj['turbulent_sigma'],
                                               sys_velocity=cur_obj['sys_velocity'],
                                               pxscale=self.pxscale * (cur_obj['distance'].to(u.pc) /
@@ -1347,6 +1376,7 @@ class ISM:
                                                ax_ratio=cur_obj['ax_ratio'],
                                                PA=cur_obj['PA'],
                                                spectrum_id=cloudy_model_index,
+                                               n_brightest_lines=cur_obj['n_brightest_lines'],
                                                turbulent_sigma=cur_obj['turbulent_sigma'],
                                                sys_velocity=cur_obj['sys_velocity'],
                                                vel_gradient=cur_obj['vel_gradient'],
@@ -1362,6 +1392,7 @@ class ISM:
                                               max_extinction=cur_obj.get('max_extinction'),
                                               radius=cur_obj['radius'],
                                               spectrum_id=cloudy_model_index,
+                                              n_brightest_lines=cur_obj['n_brightest_lines'],
                                               turbulent_sigma=cur_obj['turbulent_sigma'],
                                               sys_velocity=cur_obj['sys_velocity'],
                                               vel_gradient=cur_obj['vel_gradient'],
@@ -1377,6 +1408,7 @@ class ISM:
                                                  max_brightness=cur_obj.get('max_brightness'),
                                                  max_extinction=cur_obj.get('max_extinction'),
                                                  spectrum_id=cloudy_model_index,
+                                                 n_brightest_lines=cur_obj['n_brightest_lines'],
                                                  turbulent_sigma=cur_obj['turbulent_sigma'],
                                                  sys_velocity=cur_obj['sys_velocity'],
                                                  vel_gradient=cur_obj['vel_gradient'],
@@ -1408,14 +1440,22 @@ class ISM:
             if cur_obj['continuum_type'] is not None and cur_obj['continuum_data'] is not None \
                     and cur_obj['continuum_type'].lower() in ['bb', 'poly', 'model']:
 
-                if cur_obj['continuum_type'].lower() == 'model' and lvmdatasimulator.CONTINUUM_MODELS is not None:
-                    with fits.open(lvmdatasimulator.CONTINUUM_MODELS) as hdu:
-                        if cur_obj['continuum_data'] >= hdu[0].data.shape[0]:
-                            log.warning("Wrong continuum model ID for nebula #{0}".format(obj_id))
+                if cur_obj['continuum_type'].lower() == 'model':
+                    if isinstance(cur_obj['continuum_data'], dict) and ('wl' in cur_obj['continuum_data']) and \
+                            ('flux' in cur_obj['continuum_data']):
+                        if len(cur_obj['continuum_data']['wl']) != len(cur_obj['continuum_data']['flux']):
+                            log.error("Number of wavelength and flux points is inconsistent for continuum")
                         else:
-                            wlscale = (np.arange(hdu[0].data.shape[1]) - hdu[0].header['CRPIX1'] + 1
-                                       ) * hdu[0].header['CDELT1'] + hdu[0].header['CRVAL1']
-                            continuum = np.vstack([wlscale, hdu[0].data[cur_obj['continuum_data']]])
+                            wlscale = cur_obj['continuum_data']['wl']
+                            continuum = np.vstack([wlscale, cur_obj['continuum_data']['flux']])
+                    elif ~isinstance(cur_obj['continuum_data'], dict) and lvmdatasimulator.CONTINUUM_MODELS is not None:
+                        with fits.open(lvmdatasimulator.CONTINUUM_MODELS) as hdu:
+                            if cur_obj['continuum_data'] >= hdu[0].data.shape[0]:
+                                log.warning("Wrong continuum model ID for nebula #{0}".format(obj_id))
+                            else:
+                                wlscale = (np.arange(hdu[0].data.shape[1]) - hdu[0].header['CRPIX1'] + 1
+                                           ) * hdu[0].header['CDELT1'] + hdu[0].header['CRVAL1']
+                                continuum = np.vstack([wlscale, hdu[0].data[cur_obj['continuum_data']]])
                 elif cur_obj['continuum_type'].lower() in ['poly', 'bb']:
                     continuum = cur_obj['continuum_data']
             if continuum is not None:
