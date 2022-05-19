@@ -5,18 +5,22 @@
 # @Filename: field.py
 # @License: BSD 3-Clause
 # @Copyright: Oleg Egorov, Enrico Congiu
-
+import os.path
 from dataclasses import dataclass
 import numpy as np
-
+import re
+from astropy.io import fits
+from astropy.table import Table
 from astropy.units import UnitConversionError
 from astropy.convolution import convolve_fft
 from shapely.geometry import Point, Polygon, box
 from pyneb import RedCorr
+
+import lvmdatasimulator
 from lvmdatasimulator import log
 from sympy import divisors
 from scipy.interpolate import interp2d, RectBivariateSpline
-import sys
+import pyCloudy as pc
 
 
 def assign_units(my_object, variables, default_units):
@@ -316,7 +320,101 @@ def reconstruct_cube(chunks, orig_shape):
     return new_cube
 
 
+def models_grid_summary(model_type='cloudy'):
+    """
+    Return the summary of the models grid (Cloudy or continuum [SB99])
+    :param model_type: "cloudy" or "continuum"
+    :return: astropy.table with the summary
+    """
+    if model_type.lower() == 'cloudy':
+        name_models = lvmdatasimulator.CLOUDY_MODELS
+    elif model_type.lower() in ['continuum', 'contin', 'cont']:
+        name_models = lvmdatasimulator.CONTINUUM_MODELS
+    else:
+        print("Incorrect model_type.")
+        return None
+    with fits.open(name_models) as hdu:
+        return Table(hdu['Summary'].data)
 
+
+def save_cloudy_models(path_to_models, models_rootname, fileout=None):
+    """
+    Read the output of Cloudy and save them to the file adapted for the lvmdatasimulator
+    """
+    if fileout is None:
+        print("Saving the Clody models: fileout is required")
+        return
+    if os.path.isdir(path_to_models):
+        print(f"No such directory: {path_to_models}")
+        return
+    Ms = pc.load_models(os.path.join(path_to_models, models_rootname), read_grains=False)
+    out_tab = Table(names=["Model_ID", "Geometry", 'Z', "qH", 'LogLsun', "Teff", "nH", "Rin", "Rout",
+                           "Nzones", "Nlines", "Distance", "Flux_Ha", "Source_model"],
+                    dtype=[str, str, float, float, float, float, float, float, float, int, int, float, float, str])
+    hdul = fits.HDUList(
+        [fits.PrimaryHDU()]
+    )
+    mod_id_shell = 0
+    mod_id_cloud = 0
+    for mod_id, M in enumerate(Ms):
+        r_in = np.round(M.r_in/3.08567758e18, 2)
+        r_out = np.round(M.r_out/3.08567758e18, 2)
+        if (r_out-r_in) <= 0.05:
+            continue
+        dens = np.round(M.nH_mean, 1)
+        qH = np.round(np.log10(M.Q0), 1)
+        loglum = re.split(r"l(\d.\d)_", M.model_name_s)
+        if len(loglum) > 1:
+            loglum = float(loglum[1])
+        else:
+            loglum = np.nan
+        OH = np.round(10 ** (12 + M.abund['O'] - 8.69), 2)
+        Teff = M.Teff
+        radius = (M.radius / 3.08567758e18 - r_in) / (r_out - r_in)
+
+        hdul.append(fits.ImageHDU())
+        if r_in > 1:
+            mod_id_shell += 1
+            hdul[-1].header['Model_ID'] = f"Shell_{mod_id_shell}"
+            hdul[-1].header['Geometry'] = 'Shell'
+        else:
+            mod_id_cloud+=1
+            hdul[-1].header['Model_ID'] = f"Cloud_{mod_id_cloud}"
+            hdul[-1].header['Geometry'] = 'Cloud'
+        hdul[-1].header['EXTNAME'] = hdul[-1].header['Model_ID']
+        hdul[-1].header['Z'] = OH
+        hdul[-1].header['qH'] = qH
+        hdul[-1].header['LogLsun'] = loglum
+        hdul[-1].header['Teff'] = Teff
+        hdul[-1].header['nH'] = dens
+        hdul[-1].header['Rin'] = r_in
+        hdul[-1].header['Rout'] = r_out
+        hdul[-1].header['Nzones'] = len(radius)
+        hdul[-1].header['Nlines'] = len(M.emis_labels)
+        hdul[-1].header['Distance'] = M.distance
+        hdul[-1].header['Flux_Ha'] = M.get_emis_vol('H__1_656281A', at_earth=True)
+        hdul[-1].header['Source_model'] = M.model_name_s
+        nx = len(radius) + 2
+        ny = len(M.emis_labels) + 1
+        output = np.ndarray((ny, nx), dtype=float)
+        out_tab.add_row([hdul[-1].header['Model_ID'], hdul[-1].header['Geometry'], OH, qH, loglum, Teff,
+                         dens, r_in, r_out,  len(radius), len(M.emis_labels), M.distance,
+                         hdul[-1].header['Flux_Ha'], M.model_name_s])
+        for l_id, l in enumerate(M.emis_labels):
+            if l[-1] == 'A':
+                l_wl = float(l[-7: -1]) / 100.
+            elif l[-1] == 'M':
+                l_wl = float(l[-7: -1]) / 10.
+            else:
+                l_wl = np.nan
+            output[l_id + 1, 0] = l_wl
+            output[l_id + 1, 2:] = M.get_emis(l)
+            output[l_id + 1, 1] = M.get_emis_vol(l) / M.get_emis_vol('H__1_656281A')
+        output[0, 2:] = radius
+        output[0, :2] = np.nan
+        hdul[-1].data = output
+    hdul.append(fits.BinTableHDU(out_tab, name='Summary'))
+    hdul.writeto(fileout, overwrite=True)
 
 
 
