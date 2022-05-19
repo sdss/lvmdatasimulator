@@ -11,6 +11,7 @@ from astropy import units as u
 from astropy import constants as c
 import numpy as np
 from astropy.io import fits, ascii
+from astropy.table import Table
 from scipy.special import sph_harm
 from astropy.wcs import WCS
 from astropy.wcs.utils import proj_plane_pixel_scales
@@ -105,27 +106,61 @@ def find_model_id(file=lvmdatasimulator.CLOUDY_MODELS,
         if check_id is None:
             if params is None:
                 check_id = lvmdatasimulator.CLOUDY_SPEC_DEFAULTS['id']
-                log.warning('Default Cloudy model will be used (id = {0})'.format(check_id))
+                log.warning(f'Default Cloudy model will be used (id = {check_id})')
             else:
-                for cur_ext in range(len(hdu)):
-                    if cur_ext == 0:
-                        continue
-                    found = False
-                    for p in params:
-                        if p == 'id':
-                            continue
-                        precision = 1
-                        if p == 'Z':
-                            precision = 2
-                        if np.round(params[p], precision) != np.round(hdu[cur_ext].header[p], precision):
-                            break
+                summary_table = Table(hdu['Summary'].data)
+                rec_table = np.ones(shape=(len(summary_table)), dtype=bool)
+
+                def closest(rec, prop, val):
+                    unique_col = np.unique(summary_table[prop][rec])
+                    if isinstance(val, str):
+                        return unique_col[unique_col == val]
                     else:
-                        found = True
-                    if found:
-                        return cur_ext, check_id
-                check_id = lvmdatasimulator.CLOUDY_SPEC_DEFAULTS['id']
-                log.warning('Input parameters do not correspond any pre-computed Cloudy model.'
-                            'Default Cloudy model will be used (id = {0})'.format(check_id))
+                        return unique_col[np.argsort(np.abs(unique_col - val))[0]]
+
+                for p in params:
+                    if p not in summary_table.colnames or params[p] is None or \
+                            ((isinstance(params[p], float) or isinstance(params[p], int)) and ~np.isfinite(params[p])):
+                        continue
+                    rec_table = rec_table & (summary_table[p] == closest(rec_table, p, params[p]))
+                indexes = np.flatnonzero(rec_table)
+                if len(indexes) == 0 or len(indexes) == len(summary_table):
+                    check_id = lvmdatasimulator.CLOUDY_SPEC_DEFAULTS['id']
+                    log.warning('Input parameters do not correspond to any pre-computed Cloudy model.'
+                                'Default Cloudy model will be used (id = {0})'.format(check_id))
+                elif len(indexes) == 1:
+                    check_id = summary_table['Model_ID'][indexes[0]]
+                    for p in params:
+                        if p not in summary_table.colnames or params[p] is None or \
+                                ((isinstance(params[p], float) or
+                                  isinstance(params[p], int)) and ~np.isfinite(params[p])):
+                            continue
+                        if params[p] != summary_table[p][indexes[0]]:
+                            log.warning(f'Use the closest pre-computed Cloudy model with id = {check_id}')
+                            break
+                else:
+                    check_id = summary_table['Model_ID'][indexes[0]]
+                    log.warning(f'Select one of the closest pre-computed Cloudy model with id = {check_id}')
+                #
+                # for cur_ext in range(len(hdu)):
+                #     if cur_ext == 0:
+                #         continue
+                #     found = False
+                #     for p in params:
+                #         if p == 'id':
+                #             continue
+                #         precision = 1
+                #         if p == 'Z':
+                #             precision = 2
+                #         if np.round(params[p], precision) != np.round(hdu[cur_ext].header[p], precision):
+                #             break
+                #     else:
+                #         found = True
+                #     if found:
+                #         return cur_ext, check_id
+                # check_id = lvmdatasimulator.CLOUDY_SPEC_DEFAULTS['id']
+                # log.warning('Input parameters do not correspond to any pre-computed Cloudy model.'
+                #             'Default Cloudy model will be used (id = {0})'.format(check_id))
 
         extension_index = None
         while extension_index is None:

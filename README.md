@@ -11,6 +11,13 @@ Simulator of LVM data for testing DRP and DAP
 
 ### Major limitations of the current version:
 
+- Source field:
+  - Nebular continuum is not present in the existing Cloudy models; accounting for it is not implemented yet
+  - Pre-generated shocks models are absent
+  - Central ionizing source is not produced in the output. 
+  If needed, it is possible to add the star with corresponding parameters. 
+  - Addition of the stars overwrite the previously fetched or generated starlist
+  
 - Interstellar extinction from the produced dark clouds:  
   - Works for ISM, but not for background stars
   - In the output maps and spectra it is based on the mean value of Av in the fiber, 
