@@ -5,8 +5,22 @@
 [![Travis (.org)](https://img.shields.io/travis/sdss/lvmdatasimulator)](https://travis-ci.org/sdss/lvmdatasimulator)
 [![codecov](https://codecov.io/gh/sdss/lvmdatasimulator/branch/main/graph/badge.svg)](https://codecov.io/gh/sdss/lvmdatasimulator)
 
-Simulator of LVM data for testing DRP and DAP. In the current, early, version only reduced data with a very simplified instrument setup can be simulated.
+Simulator of LVM data for testing DRP and DAP. It can be used also as an advanced exposure time calculator for LVM.
 
+**In the current, early, version only reduced data with a very simplified instrument setup can be simulated.**
+
+## Instalation and configuration
+To install the package, please run
+
+```git clone --recursive https://github.com/sdss/lvmdatasimulator```
+
+Don't forget to download all necessary files with the pre-computed grids of models. 
+The details are given in this [notebook](examples/LVM_data_simulator_tutorial.ipynb)
+
+
+## How to use the code
+
+Shortly, the current version of the code has three
 
 
 ### Major limitations of the current version:
@@ -34,5 +48,4 @@ Simulator of LVM data for testing DRP and DAP. In the current, early, version on
   - PSF is not implemented yet
   - Atmospheric dispersion is not implemented yet
   - Sky transparency is not implemented yet
-
 
