@@ -137,9 +137,13 @@ class Observation:
 
         if self.days_moon is None:
             self.days_moon = self.days_from_new_moon()
+        elif self.days_moon < 0 or self.days_moon > 14:
+            raise ValueError(f'days_moon must be between 0 and 14, while it is {self.days_moon}')
 
         if self.airmass is None:
             self.airmass = self.target_coords_altaz.secz.value
+        elif self.airmass < 1:
+            raise ValueError(f'airmass must be >= 1, but it is {self.airmass}')
 
     @cached_property
     def localtime(self):
