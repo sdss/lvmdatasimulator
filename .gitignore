@@ -116,6 +116,7 @@ ENV/
 
 # huge data directory
 data/*.fits
+!data/LVM_continuum_models.fits
 run/*
 
 # do not upload docs yet

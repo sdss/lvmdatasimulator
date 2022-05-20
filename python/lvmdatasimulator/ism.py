@@ -109,12 +109,16 @@ def find_model_id(file=lvmdatasimulator.CLOUDY_MODELS,
                 log.warning(f'Default Cloudy model will be used (id = {check_id})')
             else:
                 summary_table = Table(hdu['Summary'].data)
-                rec_table = np.ones(shape=(len(summary_table)), dtype=bool)
+                indexes = np.arange(len(summary_table)).astype(int)
+                rec_table = np.ones(shape=len(summary_table), dtype=bool)
 
                 def closest(rec, prop, val):
                     unique_col = np.unique(summary_table[prop][rec])
                     if isinstance(val, str):
-                        return unique_col[unique_col == val]
+                        res = unique_col[unique_col == val]
+                        if len(res) == 0:
+                            return ""
+                        return res
                     else:
                         return unique_col[np.argsort(np.abs(unique_col - val))[0]]
 
@@ -122,8 +126,10 @@ def find_model_id(file=lvmdatasimulator.CLOUDY_MODELS,
                     if p not in summary_table.colnames or params[p] is None or \
                             ((isinstance(params[p], float) or isinstance(params[p], int)) and ~np.isfinite(params[p])):
                         continue
-                    rec_table = rec_table & (summary_table[p] == closest(rec_table, p, params[p]))
-                indexes = np.flatnonzero(rec_table)
+                    rec_table = rec_table & (summary_table[p] == closest(indexes, p, params[p]))
+                    indexes = np.flatnonzero(rec_table)
+                    if len(indexes) == 0:
+                        break
                 if len(indexes) == 0 or len(indexes) == len(summary_table):
                     check_id = lvmdatasimulator.CLOUDY_SPEC_DEFAULTS['id']
                     log.warning('Input parameters do not correspond to any pre-computed Cloudy model.'
@@ -314,10 +320,9 @@ class Nebula:
                         (self.n_brightest_lines > 0) and (self.n_brightest_lines < len(flux_ratios)):
                     indexes_sorted = np.argsort(flux_ratios)[::-1]
                     flux_ratios = flux_ratios[indexes_sorted[: self.n_brightest_lines]]
-                index_ha = np.flatnonzero(hdu[self.spectrum_id].data[1:, 0][indexes_sorted] == 6562.81)
+                    index_ha = np.flatnonzero(hdu[self.spectrum_id].data[1:, 0][indexes_sorted] == 6562.81)
                 if len(index_ha) == 1:
                     self._ref_line_id = index_ha[0]
-
         return self._brightness_3d_cartesian[None, :, :, :] * flux_ratios[:, None, None, None]
 
     @cached_property
@@ -330,7 +335,7 @@ class Nebula:
         else:
             norm_max = 1
         map2d = np.nansum(self._brightness_3d_cartesian, 2)
-        return map2d / np.max(map2d) * norm_max
+        return map2d / np.nanmax(map2d) * norm_max
 
     @cached_property
     def brightness_skyplane_lines(self):
@@ -339,7 +344,7 @@ class Nebula:
         """
         if self.max_brightness > 0:
             map2d = np.nansum(self._brightness_4d_cartesian, 3)
-            return map2d / np.max(map2d[self._ref_line_id, :, :]) * self.max_brightness
+            return map2d / np.nanmax(map2d[self._ref_line_id, :, :]) * self.max_brightness
         else:
             return None
 
@@ -350,7 +355,7 @@ class Nebula:
         """
         if self.max_extinction > 0:
             map2d = np.nansum(self._brightness_3d_cartesian, 2)
-            return map2d / np.max(map2d) * self._max_density / (1.8e21 / (u.cm ** 2 * u.mag))
+            return map2d / np.nanmax(map2d) * self._max_density / (1.8e21 / (u.cm ** 2 * u.mag))
         else:
             return None
 
@@ -736,20 +741,20 @@ class Cloud(Nebula):
         brt[rho < (self.radius * (1 - self.thickness))] = 0
         brt[rho > self.radius] = 0
         med = np.median(brt[brt > 0])
-
         if self.perturb_degree > 0:
             phi_cur = limit_angle(phi + np.random.uniform(0, 2 * np.pi, 1), 0, 2 * np.pi)
             theta_cur = limit_angle(theta + np.random.uniform(0, np.pi, 1), 0, np.pi)
             harm_amplitudes = self.perturb_amplitude * np.random.randn(self.perturb_degree * (self.perturb_degree + 2))
 
-            brt += np.sum(Parallel(n_jobs=lvmdatasimulator.n_process)(delayed(brightness_inhomogeneities_sphere)
-                                                                      (harm_amplitudes, ll, phi_cur, theta_cur,
-                                                                       rho, med, self.radius, self.thickness)
-                                                                      for ll in np.arange(1, self.perturb_degree + 1)),
-                          axis=0)
+            brt += np.nansum(Parallel(n_jobs=lvmdatasimulator.n_process)(delayed(brightness_inhomogeneities_sphere)
+                                                                         (harm_amplitudes, ll, phi_cur, theta_cur,
+                                                                         rho, med, self.radius, self.thickness)
+                                                                         for ll in np.arange(1,
+                                                                                             self.perturb_degree + 1)),
+                             axis=0)
             brt[brt < 0] = 0
         if med > 0:
-            brt = brt / np.sum(brt)
+            brt = brt / np.nansum(brt)
         return brt
 
     @cached_property
@@ -771,6 +776,8 @@ class Cloud(Nebula):
             radius = hdu[self.spectrum_id].data[0, 2:] * (self.thickness * self.radius) + \
                      self.radius * (1 - self.thickness)
             fluxes = hdu[self.spectrum_id].data[1:, 2:]
+            radius = np.insert(radius, 0, self.radius * (1 - self.thickness))
+            fluxes = np.insert(fluxes, 0, fluxes[:, 0], axis=1)
             index_ha = np.flatnonzero(hdu[self.spectrum_id].data[1:, 0] == 6562.81)
             if self.n_brightest_lines is not None and \
                     (self.n_brightest_lines > 0) and (self.n_brightest_lines < len(fluxes)):
@@ -785,7 +792,7 @@ class Cloud(Nebula):
                                                                         radius, flux)
                                                                        for flux in fluxes)).reshape((fluxes.shape[0],
                                                                                                      s[0], s[1], s[2]))
-            return brt / np.sum(brt[self._ref_line_id])
+            return brt / np.nansum(brt[self._ref_line_id])
 
     @cached_property
     def _brightness_3d_cartesian(self):
@@ -959,7 +966,7 @@ class ISM:
                 t_filter = ascii.read(file_filter, names=['lambda', 'transmission'])
                 cont_norm_wl = np.sum(t_filter['lambda'] * t_filter['transmission']) / np.sum(t_filter['transmission'])
         if t_filter is None:
-            cont_model_max = continuum[np.argmin(abs(cont_wl_fullrange - cont_norm_wl))]
+            cont_model_max = cont_fullrange[np.argmin(abs(cont_wl_fullrange - cont_norm_wl))]
         else:
             dl = np.roll(t_filter['lambda'], -1) - t_filter['lambda']
             dl[-1] = dl[-2]
@@ -1015,7 +1022,7 @@ class ISM:
             self.content[-1].header['PAkin'] = (obj_to_add.vel_pa.to_value(u.degree),
                                                 'Kinematical PA, degree')
         if type(obj_to_add) in [Ellipse, Circle]:
-            self.content[-1].header['Radius'] = (obj_to_add.radus.to_value(u.kpc), 'Radius (major axis), pc')
+            self.content[-1].header['Radius'] = (obj_to_add.radius.to_value(u.kpc), 'Radius (major axis), pc')
         if type(obj_to_add) in [Ellipse, Galaxy]:
             self.content[-1].header['AxRat'] = (obj_to_add.ax_ratio, "Axis ratio")
         if (obj_to_add.max_brightness <= 0) and (obj_to_add.max_extinction > 0):
@@ -1126,7 +1133,7 @@ class ISM:
                                 'perturb_scale': 200 * u.pc,  # spatial scale to generate inhomogeneities (DIG only)
                                 'distance': 50 * u.kpc,  # distance to the nebula (default is from ISM)
                                 'cloudy_id': None,  # id of pre-generated Cloudy model
-                                'cloudy_params': {'Z': 0.5, 'qH': 49., 'nH': 10, 'Teff': 30000, 'Rin': 0},  #
+                                'cloudy_params': {'Z': 0.5, 'qH': 49., 'nH': 10, 'Teff': 30000, 'Geometry': 'Sphere'}, #
                                     parameters defining the pre-generated Cloudy model (used if spectrum_id is None)
                                 'n_brightest_lines': 10,  # only this number of the brightest lines will be evaluated
                                 'linerat_constant': False #  if True -> lines ratios don't vary across Cloud/Bubble
@@ -1168,12 +1175,14 @@ class ISM:
                                    'perturb_amplitude', 'perturb_scale', 'radius', 'distance',
                                    'continuum_type', 'continuum_data', 'continuum_flux', 'continuum_mag',
                                    'continuum_wl', 'ext_law', 'ext_rv', 'vel_gradient', 'vel_rot', 'vel_pa',
-                                   'n_brightest_lines'],
+                                   'n_brightest_lines', 'offset_RA', 'offset_DEC', 'RA', 'DEC'],
                                   [0, 0, 1., 0, self.sys_velocity, self.turbulent_sigma, 0, 0.1, 0, 0, self.distance,
-                                   None, None, 0, None, 5500., self.ext_law, self.R_V, 0, 0, kin_pa_default, None],
+                                   None, None, 0, None, 5500., self.ext_law, self.R_V, 0, 0, kin_pa_default, None,
+                                   None, None, None, None],
                                   [fluxunit, u.mag, None, velunit, velunit, velunit, None, None,
-                                   u.pc, u.pc, u.kpc, None, None, fluxunit, None, u.Angstrom,
-                                   None, None, velunit / u.pc, velunit, u.degree, None]):
+                                   u.pc, u.pc, u.kpc, None, None, fluxunit/u.AA, None, u.Angstrom,
+                                   None, None, velunit / u.pc, velunit, u.degree, None, u.arcsec, u.arcsec,
+                                   u.degree, u.degree]):
                 set_default_dict_values(cur_obj, k, v, unit=unit)
 
             for k in ['max_brightness', 'max_extinction', 'radius', 'continuum_flux']:
@@ -1263,16 +1272,18 @@ class ISM:
                     if 'rad_lim' not in cur_obj:
                         cur_obj['rad_lim'] = 3.
 
-                if not (cur_obj.get('X') and cur_obj.get('Y')):
-                    if cur_obj.get('offset_X') and cur_obj.get('offset_Y'):
-                        x = self.width / 2. + cur_obj.get('offset_X')
-                        y = self.height / 2. + cur_obj.get('offset_Y')
-                    elif cur_obj.get('RA') and cur_obj.get('DEC'):
+                if not (cur_obj.get('X') is not None and cur_obj.get('Y') is not None):
+                    if cur_obj.get('offset_X') is not None and cur_obj.get('offset_Y') is not None:
+                        x = (self.width - 1) / 2. + cur_obj.get('offset_X')
+                        y = (self.height - 1) / 2. + cur_obj.get('offset_Y')
+                    elif cur_obj.get('RA') is not None and cur_obj.get('DEC') is not None:
                         radec = SkyCoord(ra=cur_obj.get('RA'), dec=cur_obj.get('DEC'))
                         x, y = self.wcs.world_to_pixel(radec)
-                    elif cur_obj.get('offset_RA') and cur_obj.get('offset_DEC'):
-                        x = self.width / 2. - (cur_obj.get('offset_RA') / proj_plane_pixel_scales(self.wcs)[0] / 3600)
-                        y = self.height / 2. + (cur_obj.get('offset_DEC') / proj_plane_pixel_scales(self.wcs)[0] / 3600)
+                    elif cur_obj.get('offset_RA') is not None and cur_obj.get('offset_DEC') is not None:
+                        x = (self.width - 1) / 2. - (cur_obj.get('offset_RA').to_value(u.degree) /
+                                                     proj_plane_pixel_scales(self.wcs)[0])
+                        y = (self.height - 1) / 2. + (cur_obj.get('offset_DEC').to_value(u.degree) /
+                                                     proj_plane_pixel_scales(self.wcs)[0])
                     x = np.round(x).astype(int)
                     y = np.round(y).astype(int)
                 else:
@@ -1463,18 +1474,22 @@ class ISM:
                     add_fits_kw = {}
                 add_fits_kw['CONTTYPE'] = (cur_obj['continuum_type'], "Type of the continuum")
                 if cur_obj['continuum_flux'] > 0:
-                    contflux = cur_obj['continuum_flux'].to(u.erg / u.cm ** 2 / u.s / u.arcsec ** 2 / u.AA).value
+                    contflux = cur_obj['continuum_flux'].to_value(u.erg / u.cm ** 2 / u.s / u.arcsec ** 2 / u.AA)
                 else:
                     contflux = 0
                 add_fits_kw['CONTFLUX'] = (contflux,
                                            "Continuum brightness (in erg/s/cm^2/asec^2/AA) at ref. wl/Filter")
                 if cur_obj['continuum_mag'] is not None:
-                    contmag = cur_obj['continuum_mag'].value
+                    contmag = cur_obj['continuum_mag'].to_value(u.mag)
                 else:
                     contmag = None
                 add_fits_kw['CONTMAG'] = (contmag,
                                           "Continuum brightness (in mag/asec^2) at ref. wl/Filter")
-                add_fits_kw['CONTWL'] = (cur_obj['continuum_wl'], 'Reference wavelength/filter for cont. flux/mag')
+                if isinstance(cur_obj['continuum_wl'], str):
+                    cont_wl = cur_obj['continuum_wl']
+                else:
+                    cont_wl = cur_obj['continuum_wl'].to_value(u.AA)
+                add_fits_kw['CONTWL'] = (cont_wl, 'Reference wavelength/filter for cont. flux/mag')
 
             if cur_obj.get('max_extinction') > 0:
                 if add_fits_kw is None:
