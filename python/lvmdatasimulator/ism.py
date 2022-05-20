@@ -776,6 +776,8 @@ class Cloud(Nebula):
             radius = hdu[self.spectrum_id].data[0, 2:] * (self.thickness * self.radius) + \
                      self.radius * (1 - self.thickness)
             fluxes = hdu[self.spectrum_id].data[1:, 2:]
+            radius = np.insert(radius, 0, self.radius * (1 - self.thickness))
+            fluxes = np.insert(fluxes, 0, fluxes[:, 0], axis=1)
             index_ha = np.flatnonzero(hdu[self.spectrum_id].data[1:, 0] == 6562.81)
             if self.n_brightest_lines is not None and \
                     (self.n_brightest_lines > 0) and (self.n_brightest_lines < len(fluxes)):
