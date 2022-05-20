@@ -73,7 +73,10 @@ def save_input_params(params):
     # filling missing keys with default values
     for key in params.keys():
         if key not in params:
-            params[key] = default[key]
+            if key in ['ra_bundle', 'dec_bundle']:
+                params[key] = params.get(key.replace('_bundle', ''), default[key])
+            else:
+                params[key] = default[key]
 
     outname = '{}_input_parameters.yml' .format(params['name'])
     log.info(f'Saving input parameters to {outname}')
@@ -135,8 +138,8 @@ def run_simulator_1d(params):
                         unit_range=params.get('unit_range', u.AA))
 
     obs = Observation(name=params.get('name', 'LVM_field'),
-                      ra=params.get('ra_bundle', 10),
-                      dec=params.get('dec_bundle', -10),
+                      ra=params.get('ra_bundle', params.get('ra', 10)),
+                      dec=params.get('dec_bundle', params.get('dec', -10)),
                       unit_ra=params.get('unit_ra_bundle', u.deg),
                       unit_dec=params.get('unit_dec_bundle', u.deg),
                       time=params.get('time', '2022-01-01T00:00:00.00'),
