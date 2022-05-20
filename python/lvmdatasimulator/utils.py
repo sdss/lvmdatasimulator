@@ -182,11 +182,6 @@ def convolve_array(to_convolve, kernel, selected_points_x, selected_points_y,
         else:
             nchunks = 1
 
-    if nchunks is 1:
-        log.info('Convolving the whole array at once')
-    else:
-        log.info(f'Dividing the array in {nchunks} chunks')
-
     # defining the overlap as the size of the kernel + some room
     overlap = 1.1 * np.max(kernel.shape)
 
