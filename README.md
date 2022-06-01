@@ -29,9 +29,8 @@ The detailed documentation of these blocks will be added later to this readme.
 At the moment, we prepared two tutorials for users on how to use the code.
 
 - [Tutorial #1](examples/LVM_data_simulator_tutorial1.ipynb) describes the necessary steps to properly install and configure the package and overview the very basic steps to run the simulations.
-- [Tutorial #2](examples/LVM_data_simulator_tutorial2.ipynb) explains in more details how to configure the source field, simulate different types of nebulae. It has two major parts. One describes the very simplified simulations, while another considers different aspects on how to deal with the varying line rations and gas kinematics.
-
-A third tutorial focusing on the setup of the instrument and of the observations will be prepared soon.
+- [Tutorial #2](examples/LVM_data_simulator_tutorial2.ipynb) digs deeper into the configuration of some aspects of the simulator (fiber bundle, Observation class) and describe the properties of the output files.
+- [Tutorial #3](examples/LVM_data_simulator_tutorial3.ipynb) explains in more details how to configure the source field, simulate different types of nebulae. It has two major parts. One describes the very simplified simulations, while another considers different aspects on how to deal with the varying line rations and gas kinematics.
 
 
 
