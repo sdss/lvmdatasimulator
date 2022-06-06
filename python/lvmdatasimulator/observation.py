@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 from astropy.time import Time
 from astropy.coordinates import get_body, EarthLocation, AltAz, SkyCoord
 from astroplan import moon_illumination
-
+from typing import List
 from lvmdatasimulator import WORK_DIR
 
 import matplotlib.pyplot as plt
@@ -114,7 +114,7 @@ class Observation:
     time: str = '2022-01-01T00:00:00.00'  # UT time of observations
     location: EarthLocation = EarthLocation.of_site('lco')
     utcoffset: u.hour = -3 * u.hour  # Correction to local time. It is important to keep it updated
-    exptimes: list[int] = field(default_factory=lambda: ['900'])  # exposure time in s
+    exptimes: List[int] = field(default_factory=lambda: ['900'])  # exposure time in s
     nexp: int = 1  # number of exposures
     seeing: u.arcsec = 1 * u.arcsec  # seeing at zenit in the V-band (5500 A?)
     sky_transparency: str = 'PHOT'
@@ -128,7 +128,7 @@ class Observation:
             self.ra *= self.unit_ra
         if isinstance(self.dec, (float, int)):
             self.dec *= self.unit_dec
-        if not isinstance(self.exptimes, (list)):
+        if not isinstance(self.exptimes, list):
             self.exptimes = [self.exptimes]
 
         self.time = Time(self.time, format='isot', scale='utc')  # time of obs.
