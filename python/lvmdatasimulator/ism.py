@@ -24,12 +24,13 @@ if (sys.version_info[0]+sys.version_info[1]/10.) < 3.8:
 else:
     from functools import cached_property
 from scipy.ndimage.interpolation import map_coordinates
-from scipy.interpolate import interp1d, interp2d
+from scipy.interpolate import interp1d, RectBivariateSpline
 import lvmdatasimulator
 from lvmdatasimulator import log
 import progressbar
 from joblib import Parallel, delayed
 from astropy.convolution import convolve_fft, kernels
+from astropy.units import UnitConversionError
 from lvmdatasimulator.utils import calc_circular_mask, convolve_array, set_default_dict_values, \
     ism_extinction, check_overlap, assign_units
 fluxunit = u.erg / (u.cm ** 2 * u.s * u.arcsec ** 2)
@@ -884,7 +885,10 @@ class CustomNebula(Nebula):
         Class defining the custom nebulae with the user-defined distribution of the brighntess, continuum
         and line shapes in different lines.
     """
-    pass
+    perturb_amplitude: float = 0
+    brt_map: np.array = None
+    lines_maps: np.array = None
+    lines_wl: np.array = None
 
 
 @dataclass
@@ -1057,29 +1061,39 @@ class ISM:
         if (obj_to_add.max_brightness <= 0) and (obj_to_add.max_extinction <= 0) and (continuum is None):
             log.warning('Skip nebula with zero extinction and brightness')
             return
-        if obj_to_add.max_brightness > 0:
-            brt = obj_to_add.brightness_skyplane.value
-            if obj_to_add.spectrum_id is not None and not obj_to_add.linerat_constant:
-                brt_4d = obj_to_add.brightness_skyplane_lines.value
-            else:
+        if type(obj_to_add) == CustomNebula:
+            brt = obj_to_add.brt_map
+            brt_4d = obj_to_add.lines_maps
+        else:
+            if obj_to_add.max_brightness > 0:
+                brt = obj_to_add.brightness_skyplane.value
+                if obj_to_add.spectrum_id is not None and not obj_to_add.linerat_constant:
+                    brt_4d = obj_to_add.brightness_skyplane_lines.value
+                else:
+                    brt_4d = None
+            elif obj_to_add.max_extinction > 0:
+                brt = obj_to_add.extinction_skyplane.value
                 brt_4d = None
-        elif obj_to_add.max_extinction > 0:
-            brt = obj_to_add.extinction_skyplane.value
-            brt_4d = None
-        elif continuum is not None:
-            brt = obj_to_add.brightness_skyplane
-            brt_4d = None
+            elif continuum is not None:
+                brt = obj_to_add.brightness_skyplane
+                brt_4d = None
 
         self._add_fits_extension(name="Comp_{0}_Brightness".format(obj_id), value=brt,
                                  obj_to_add=obj_to_add, zorder=zorder, add_fits_kw=add_fits_kw, add_counter=True)
         if obj_to_add.max_brightness > 0:
             if brt_4d is not None:
-                with fits.open(lvmdatasimulator.CLOUDY_MODELS) as hdu:
-                    wl_list = hdu[obj_to_add.spectrum_id].data[1:, 0]
+                if type(obj_to_add) == CustomNebula:
+                    wl_list = obj_to_add.lines_wl
                     if obj_to_add.n_brightest_lines is not None and \
                             (obj_to_add.n_brightest_lines > 0) and (obj_to_add.n_brightest_lines < len(wl_list)):
-                        wl_list = wl_list[np.argsort(hdu[obj_to_add.spectrum_id].data[1:, 1]
-                                                     )[::-1][: obj_to_add.n_brightest_lines]]
+                        wl_list = wl_list[np.argsort(np.max(brt_4d, axis=(1, 2)))[::-1][: obj_to_add.n_brightest_lines]]
+                else:
+                    with fits.open(lvmdatasimulator.CLOUDY_MODELS) as hdu:
+                        wl_list = hdu[obj_to_add.spectrum_id].data[1:, 0]
+                        if obj_to_add.n_brightest_lines is not None and \
+                                (obj_to_add.n_brightest_lines > 0) and (obj_to_add.n_brightest_lines < len(wl_list)):
+                            wl_list = wl_list[np.argsort(hdu[obj_to_add.spectrum_id].data[1:, 1]
+                                                         )[::-1][: obj_to_add.n_brightest_lines]]
                 for line_ind in range(brt_4d.shape[0]):
                     self._add_fits_extension(name="Comp_{0}_Flux_{1}".format(obj_id, wl_list[line_ind]),
                                              value=brt_4d[line_ind],
@@ -1091,7 +1105,7 @@ class ISM:
                     if obj_to_add.n_brightest_lines is not None and \
                             (obj_to_add.n_brightest_lines > 0) and \
                             (obj_to_add.n_brightest_lines < len(hdu[obj_to_add.spectrum_id].data[1:, 0])):
-                            data_save = data_save[np.argsort(data_save[:, 1])[::-1][: obj_to_add.n_brightest_lines]]
+                        data_save = data_save[np.argsort(data_save[:, 1])[::-1][: obj_to_add.n_brightest_lines]]
                     self._add_fits_extension(name="Comp_{0}_FluxRatios".format(obj_id),
                                              value=data_save.T,
                                              obj_to_add=obj_to_add, zorder=zorder, add_fits_kw=add_fits_kw)
@@ -1112,6 +1126,108 @@ class ISM:
     def save_ism(self, filename):
         self.content.writeto(filename, overwrite=True)
         log.info("Generated ISM saved to {0}".format(filename))
+
+    def process_custom_nebula(self, params, xc=None, yc=None, cloudy_model_index=None):
+        """
+        Processes the input parameters for custom nebula object
+
+        Args:
+            params: dict -- contains keywords and values for a nebula properties
+            xc: int -- pixel X coordinate of the center of the nebula in FOV
+                         (calculated in 'generate' method based on provided offsets)
+            yc: int -- pixel Y coordinate of the center of the nebula in FOV
+                         (calculated in 'generate' method based on provided offsets)
+            cloudy_model_index: int or None -- ID of cloudy models to use if maps in different lines are not present
+        Returns:
+             CustomNebula object, or None if something went wrong
+        """
+
+        pxsize = params['pxsize']
+        try:
+            pxsize = pxsize << u.pc
+        except UnitConversionError:
+            try:
+                pxsize = pxsize << u.arcsec
+            except UnitConversionError:
+                log.error(f"Wrong unit for parameter 'pxsize' - should be angle or parsec")
+                return None
+            pxsize = (pxsize.value * params['distance'].to_value(u.pc) / 206265.) << u.pc
+        pxsize_out = self.pxscale * (params['distance'].to_value(u.pc) / self.distance.to_value(u.pc))
+        pxsize = pxsize.value
+        pxsize_out = pxsize_out.value
+
+        # cut arrays if they have even size along axes
+        xc_input = (params['brightness_map'].shape[1]) // 2
+        yc_input = (params['brightness_map'].shape[0]) // 2
+        nlines = 0
+        if 'brightness_lines' in params and isinstance(params['brightness_lines'], dict):
+            for k, v in params['brightness_lines'].items():
+                nlines += 1
+                if v.shape != params['brightness_map'].shape:
+                    log.error("Size of all arrays containing the brightness in each lines "
+                              "should be equal to that of the `brightness_map'")
+                    return None
+                params['brightness_lines'][k] = params['brightness_lines'][k][
+                                                params['brightness_map'].shape[0] - 2 * yc_input:,
+                                                params['brightness_map'].shape[1] - 2 * xc_input:]
+        params['brightness_map'] = params['brightness_map'][params['brightness_map'].shape[0] - 2 * yc_input:,
+                                                            params['brightness_map'].shape[1] - 2 * xc_input:]
+
+        if np.isclose(pxsize_out, pxsize):
+            shape_out = params['brightness_map'].shape
+        else:
+            shape_out = (np.ceil(yc*pxsize/pxsize_out).astype(int) * 2 + 1,
+                         np.ceil(xc*pxsize/pxsize_out).astype(int) * 2 + 1)
+        xc_out = shape_out[1] // 2
+        yc_out = shape_out[0] // 2
+        if nlines == 0:
+            wavelengths = None
+        else:
+            wavelengths = np.array([])
+        brt_maps_out = np.zeros(shape=(1 + nlines, shape_out[0], shape_out[1]), dtype=np.float32)
+        brt_max = np.nanmax(params['brightness_map'])
+        if shape_out == params['brightness_map'].shape:
+            brt_maps_out[0] = params['brightness_map']
+            if nlines > 0:
+                for k, v in params['brightness_lines'].items():
+                    wavelengths = np.append(wavelengths, k)
+                    brt_maps_out[0] = v / brt_max
+        else:
+            # Interpolate brightness distributions to the ISM grid:
+            brt_maps = params['brightness_map'].reshape((1, params['brightness_map'].shape[0],
+                                                        params['brightness_map'].shape[1]))
+
+            if nlines > 0:
+                for k, v in params['brightness_lines'].items():
+                    wavelengths = np.append(wavelengths, k)
+                    brt_maps = np.append(brt_maps, v)
+            brt_maps = brt_maps.reshape((1+nlines, params['brightness_map'].shape[0],
+                                         params['brightness_map'].shape[1]))
+
+            xx, yy = np.arange(brt_maps.shape[2]), np.arange(brt_maps.shape[1])
+            xx_out, yy_out = np.meshgrid(np.arange(shape_out[1]), np.arange(shape_out[0]))
+            xx_out = (xx_out - xc_out) * pxsize_out / pxsize + xc_input
+            yy_out = (yy_out - yc_out) * pxsize_out / pxsize + yc_input
+            for ind, brt_slice in enumerate(brt_maps):
+                p = RectBivariateSpline(xx, yy, brt_slice.T, kx=1, ky=1)
+                output = np.zeros_like(xx_out, dtype=np.float32)
+                rec = (xx_out >= 0) & (xx_out <= (brt_maps.shape[2]-1)) & \
+                      (yy_out >= 0) & (yy_out <= (brt_maps.shape[1]-1))
+                output[rec] = p.ev(xx_out[rec], yy_out[rec])
+                brt_maps_out[ind] = output.reshape(shape_out)
+        if nlines == 0:
+            lines_maps = None
+        else:
+            lines_maps = brt_maps_out[1:]
+            cloudy_model_index = None
+        neb = CustomNebula(xc=xc, yc=yc, max_brightness=brt_max, turbulent_sigma=params['turbulent_sigma'],
+                           sys_velocity=params['sys_velocity'], vel_gradient=params['vel_gradient'],
+                           vel_pa=params['vel_pa'], spectrum_id=cloudy_model_index,
+                           n_brightest_lines=params['n_brightest_lines'],
+                           pxscale=self.pxscale * (params['distance'].to(u.pc) / self.distance.to(u.pc)),
+                           pix_width=shape_out[1], pix_height=shape_out[0],
+                           brt_map=brt_maps_out[0], lines_maps=lines_maps, lines_wl=wavelengths)
+        return neb
 
     def generate(self, all_objects):
         """
@@ -1222,6 +1338,12 @@ class ISM:
                 else:
                     cur_obj['linerat_constant'] = True
 
+            if cur_obj['type'] == 'CustomNebula':
+                if 'brightness_lines' in cur_obj and isinstance(cur_obj['brightness_lines'], dict):
+                    cur_obj['linerat_constant'] = False
+                else:
+                    cur_obj['linerat_constant'] = True
+
             if cur_obj['type'] == 'DIG':
                 if cur_obj.get('max_brightness') is None or cur_obj.get('max_brightness') <= 0:
                     log.warning("Wrong set of parameters for the nebula #{0}: skip this one".format(ind_obj))
@@ -1283,7 +1405,7 @@ class ISM:
                         x = (self.width - 1) / 2. - (cur_obj.get('offset_RA').to_value(u.degree) /
                                                      proj_plane_pixel_scales(self.wcs)[0])
                         y = (self.height - 1) / 2. + (cur_obj.get('offset_DEC').to_value(u.degree) /
-                                                     proj_plane_pixel_scales(self.wcs)[0])
+                                                      proj_plane_pixel_scales(self.wcs)[0])
                     x = np.round(x).astype(int)
                     y = np.round(y).astype(int)
                 else:
@@ -1429,10 +1551,12 @@ class ISM:
                                                  perturb_scale=cur_obj['perturb_scale'],
                                                  perturb_amplitude=cur_obj['perturb_amplitude'],
                                                  )
-                elif cur_obj['type'] == "CustomNebulae":
-                    # generated_object = CustomNebula(xc=x, yc=y,)
-                    log.warning("Custom Nebulae will be added soon")
-                    continue
+                elif cur_obj['type'] == "CustomNebula":
+                    generated_object = self.process_custom_nebula(cur_obj, xc=x, yc=y,
+                                                                  cloudy_model_index=cloudy_model_index)
+                    if generated_object is None:
+                        log.warning("Something wrong with the Custom Nebula: skip it")
+                        continue
                 else:
                     log.warning("Unrecognized type of the nebula #{0}: skip this one".format(ind_obj))
                     continue
@@ -1922,6 +2046,10 @@ class ISM:
                 data_in_apertures = np.moveaxis(data_in_apertures, 2, 0)
                 if data_in_apertures.shape[1] > 1:
                     prf_index = np.flatnonzero(all_wavelength == 6562.81)
+                    if len(prf_index) == 0:
+                        prf_index = np.flatnonzero(np.round(all_wavelength) == 6563.)
+                        if len(prf_index) == 0:
+                            prf_index = 0
                 else:
                     prf_index = 0
                 flux_norm_in_apertures = data_in_apertures.sum(axis=2)
@@ -1935,7 +2063,8 @@ class ISM:
                 wl_logscale_lsf_highres = np.arange(np.round((wl_logscale_lsf[-1] - wl_logscale_lsf[0]
                                                               ) / 2. * highres_factor).astype(int) * 2 + 1
                                                     ) / highres_factor + wl_logscale_lsf[0]
-                p = interp1d(wl_logscale_lsf, line_prf_in_apertures, axis=1, assume_sorted=True)
+                p = interp1d(wl_logscale_lsf, line_prf_in_apertures, axis=1, assume_sorted=True,
+                             fill_value=0, bounds_error=False)
                 line_highres_log = p(wl_logscale_lsf_highres)
                 line_highres_log = line_highres_log / np.sum(line_highres_log, axis=1)[:, None]
                 if flux_norm_in_apertures.shape[1] == 1:

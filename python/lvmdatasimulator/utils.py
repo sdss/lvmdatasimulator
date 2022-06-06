@@ -19,7 +19,7 @@ from pyneb import RedCorr
 import lvmdatasimulator
 from lvmdatasimulator import log
 from sympy import divisors
-from scipy.interpolate import interp2d, RectBivariateSpline
+from scipy.interpolate import RectBivariateSpline
 import pyCloudy as pc
 
 
