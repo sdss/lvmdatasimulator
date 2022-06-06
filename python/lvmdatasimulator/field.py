@@ -102,7 +102,7 @@ class LVMField:
                 self.ism_params[k] = v
         self.ism = self._create_ism(**self.ism_params)
         self.ism_map = None
-        self.starlist = StarsList(ra=self.ra, dec=self.dec, radius=self.radius)
+        self.starlist = StarsList(ra=self.ra, dec=self.dec, radius=self.radius)  # empty starlist
 
     def _create_wcs(self):
         """

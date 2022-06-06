@@ -6,6 +6,7 @@
 # @License: BSD 3-Clause
 # @Copyright: Oleg Egorov, Enrico Congiu
 
+from urllib.error import HTTPError
 import astropy.units as u
 import numpy as np
 import pyphot
@@ -18,6 +19,7 @@ from astropy.coordinates import SkyCoord
 from astropy.table import Table, vstack
 from astroquery.gaia import Gaia
 from spectres import spectres
+from requests.exceptions import HTTPError
 # from scipy.interpolate import interp1d
 from lvmdatasimulator import log, STELLAR_LIBS, WORK_DIR
 
@@ -201,7 +203,10 @@ class StarsList:
         try:
             result = query_gaia(self.center, self.radius.to(u.deg))
         except TimeoutError:
-            log.warning('GAIA DR2 server timed out. Continuing without gaia stars')
+            log.warning('Gaia DR2 server timed out. Continuing without gaia stars...')
+            return
+        except HTTPError:
+            log.warning('Gaia DR2 server is down. Continuing without gaia stars...')
             return
 
         # select only the relevant columns
