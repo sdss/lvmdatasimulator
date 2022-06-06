@@ -102,7 +102,7 @@ class LVMField:
                 self.ism_params[k] = v
         self.ism = self._create_ism(**self.ism_params)
         self.ism_map = None
-        self.starlist = None
+        self.starlist = StarsList(ra=self.ra, dec=self.dec, radius=self.radius)
 
     def _create_wcs(self):
         """
@@ -148,7 +148,6 @@ class LVMField:
             self.starlist = StarsList(filename=filename, dir=directory)
             return
 
-        self.starlist = StarsList(ra=self.ra, dec=self.dec, radius=self.radius)
         self.starlist.generate_gaia(self.wcs, gmag_limit=gmag_limit, shift=shift)
 
         if save:
@@ -175,7 +174,6 @@ class LVMField:
                 Defaults to {}.
         """
 
-        self.starlist = StarsList(ra=self.ra, dec=self.dec, radius=self.radius)
         self.starlist.generate_stars_manually(self.wcs, parameters, shift=shift)
 
         if save:
@@ -183,7 +181,7 @@ class LVMField:
 
     def open_starlist(self, filename, directory=lvmdatasimulator.WORK_DIR):
         """
-        Open an existing file list from a fits file.
+        Open an existing file list from a fits file. This is redundant?
 
         Args:
             filename (str):
@@ -310,7 +308,7 @@ class LVMField:
                 wavelength_range[i] = wavelength_range[i].to(u.AA).value
 
             wavelength_range = np.atleast_1d(wavelength_range)
-            if self.starlist is not None:
+            if len(self.starlist) != 0:
                 xc_stars = np.round(self.starlist.stars_table['x']).astype(int)
                 yc_stars = np.round(self.starlist.stars_table['y']).astype(int)
                 wl_grid = np.linspace(wavelength_range[0], wavelength_range[1], 10)
