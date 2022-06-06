@@ -227,7 +227,7 @@ class LVMField:
         if self.starlist is not None:
             self._plot_stars(ax=ax)
         cb = plt.colorbar(img)
-        cb.set_label(r"F(H$\alpha$), erg s$^{-1}$ cm$^{-2}$", fontsize=15)
+        cb.set_label(r"F, erg s$^{-1}$ cm$^{-2}$", fontsize=15)
         ax.set_xlabel('RA (J2000)', fontsize=15)
         ax.set_ylabel('Dec (J2000)', fontsize=15)
 
