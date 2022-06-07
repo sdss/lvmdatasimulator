@@ -174,7 +174,7 @@ def convolve_array(to_convolve, kernel, selected_points_x, selected_points_y,
 
     if nchunks == -1:
         if max(orig_shape_arcsec) > 1700:
-            nchunks = 12
+            nchunks = 16
         elif max(orig_shape_arcsec) > 1200:
             nchunks = 9
         elif max(orig_shape_arcsec) > 660:
