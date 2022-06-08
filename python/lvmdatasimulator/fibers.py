@@ -171,8 +171,8 @@ class FiberBundle:
 
         if self.nrings is not None:
 
-            # open the full array until a certain exagonal ring
-            log.info(f'Using the inner {self.nrings} exagonal rings.')
+            # open the full array until a certain hexagonal ring
+            log.info(f'Using the inner {self.nrings} hexagonal rings.')
             mask = selected['ring_id'] <= self.nrings
             selected = selected[mask].copy()
 

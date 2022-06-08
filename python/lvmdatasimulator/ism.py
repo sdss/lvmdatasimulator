@@ -912,7 +912,8 @@ class ISM:
         assign_units(self, ['vel_amplitude', 'turbulent_sigma', 'sys_velocity', 'distance', 'spec_resolution'],
                      [velunit, velunit, velunit, u.kpc, u.Angstrom])
         self.content = fits.HDUList()
-        self.content.append(fits.PrimaryHDU(header=self.wcs.to_header(), data=np.zeros(shape=(2, 2), dtype=int)))
+        self.content.append(fits.PrimaryHDU(header=self.wcs.to_header(), data=np.zeros(shape=(self.height, self.width),
+                                                                                       dtype=np.float32)))
         self.vel_grid = np.linspace(-self.vel_amplitude + self.sys_velocity,
                                     self.vel_amplitude + self.sys_velocity,
                                     np.ceil(self.vel_amplitude / self.vel_resolution).astype(int) * 2 + 1)
@@ -1124,6 +1125,13 @@ class ISM:
         return self.content
 
     def save_ism(self, filename):
+        total_map = None
+        if self.content[0].header['Nobj'] > 0:
+            total_map = self.get_map(wavelength=[6560., 6565.])
+        if total_map is None:
+            total_map = np.zeros(shape=(self.height, self.width), dtype=np.float32)
+        self.content[0].data = total_map
+        self.content[0].header['IM_WL'] = ('6560-6565', "Rest-frame wavelength range for the ref. image")
         self.content.writeto(filename, overwrite=True)
         log.info("Generated ISM saved to {0}".format(filename))
 
@@ -1160,6 +1168,8 @@ class ISM:
         xc_input = (params['brightness_map'].shape[1]) // 2
         yc_input = (params['brightness_map'].shape[0]) // 2
         nlines = 0
+        lines_map = {}
+
         if 'brightness_lines' in params and isinstance(params['brightness_lines'], dict):
             for k, v in params['brightness_lines'].items():
                 nlines += 1
@@ -1167,17 +1177,18 @@ class ISM:
                     log.error("Size of all arrays containing the brightness in each lines "
                               "should be equal to that of the `brightness_map'")
                     return None
-                params['brightness_lines'][k] = params['brightness_lines'][k][
-                                                params['brightness_map'].shape[0] - 2 * yc_input:,
-                                                params['brightness_map'].shape[1] - 2 * xc_input:]
-        params['brightness_map'] = params['brightness_map'][params['brightness_map'].shape[0] - 2 * yc_input:,
-                                                            params['brightness_map'].shape[1] - 2 * xc_input:]
-
+                lines_map[k] = params['brightness_lines'][k][
+                               params['brightness_map'].shape[0] - 2 * yc_input:,
+                               params['brightness_map'].shape[1] - 2 * xc_input:]
+                lines_map[k][~np.isfinite(lines_map[k]) | (lines_map[k] < 0)] = 0
+        brt_map = params['brightness_map'][
+                  params['brightness_map'].shape[0] - 2 * yc_input:, params['brightness_map'].shape[1] - 2 * xc_input:]
+        brt_map[~np.isfinite(brt_map) | (brt_map < 0)] = 0
         if np.isclose(pxsize_out, pxsize):
-            shape_out = params['brightness_map'].shape
+            shape_out = brt_map.shape
         else:
-            shape_out = (np.ceil(yc*pxsize/pxsize_out).astype(int) * 2 + 1,
-                         np.ceil(xc*pxsize/pxsize_out).astype(int) * 2 + 1)
+            shape_out = (np.ceil(yc_input*pxsize/pxsize_out).astype(int) * 2 + 1,
+                         np.ceil(xc_input*pxsize/pxsize_out).astype(int) * 2 + 1)
         xc_out = shape_out[1] // 2
         yc_out = shape_out[0] // 2
         if nlines == 0:
@@ -1185,24 +1196,25 @@ class ISM:
         else:
             wavelengths = np.array([])
         brt_maps_out = np.zeros(shape=(1 + nlines, shape_out[0], shape_out[1]), dtype=np.float32)
-        brt_max = np.nanmax(params['brightness_map'])
-        if shape_out == params['brightness_map'].shape:
-            brt_maps_out[0] = params['brightness_map']
+        brt_max = np.nanmax(brt_map)
+        if shape_out == brt_map.shape:
+            brt_maps_out[0] = brt_map
             if nlines > 0:
-                for k, v in params['brightness_lines'].items():
+                ind = 1
+                for k, v in lines_map.items():
                     wavelengths = np.append(wavelengths, k)
-                    brt_maps_out[0] = v / brt_max
+                    brt_maps_out[ind] = v
+                    ind += 1
         else:
             # Interpolate brightness distributions to the ISM grid:
-            brt_maps = params['brightness_map'].reshape((1, params['brightness_map'].shape[0],
-                                                        params['brightness_map'].shape[1]))
+            brt_maps = brt_map.reshape((1, brt_map.shape[0], brt_map.shape[1]))
 
             if nlines > 0:
-                for k, v in params['brightness_lines'].items():
+                for k, v in lines_map.items():
                     wavelengths = np.append(wavelengths, k)
                     brt_maps = np.append(brt_maps, v)
-            brt_maps = brt_maps.reshape((1+nlines, params['brightness_map'].shape[0],
-                                         params['brightness_map'].shape[1]))
+            brt_maps = brt_maps.reshape((1+nlines, brt_map.shape[0],
+                                         brt_map.shape[1]))
 
             xx, yy = np.arange(brt_maps.shape[2]), np.arange(brt_maps.shape[1])
             xx_out, yy_out = np.meshgrid(np.arange(shape_out[1]), np.arange(shape_out[0]))
@@ -1291,19 +1303,26 @@ class ISM:
                                    'perturb_amplitude', 'perturb_scale', 'radius', 'distance',
                                    'continuum_type', 'continuum_data', 'continuum_flux', 'continuum_mag',
                                    'continuum_wl', 'ext_law', 'ext_rv', 'vel_gradient', 'vel_rot', 'vel_pa',
-                                   'n_brightest_lines', 'offset_RA', 'offset_DEC', 'RA', 'DEC'],
+                                   'n_brightest_lines', 'offset_RA', 'offset_DEC', 'RA', 'DEC',
+                                   'pxsize'],
                                   [0, 0, 1., 0, self.sys_velocity, self.turbulent_sigma, 0, 0.1, 0, 0, self.distance,
                                    None, None, 0, None, 5500., self.ext_law, self.R_V, 0, 0, kin_pa_default, None,
-                                   None, None, None, None],
+                                   None, None, None, None, self.pxscale],
                                   [fluxunit, u.mag, None, velunit, velunit, velunit, None, None,
                                    u.pc, u.pc, u.kpc, None, None, fluxunit/u.AA, None, u.Angstrom,
                                    None, None, velunit / u.pc, velunit, u.degree, None, u.arcsec, u.arcsec,
-                                   u.degree, u.degree]):
+                                   u.degree, u.degree, None]):
                 set_default_dict_values(cur_obj, k, v, unit=unit)
 
             for k in ['max_brightness', 'max_extinction', 'radius', 'continuum_flux']:
                 if cur_obj[k] < 0:
                     cur_obj[k] = 0
+
+            if cur_obj['type'] == 'CustomNebula':
+                if not isinstance(cur_obj.get('brightness_map'), np.ndarray):
+                    log.warning("Wrong set of parameters for the nebula #{0}: skip this one".format(ind_obj))
+                    continue
+                cur_obj['max_brightness'] = 1.
 
             if (cur_obj['max_brightness'] == 0) and (cur_obj['max_extinction'] == 0) and \
                     (((cur_obj['continuum_mag'] is None) and (cur_obj['continuum_flux'] == 0)) or
@@ -1317,9 +1336,11 @@ class ISM:
             else:
                 if cur_obj.get('cloudy_id') is None:
                     if cur_obj.get('cloudy_params') is None or (type(cur_obj.get('cloudy_params')) is not dict):
-                        log.warning("Neither of 'cloudy_id' or 'cloudy_params' is set for the nebula #{0}: "
-                                    "use default 'cloudy_id={1}'".format(ind_obj,
-                                                                         lvmdatasimulator.CLOUDY_SPEC_DEFAULTS['id']))
+                        if not (cur_obj['type'] == 'CustomNebula' and
+                                isinstance(cur_obj.get('brightness_lines'), dict)):
+                            log.warning("Neither of 'cloudy_id' or 'cloudy_params' is set for the nebula #{0}: "
+                                        "use default 'cloudy_id={1}'".format(ind_obj,
+                                                                             lvmdatasimulator.CLOUDY_SPEC_DEFAULTS['id']))
                         cur_obj['cloudy_id'] = lvmdatasimulator.CLOUDY_SPEC_DEFAULTS['id']
                     else:
                         for p in lvmdatasimulator.CLOUDY_SPEC_DEFAULTS:
