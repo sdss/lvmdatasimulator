@@ -220,7 +220,7 @@ class LVMField:
 
         fig, ax = plt.subplots(1, 1, subplot_kw=dict(projection=self.wcs))
         if self.ism_map is None:
-            self._get_ism_map(wavelength=6562.81)
+            self._get_ism_map(wavelength=[6560., 6565.])  # 6562.81)
         norm = ImageNormalize(self.ism_map, interval=PercentileInterval(percentile=percentile),
                               stretch=AsinhStretch())
         img = ax.imshow(self.ism_map, norm=norm, cmap=cmap)
