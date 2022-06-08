@@ -47,7 +47,7 @@ class Branch:
 
     name: str
     wavecoord: w.WaveCoord
-    lsf_fwhm: u.AA = 0.5 * u.AA
+    lsf_fwhm: u.AA = 1.5 * u.AA
     gain: u.electron / u.adu = 1.0 * u.electron / u.adu
     ron: u.electron = 5.0 * u.electron / u.pix
     dark: u.electron / u.s = 0.001 * u.electron / u.s / u.pix

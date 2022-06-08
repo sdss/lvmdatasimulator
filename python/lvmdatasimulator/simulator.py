@@ -1062,15 +1062,29 @@ class Simulator:
 
     def _populate_map(self, map, values, ids, wcs):
 
-        yy, xx = np.mgrid[:map.shape[0], :map.shape[1]]
+        # I'm assuming that all fibers will have the same diameter on the sky
+        # For now this is fine, but it might not be ok anymore with the real instrument
+        diameter = np.ceil(self.bundle.fibers[0].diameter / self.source.spaxel).value
+        if diameter % 2 == 0:
+            size = int(diameter) + 3
+        else:
+            size = int(diameter) + 2
+
+        kernel = np.zeros((size, size))
+        center = kernel.shape[0] // 2  # center of new array
+
+        yy, xx = np.mgrid[:kernel.shape[0], :kernel.shape[1]]
+        radius = np.sqrt((xx - center)**2 + (yy - center)**2)
+        kernel[radius < diameter / 2] = 1
 
         for fiber in self.bundle.fibers:
             flux = values[ids['id'] == fiber.id]
             fiber_coord = self.source.coord.spherical_offsets_by(fiber.x, fiber.y)
 
             fiber_x, fiber_y = wcs.world_to_pixel(fiber_coord)
+            fiber_x = int(np.rint(fiber_x))
+            fiber_y = int(np.rint(fiber_y))
 
-            radius = np.sqrt((xx - fiber_x)**2 + (yy - fiber_y)**2)
-            map[radius < fiber.diameter.value / 2] = flux
+            map[fiber_y-center: fiber_y+center+1, fiber_x-center: fiber_x+center+1] += kernel * flux
 
         return map
