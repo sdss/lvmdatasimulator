@@ -74,7 +74,7 @@ def save_input_params(params):
                    )
 
     # filling missing keys with default values
-    for key in params.keys():
+    for key in default.keys():
         if key not in params:
             if key in ['ra_bundle', 'dec_bundle']:
                 params[key] = params.get(key.replace('_bundle', ''), default[key])
@@ -83,6 +83,24 @@ def save_input_params(params):
 
     outname = '{}_input_parameters.yml' .format(params['name'])
     log.info(f'Saving input parameters to {outname}')
+
+    outname = os.path.join(WORK_DIR, outname)  # putting it in the WORK directory
+    with open(outname, 'w') as fp:
+        yaml.dump(params, fp)
+
+
+def save_input_params_etc(params):
+
+    default = {'name': 'LVM_Field_ETC',
+               'airmass': 1.5,
+               'days_moon': 0,}
+
+    for key in default.keys():
+        if key not in params:
+            params[key] = default[key]
+
+    outname = '{}_input_parameters_etc.yml' .format(params['name'])
+    log.info(f'Saving input ETC parameters to {outname}')
 
     outname = os.path.join(WORK_DIR, outname)  # putting it in the WORK directory
     with open(outname, 'w') as fp:
@@ -182,22 +200,26 @@ def run_lvm_etc(params, check_lines=None, desired_snr=None):
             desired_snr (float, list, tuple):
                 Desired signal-to-noise ratios in corresponding lines. Should be of the same size as check_lines
     """
+
     if isinstance(params, str):
         params = open_input_params(params)
+
     if ('nebula' not in params) or (type(params['nebula']) is not dict):
         nebula = None
     else:
         nebula = params['nebula']
         if nebula.get('max_brightness') is None or nebula.get('max_brightness') < 0:
             nebula = None
+
     if ('star' not in params) or (type(params['star']) is not dict):
         star = None
     else:
         star = params['star']
-    if star is None and nebula is None:
-        raise ValueError('No nebula or star defined, or they defined incorrectly. Aborting the simulation')
 
-    str_print = 'Start simulations in the mode of exposure time calculator for '
+    if star is None and nebula is None:
+        raise ValueError('No nebula or star defined, or they are defined incorrectly. Aborting the simulation')
+
+    str_print = 'Start simulations in exposure time calculator mode for '
     if nebula is not None:
         str_print += '1 nebula '
         if star is not None:
@@ -213,12 +235,12 @@ def run_lvm_etc(params, check_lines=None, desired_snr=None):
 
     start = time.time()
     name = params.get('name', 'LVM_Field_ETC')
-    my_lvmfield = LVMField(ra=params.get('ra', 10),
-                           dec=params.get('dec', -10),
+    my_lvmfield = LVMField(ra=10,
+                           dec=-10,
                            size=1,
                            spaxel=1,
-                           unit_ra=params.get('unit_ra', u.degree),
-                           unit_dec=params.get('unit_dec', u.degree),
+                           unit_ra=u.deg,
+                           unit_dec=u.deg,
                            unit_size=u.arcmin,
                            unit_spaxel=u.arcsec,
                            name=name)
@@ -241,16 +263,13 @@ def run_lvm_etc(params, check_lines=None, desired_snr=None):
     default_exptimes = list(np.round(np.logspace(np.log10(300), np.log10(90000), 15)).astype(int))
     exptimes = params.get('exptimes', default_exptimes)
     obs = Observation(name=name,
-                      ra=params.get('ra_bundle', params.get('ra', 10)),
-                      dec=params.get('dec_bundle', params.get('dec', -10)),
-                      unit_ra=params.get('unit_ra_bundle', u.deg),
-                      unit_dec=params.get('unit_dec_bundle', u.deg),
-                      time=params.get('time', '2022-01-01T00:00:00.00'),
-                      utcoffset=params.get('utcoffset', -3 * u.hour),
+                      ra=10,
+                      dec=-10,
+                      unit_ra=u.deg,
+                      unit_dec=u.deg,
                       exptimes=exptimes,
-                      airmass=params.get('airmass', None),
-                      days_moon=params.get('days_moon', None),
-                      sky_template=params.get('sky_template', None))
+                      airmass=params.get('airmass', 1.5),
+                      days_moon=params.get('days_moon', 0))
 
     tel = LVM160()
     spec = LinearSpectrograph()
@@ -259,34 +278,55 @@ def run_lvm_etc(params, check_lines=None, desired_snr=None):
     sim.simulate_observations()
     sim.save_outputs()
 
+    save_input_params_etc(params)
+
+    outdir = os.path.join(WORK_DIR, 'outputs')
+
     snr_output = np.zeros(shape=(len(check_lines), len(exptimes)))
     w_lam = 1.
     for exp_id, exptime in enumerate(exptimes):
-        with fits.open(f'outputs/{name}_linear_central_{exptime}_flux.fits') as hdu:
+        outname = os.path.join(outdir, f'{name}_linear_central_{exptime}_flux.fits')
+        with fits.open(outname) as hdu:
             for l_id, line in enumerate(check_lines):
                 snr_output[l_id, exp_id] = np.nanmax(hdu['SNR'].data[0,
                                                                      (hdu['WAVE'].data > (line - w_lam)) &
                                                                      (hdu['WAVE'].data < (line + w_lam))])
+        os.remove(outname)  #remove temporary files
+        os.remove(outname.replace('flux', 'realization'))
+
+    os.remove(os.path.join(outdir, f'{name}_linear_central_input.fits'))
+    # remove output directory if empty
+    if len(os.listdir(outdir)) == 0:
+        os.rmdir(outdir)
 
     if desired_snr is not None and (len(desired_snr) == len(check_lines)):
         desired_exptimes = []
     else:
         default_exptimes = None
+
     fig, ax = plt.subplots()
     for l_id, line in enumerate(check_lines):
+
         ax.scatter(exptimes, snr_output[l_id, :], label=str(line))
+
         res = np.polyfit(np.log10(snr_output[l_id, :]), np.log10(exptimes), 3)
         p = np.poly1d(res)
         ax.plot(10**p(np.log10(snr_output[l_id, :])), snr_output[l_id, :])
+
         if desired_snr is not None and (len(desired_snr) == len(check_lines)):
+
             desired_exptimes.append(np.round(10**p(np.log10(desired_snr[l_id]))).astype(int))
             print(f'To reach S/N={desired_snr[l_id]} in line = {line}±{w_lam}A we need '
                   f'{desired_exptimes[-1]}s of single exposure')
+
     ax.set_xscale('log')
     ax.set_yscale('log')
-    ax.legend()
+
+    ax.legend(loc='best')
+
     ax.set_xlabel("Exposure time, s")
     ax.set_ylabel("Expected S/N ratio")
+
     plt.show()
-    print('Elapsed time: {:0.1f}s'.format(time.time() - start))
+    print('\nElapsed time: {:0.1f}s' .format(time.time() - start))
     return desired_exptimes
