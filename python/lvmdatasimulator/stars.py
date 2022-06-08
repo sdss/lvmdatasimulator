@@ -498,8 +498,8 @@ class StarsList:
 
     def generate_stars_manually(self, wcs, parameters, shift=False):
 
-        ra_list = parameters.get('ra', [0])
-        dec_list = parameters.get('dec', [0])
+        ra_list = parameters.get('ra', [10])
+        dec_list = parameters.get('dec', [-10])
         gmag_list = parameters.get('gmag', [17])
         teff_list = parameters.get('teff', [6000])
         ag_list = parameters.get('ag', [0])
