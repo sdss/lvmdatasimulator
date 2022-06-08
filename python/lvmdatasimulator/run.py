@@ -1,3 +1,5 @@
+import numpy as np
+
 from lvmdatasimulator.field import LVMField
 from lvmdatasimulator.observation import Observation
 from lvmdatasimulator.telescope import LVM160
@@ -9,7 +11,8 @@ from astropy.io.misc import yaml
 
 import astropy.units as u
 import time
-
+from astropy.io import fits
+from matplotlib import pyplot as plt
 import os
 
 
@@ -95,6 +98,7 @@ def open_input_params(filename):
 
     return params
 
+
 def run_simulator_1d(params):
     """
     Main function to run the simulation of an LVM field.
@@ -124,7 +128,6 @@ def run_simulator_1d(params):
     else:
         if params['nebulae'] is None:
             raise ValueError('No nebulae defined, aborting the simulation')
-
 
         my_lvmfield.add_nebulae(params['nebulae'],
                                 save_nebulae=params.get('nebulae_name', 'LVM_field_nebulae'))
@@ -166,3 +169,124 @@ def run_simulator_1d(params):
     print('Elapsed time: {:0.1f}' .format(time.time()-start))
 
 
+def run_lvm_etc(params, check_lines=None, desired_snr=None):
+    """
+        Simple run the simulations in the mode of exposure time calculator.
+
+        Args:
+            params (dict, str):
+                Dictionary containing all the input needed to run the simulator or name of the JSON file
+                where it is stored.
+            check_lines (float, list, tuple):
+                Wavelength or the list of wavelength to examine in the output. Default - only Halpha line
+            desired_snr (float, list, tuple):
+                Desired signal-to-noise ratios in corresponding lines. Should be of the same size as check_lines
+    """
+    if isinstance(params, str):
+        params = open_input_params(params)
+    if ('nebula' not in params) or (type(params['nebula']) is not dict):
+        nebula = None
+    else:
+        nebula = params['nebula']
+        if nebula.get('max_brightness') is None or nebula.get('max_brightness') < 0:
+            nebula = None
+    if ('star' not in params) or (type(params['star']) is not dict):
+        star = None
+    else:
+        star = params['star']
+    if star is None and nebula is None:
+        raise ValueError('No nebula or star defined, or they defined incorrectly. Aborting the simulation')
+
+    str_print = 'Start simulations in the mode of exposure time calculator for '
+    if nebula is not None:
+        str_print += '1 nebula '
+        if star is not None:
+            str_print += 'and '
+    if star is not None:
+        str_print += '1 star '
+    log.info(str_print)
+
+    if check_lines is None:
+        check_lines = [6563.]
+    if type(check_lines) in [float, int]:
+        check_lines = [check_lines]
+
+    start = time.time()
+    name = params.get('name', 'LVM_Field_ETC')
+    my_lvmfield = LVMField(ra=params.get('ra', 10),
+                           dec=params.get('dec', -10),
+                           size=1,
+                           spaxel=1,
+                           unit_ra=params.get('unit_ra', u.degree),
+                           unit_dec=params.get('unit_dec', u.degree),
+                           unit_size=u.arcmin,
+                           unit_spaxel=u.arcsec,
+                           name=name)
+
+    if nebula is not None:
+        my_lvmfield.add_nebulae([{"type": 'DIG',
+                                  'perturb_scale': 0, 'perturb_amplitude': 0,
+                                  'max_brightness': nebula.get('max_brightness'),
+                                  'cloudy_id': nebula.get('cloudy_id'),
+                                  'cloudy_params': nebula.get('cloudy_params'),
+                                  'continuum_type': nebula.get('continuum_type'),
+                                  'continuum_data': nebula.get('continuum_data'),
+                                  'continuum_mag': nebula.get('continuum_mag'),
+                                  'continuum_flux': nebula.get('continuum_flux', 0),
+                                  'continuum_wl': nebula.get('continuum_wl', 5500.),
+                                  'offset_X': 0, 'offset_Y': 0}])
+    if star is not None:
+        my_lvmfield.generate_single_stars(parameters=star)
+
+    default_exptimes = list(np.round(np.logspace(np.log10(300), np.log10(90000), 15)).astype(int))
+    exptimes = params.get('exptimes', default_exptimes)
+    obs = Observation(name=name,
+                      ra=params.get('ra_bundle', params.get('ra', 10)),
+                      dec=params.get('dec_bundle', params.get('dec', -10)),
+                      unit_ra=params.get('unit_ra_bundle', u.deg),
+                      unit_dec=params.get('unit_dec_bundle', u.deg),
+                      time=params.get('time', '2022-01-01T00:00:00.00'),
+                      utcoffset=params.get('utcoffset', -3 * u.hour),
+                      exptimes=exptimes,
+                      airmass=params.get('airmass', None),
+                      days_moon=params.get('days_moon', None),
+                      sky_template=params.get('sky_template', None))
+
+    tel = LVM160()
+    spec = LinearSpectrograph()
+    bundle = FiberBundle(bundle_name='central')
+    sim = Simulator(my_lvmfield, obs, spec, bundle, tel, fast=True)
+    sim.simulate_observations()
+    sim.save_outputs()
+
+    snr_output = np.zeros(shape=(len(check_lines), len(exptimes)))
+    w_lam = 1.
+    for exp_id, exptime in enumerate(exptimes):
+        with fits.open(f'outputs/{name}_linear_central_{exptime}_flux.fits') as hdu:
+            for l_id, line in enumerate(check_lines):
+                snr_output[l_id, exp_id] = np.nanmax(hdu['SNR'].data[0,
+                                                                     (hdu['WAVE'].data > (line - w_lam)) &
+                                                                     (hdu['WAVE'].data < (line + w_lam))])
+
+    if desired_snr is not None and (len(desired_snr) == len(check_lines)):
+        desired_exptimes = []
+    else:
+        default_exptimes = None
+    fig, ax = plt.subplots()
+    for l_id, line in enumerate(check_lines):
+        ax.scatter(exptimes, snr_output[l_id, :], label=str(line))
+        res = np.polyfit(np.log10(snr_output[l_id, :]), np.log10(exptimes), 3)
+        p = np.poly1d(res)
+        ax.plot(10**p(np.log10(snr_output[l_id, :])), snr_output[l_id, :])
+        if desired_snr is not None and (len(desired_snr) == len(check_lines)):
+            desired_exptimes.append(np.round(10**p(np.log10(desired_snr[l_id]))).astype(int))
+            print(f'To reach S/N={desired_snr[l_id]} in line = {line}±{w_lam}A we need '
+                  f'{desired_exptimes[-1]}s of single exposure')
+    ax.set_xscale('log')
+    ax.set_yscale('log')
+    ax.legend()
+    ax.set_xlabel("Exposure time, s")
+    ax.set_ylabel("Expected S/N ratio")
+    plt.show()
+    print('Elapsed time: {:0.1f}s'.format(time.time() - start))
+    return desired_exptimes
