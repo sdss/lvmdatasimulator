@@ -28,10 +28,10 @@ Shortly, the current version of the code can be divided three main sections:
 The detailed documentation of these blocks will be added later to this readme.
 At the moment, we prepared two tutorials for users on how to use the code.
 
-- [Tutorial #1](examples/LVM_data_simulator_tutorial1.ipynb) describes the necessary steps to properly install and configure the package and overview the very basic steps to run the simulations.
-- [Tutorial #2](examples/LVM_data_simulator_tutorial2.ipynb) digs deeper into the configuration of some aspects of the simulator (fiber bundle, Observation class) and describe the properties of the output files.
-- [Tutorial #3](examples/LVM_data_simulator_tutorial3.ipynb) explains in more details how to configure the source field, simulate different types of nebulae. It has two major parts. One describes the very simplified simulations, while another considers different aspects on how to deal with the varying line rations and gas kinematics.
-- [Tutorial #4](examples/LVM_data_simulator_tutorial4.ipynb) shows how to use the simulator as a simple ETC.
+- [Tutorial #1](https://github.com/sdss/lvmdatasimulator/blob/main/examples/LVM_data_simulator_tutorial1.ipynb) describes the necessary steps to properly install and configure the package and overview the very basic steps to run the simulations.
+- [Tutorial #2](https://github.com/sdss/lvmdatasimulator/blob/main/examples/LVM_data_simulator_tutorial2.ipynb) digs deeper into the configuration of some aspects of the simulator (fiber bundle, Observation class) and describe the properties of the output files.
+- [Tutorial #3](https://github.com/sdss/lvmdatasimulator/blob/main/examples/LVM_data_simulator_tutorial3.ipynb) explains in more details how to configure the source field, simulate different types of nebulae. It has two major parts. One describes the very simplified simulations, while another considers different aspects on how to deal with the varying line rations and gas kinematics.
+- [Tutorial #4](https://github.com/sdss/lvmdatasimulator/blob/main/examples/LVM_data_simulator_tutorial4.ipynb) shows how to use the simulator as a simple ETC.
 
 
 
