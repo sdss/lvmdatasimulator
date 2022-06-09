@@ -187,7 +187,7 @@ def run_simulator_1d(params):
     print('Elapsed time: {:0.1f}' .format(time.time()-start))
 
 
-def run_lvm_etc(params, check_lines=None, desired_snr=None):
+def run_lvm_etc(params, check_lines=None, desired_snr=None, continuum=False):
     """
         Simple run the simulations in the mode of exposure time calculator.
 
@@ -199,6 +199,10 @@ def run_lvm_etc(params, check_lines=None, desired_snr=None):
                 Wavelength or the list of wavelength to examine in the output. Default - only Halpha line
             desired_snr (float, list, tuple):
                 Desired signal-to-noise ratios in corresponding lines. Should be of the same size as check_lines
+            continuum (bool):
+                If True, then S/N will be measured assuming the source spectrum is continuum (signal = flux per pixel);
+                otherwise (default) the flux is integrated in the window of ±2A assuming the
+                emission line spectrum(noise is also scaled)
     """
 
     if isinstance(params, str):
@@ -283,15 +287,26 @@ def run_lvm_etc(params, check_lines=None, desired_snr=None):
     outdir = os.path.join(WORK_DIR, 'outputs')
 
     snr_output = np.zeros(shape=(len(check_lines), len(exptimes)))
-    w_lam = 1.
+    w_lam = 2.
     for exp_id, exptime in enumerate(exptimes):
         outname = os.path.join(outdir, f'{name}_linear_central_{exptime}_flux.fits')
         with fits.open(outname) as hdu:
             for l_id, line in enumerate(check_lines):
-                snr_output[l_id, exp_id] = np.nanmax(hdu['SNR'].data[0,
-                                                                     (hdu['WAVE'].data > (line - w_lam)) &
-                                                                     (hdu['WAVE'].data < (line + w_lam))])
-        os.remove(outname)  #remove temporary files
+                if continuum:
+                    snr_output[l_id, exp_id] = np.nanmax(hdu['SNR'].data[0,
+                                                                         (hdu['WAVE'].data > (line - w_lam)) &
+                                                                         (hdu['WAVE'].data < (line + w_lam))])
+                else:
+                    rec_wl = (hdu['WAVE'].data > (line - w_lam)) & (hdu['WAVE'].data < (line + w_lam))
+                    rec_wl_cnt = (hdu['WAVE'].data > (line - w_lam*30)) & (hdu['WAVE'].data < (line + w_lam*30))
+                    flux = np.nansum(hdu['TARGET'].data[0, rec_wl] - np.nanmedian(hdu['TARGET'].data[0, rec_wl_cnt]))
+                    if flux < 0:
+                        flux = 0
+                    snr_output[l_id, exp_id] = flux/np.sqrt(np.nansum(hdu['ERR'].data[0, rec_wl]**2))
+                    # snr_output[l_id, exp_id] = np.nanmax(hdu['SNR'].data[0,
+                    #                                                      (hdu['WAVE'].data > (line - w_lam)) &
+                    #                                                      (hdu['WAVE'].data < (line + w_lam))])
+        os.remove(outname)  # remove temporary files
         os.remove(outname.replace('flux', 'realization'))
 
     os.remove(os.path.join(outdir, f'{name}_linear_central_input.fits'))
