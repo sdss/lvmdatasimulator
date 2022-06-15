@@ -1056,7 +1056,7 @@ class Simulator:
                 coord = self.observation.target_coords.spherical_offsets_by(fiber.x, fiber.y)
                 x, y = self.source.wcs.all_world2pix(coord.ra, coord.dec, 1)
                 r = fiber.diameter / (2 * self.source.spaxel.to(u.arcsec))
-                print(f'circle({x:0.3f}, {y:0.3f}, {r:0.3f})', file=f)
+                print(f'circle({x:0.3f}, {y:0.3f}, {r:0.3f}) # text={{{fiber.id}}}', file=f)
 
         log.info(f' Saving {outname}...')
 
