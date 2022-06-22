@@ -18,6 +18,9 @@ Don't forget to download all necessary files with the pre-computed grids of mode
 The details are given in this [notebook](examples/LVM_data_simulator_tutorial1.ipynb) and in this
 [section](#files)
 
+**N.B.:** We have been notified that there are problem installing the package with the M1 MacBook. The solution seems to be installing the **hdf5** package. Including this package in the requirements, however, creates issues with the installation on other platforms (e.g. Ubuntu). So, **if you are trying to install this package on a new Mac, please first do ``pip install hdf5``.
+
+
 ## How to use the code
 
 Shortly, the current version of the code can be divided three main sections:
