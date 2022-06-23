@@ -116,9 +116,12 @@ class FiberBundle:
 
         if nrings is not None:
             log.warning('nrings is defined. It will limit the number of fibers selected.')
-            if nrings > 24:
+            if nrings > 25:
                 log.warning('The maximum number of rings that can be simulated is 25.')
-                self.nrings = 24
+                self.nrings = 25
+            if nrings < 1:
+                log.warning('The ring number goes from 1 to 25. Setting it to 1.')
+                self.nrings = 1
 
         self.angle = angle
 
@@ -147,7 +150,7 @@ class FiberBundle:
         elif self.bundle_name == 'central':
 
             # open the central fiber
-            mask = fiber_table['ring_id'] == 0
+            mask = fiber_table['ring_id'] == 1
             selected = fiber_table[mask].copy()
             log.info('Using only the central fiber.')
 
