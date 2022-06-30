@@ -174,9 +174,9 @@ def convolve_array(to_convolve, kernel, selected_points_x, selected_points_y,
 
     if nchunks == -1:
         if max(orig_shape_arcsec) > 1700:
-            nchunks = 16
+            nchunks = 25
         elif max(orig_shape_arcsec) > 1200:
-            nchunks = 9
+            nchunks = 16
         elif max(orig_shape_arcsec) > 660:
             nchunks = 4
         else:
@@ -256,9 +256,9 @@ def chunksize(cube, nchunks=4, overlap=40):
     for i in range(min_chunks):
         for j in range(max_chunks):
             if min_dim_id == 0:
-                corners = ((cor_min_dim[i], cor_min_dim[i+1]+1), (cor_max_dim[j], cor_max_dim[j+1]+1))
+                corners = ((cor_min_dim[i], cor_min_dim[i+1]), (cor_max_dim[j], cor_max_dim[j+1]))
             else:
-                corners = ((cor_max_dim[j], cor_max_dim[j+1]+1), (cor_min_dim[i], cor_min_dim[i+1]+1))
+                corners = ((cor_max_dim[j], cor_max_dim[j+1]), (cor_min_dim[i], cor_min_dim[i+1]))
             original_corners.append(corners)
 
     assert len(original_corners) == nchunks, f'{len(original_corners)} but {nchunks} chunks'
