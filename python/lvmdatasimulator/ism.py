@@ -980,8 +980,9 @@ class ISM:
                          fill_value=0, bounds_error=False)
             cont_model_max = np.sum(cont_fullrange * p(cont_wl_fullrange)) / w_filter
         if ~np.isfinite(cont_norm) or cont_norm <= 0:
-            cont_norm = self.content[my_comp + "_CONTINUUM"].header.get("CONTMAG") * u.ABmag
-            cont_norm = cont_norm.to(u.STmag, u.spectral_density(cont_norm_wl * u.AA)).to(u.erg/u.s/u.cm**2/u.AA).value
+            cont_norm = self.content[my_comp + "_CONTINUUM"].header.get("CONTMAG") * (u.ABmag)
+            cont_norm = cont_norm.to(u.STmag,
+                                     u.spectral_density(cont_norm_wl * u.AA)).to(u.erg/u.s/u.cm**2/u.AA).value
         return continuum / cont_model_max * cont_norm * (wl_grid[1] - wl_grid[0])
 
     def _add_fits_extension(self, name, value, obj_to_add, zorder=0, cur_wavelength=0, add_fits_kw=None,
@@ -1269,7 +1270,7 @@ class ISM:
                                 'continuum_data': model_id or [poly_coefficients] or Teff or dict with "wl" and "flux"
                                                 # value defining cont. shape
                                 'continuum_flux': 1e-16 * u.erg / u.cm ** 2 / u.s / u.arcsec **2 / u.AA,
-                                'continuum_mag': 22 * u.mag,
+                                'continuum_mag': 22 * u.mag/ u.arcsec **2,
                                 'continuum_wl': 5500, # could be also R, V, B,
                                 'ext_law': 'F99',  # Extinction law, one of those used by pyneb (used for dark nebulae)
                                 'ext_rv': 3.1,  # Value of R_V for extinction curve calculation (used for dark nebulae)
@@ -1625,7 +1626,7 @@ class ISM:
                 add_fits_kw['CONTFLUX'] = (contflux,
                                            "Continuum brightness (in erg/s/cm^2/asec^2/AA) at ref. wl/Filter")
                 if cur_obj['continuum_mag'] is not None:
-                    contmag = cur_obj['continuum_mag'].to_value(u.mag)
+                    contmag = cur_obj['continuum_mag'].to_value(u.mag/u.arcsec ** 2)
                 else:
                     contmag = None
                 add_fits_kw['CONTMAG'] = (contmag,
