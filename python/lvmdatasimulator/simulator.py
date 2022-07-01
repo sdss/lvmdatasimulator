@@ -167,6 +167,7 @@ class Simulator:
         self.fast = fast
 
         # creating empty storage
+        self.output_no_noise = OrderedDict()  # realization without noise
         self.output_noise = OrderedDict()  # realization with noise
         self.output_calib = OrderedDict()  # flux calibrated
         # self.output_coadd = OrderedDict()
@@ -374,7 +375,7 @@ class Simulator:
         calibrated = self._flux_calibration(fiber.id, realization_noise, exptime)
         # self.output_calib[fiber.id] = calibrated
 
-        return (fiber.id, realization_noise, calibrated)
+        return (fiber.id, realization_noise, calibrated, single_exposure)
 
     def simulate_observations(self, exptimes=None):
         """
@@ -408,14 +409,18 @@ class Simulator:
                     for fiber in self.bundle.fibers])
 
             # reorganize outputs
-            ids = []
-            noises = []
-            calibs = []
+            ids = []  # fiber ids
+            realizations = []  # realization without noise
+            noises = []  # realization with noise
+            calibs = []  # realization calibrated
+
             for item in results:
                 ids.append(item[0])
                 noises.append(item[1])
                 calibs.append(item[2])
+                realizations.append(item[3])
 
+            self.output_no_noise[exptime] = OrderedDict(zip(ids, realizations))
             self.output_noise[exptime] = OrderedDict(zip(ids, noises))
             self.output_calib[exptime] = OrderedDict(zip(ids, calibs))
 
@@ -429,6 +434,8 @@ class Simulator:
         for branch in self.spectrograph.branches:
             log.info('Input spectra')
             self._save_inputs(branch)
+            log.info('Clean outputs')
+            self._save_outputs_no_noise(branch)
             log.info('Uncalibrated outputs')
             self._save_outputs_with_noise(branch)
             log.info('Calibrated outputs')
@@ -573,6 +580,57 @@ class Simulator:
             hdul.writeto(filename, overwrite=True)
             log.info(f"{filename} saved.")
 
+    def _save_outputs_no_noise(self, branch):
+        """
+        Save the uncalibrated output spectra without noise for a certain branch
+        to an RSS file.
+
+        Args:
+            branch (Branch):
+                specific spectrograph branch to be saved.
+        """
+        for exptime in self.observation.exptimes:
+            ids, target, total, noise, sky, snr = self._reorganize_to_rss(branch,
+                                                      self.output_no_noise[exptime])
+            primary = self._create_primary_hdu(branch, exptime)
+
+            target_hdu = fits.ImageHDU(data=target, name="TARGET")
+            target_hdu.header["BUNIT"] = "e/pix"
+            primary.header["EXT1"] = "TARGET"
+
+            total_hdu = fits.ImageHDU(data=total, name="TOTAL")
+            total_hdu.header["BUNIT"] = "e/pix"
+            primary.header["EXT2"] = "TOTAL"
+
+            noise_hdu = fits.ImageHDU(data=noise, name="ERR")
+            noise_hdu.header["BUNIT"] = "e/pix"
+            primary.header["EXT3"] = "ERR"
+
+            stn_hdu = fits.ImageHDU(data=snr, name="SNR")
+            stn_hdu.header["BUNIT"] = ""
+            primary.header["EXT4"] = "SNR"
+
+            sky_hdu = fits.ImageHDU(data=sky, name="SKY")
+            sky_hdu.header["BUNIT"] = "e/pix"
+            primary.header["EXT5"] = "SKY"
+
+            wave_hdu = fits.ImageHDU(data=branch.wavecoord.wave.value, name="WAVE")
+            wave_hdu.header["BUNIT"] = "Angstrom"
+            primary.header["EXT6"] = "WAVE"
+
+            ids_hdu = fits.BinTableHDU(ids, name="FIBERID")
+            primary.header["EXT7"] = "FIBERID"
+
+            hdul = fits.HDUList([primary, target_hdu, total_hdu, noise_hdu, stn_hdu, sky_hdu, wave_hdu,
+                                ids_hdu])
+
+            filename = os.path.join(self.outdir,
+                                    f"{self.source.name}_{branch.name}_{self.bundle.bundle_name}_"
+                                    + f"{exptime}_no_noise.fits")
+
+            hdul.writeto(filename, overwrite=True)
+            log.info(f"{filename} saved.")
+
     def _obj_to_electrons(self, spectrum, fiber_id, exptime):
         """
         Convert a spectrum in flux units to electrons per second.
@@ -709,10 +767,11 @@ class Simulator:
             _type_: _description_
         """
 
-        stnout = OrderedDict()
-        sout = OrderedDict()
-        nout = OrderedDict()
-        skyout = OrderedDict()
+        signal_to_noise_out = OrderedDict()
+        target_out = OrderedDict()
+        noise_out = OrderedDict()
+        sky_out = OrderedDict()
+        total_out = OrderedDict()
 
         for branch in self.spectrograph.branches:
             # they all have the same size
@@ -728,21 +787,23 @@ class Simulator:
 
             # extracting the apertures
             # creating helper objects to keep working with arrays
-            faux = np.zeros(sely.shape)
-            eaux = np.zeros(sely.shape)
-            saux = np.zeros(sely.shape)
-            faux[sely] = spec2d[branch.name][sely]  # spectrum
-            eaux[sely] = noise2d[branch.name][sely]  # noise
-            saux[sely] = sky2d[branch.name][sely]  # sky
-            signal = faux.sum(axis=1)
-            noise = np.sqrt(np.sum(eaux ** 2, axis=1))
-            sky = saux.sum(axis=1)
-            stnout[branch.name] = signal / noise
-            sout[branch.name] = signal
-            nout[branch.name] = noise
-            skyout[branch.name] = sky
+            flux_auxiliar = np.zeros(sely.shape)
+            error_auxiliar = np.zeros(sely.shape)
+            sky_auxiliar = np.zeros(sely.shape)
+            flux_auxiliar[sely] = spec2d[branch.name][sely]  # spectrum
+            error_auxiliar[sely] = noise2d[branch.name][sely]  # noise
+            sky_auxiliar[sely] = sky2d[branch.name][sely]  # sky
+            target = flux_auxiliar.sum(axis=1)
+            noise = np.sqrt(np.sum(error_auxiliar ** 2, axis=1))
+            sky = sky_auxiliar.sum(axis=1)
+            signal_to_noise_out[branch.name] = target / noise
+            target_out[branch.name] = target
+            noise_out[branch.name] = noise
+            sky_out[branch.name] = sky
+            total_out[branch.name] = sky + target
 
-        return {"spectrum": sout, "noise": nout, "snr": stnout, "sky": skyout}
+        return {"signal": total_out, "target": target_out, "noise": noise_out,
+                "snr": signal_to_noise_out, "sky": sky_out}
 
     def _add_noise(self, exposure):
         """
@@ -769,10 +830,9 @@ class Simulator:
             noise_to_add = np.random.standard_normal(exposure["noise"][branch.name].shape) *\
                 exposure["noise"][branch.name]
 
-            signal = exposure["spectrum"][branch.name] + exposure["sky"][branch.name]
-            signal_with_noise = signal + noise_to_add
+            signal_with_noise = exposure["signal"][branch.name] + noise_to_add
             target = signal_with_noise - exposure["sky"][branch.name]
-            sky = signal_with_noise - exposure["spectrum"][branch.name]
+            sky = signal_with_noise - exposure["target"][branch.name]
             signal_noise[branch.name] = signal_with_noise
             obj_noise[branch.name] = target
             sky_noise[branch.name] = sky
@@ -875,22 +935,22 @@ class Simulator:
         fib_id = []
 
         # outputs with noise
-        target_w_noise = np.zeros((nfibers, branch.wavecoord.npix))
-        total_w_noise = np.zeros((nfibers, branch.wavecoord.npix))
-        sky_el = np.zeros((nfibers, branch.wavecoord.npix))
-        noise_el = np.zeros((nfibers, branch.wavecoord.npix))
+        target = np.zeros((nfibers, branch.wavecoord.npix))
+        total = np.zeros((nfibers, branch.wavecoord.npix))
+        sky = np.zeros((nfibers, branch.wavecoord.npix))
+        noise = np.zeros((nfibers, branch.wavecoord.npix))
         snr = np.zeros((nfibers, branch.wavecoord.npix))
 
         for i, spectra in enumerate(exposures.values()):
             fib_id.append(self.bundle.fibers[i].to_table())
-            target_w_noise[i, :] = spectra["target"][branch.name]
-            total_w_noise[i, :] = spectra["signal"][branch.name]
-            noise_el[i, :] = spectra["noise"][branch.name]
-            sky_el[i, :] = spectra["sky"][branch.name]
+            target[i, :] = spectra["target"][branch.name]
+            total[i, :] = spectra["signal"][branch.name]
+            noise[i, :] = spectra["noise"][branch.name]
+            sky[i, :] = spectra["sky"][branch.name]
             snr[i, :] = spectra["snr"][branch.name]
 
         fib_id = vstack(fib_id)
-        return fib_id, target_w_noise, total_w_noise, noise_el, sky_el, snr
+        return fib_id, target, total, noise, sky, snr
 
     def _create_primary_hdu(self, branch, exptime=None):
 
