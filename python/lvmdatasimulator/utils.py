@@ -492,9 +492,9 @@ def set_geocoronal_ha(wave, flux, ha):
 
     I0 = ha_flux.value / (sigma * np.sqrt(2*np.pi))  # from flux to peak
 
-    line = I0 * np.exp(-0.5* (wave[mask_line]-6562.8)**2/sigma**2)
+    line = I0 * np.exp(-0.5* (wave[mask_line]-6562.79)**2/sigma**2)
 
-    flux[mask_line] = line
+    flux[mask_line] += line
 
     return flux
 
