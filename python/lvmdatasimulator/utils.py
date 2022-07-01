@@ -6,21 +6,26 @@
 # @License: BSD 3-Clause
 # @Copyright: Oleg Egorov, Enrico Congiu
 import os.path
-from dataclasses import dataclass
 import numpy as np
 import re
+import pyCloudy as pc
+import astropy.units as u
+import lvmdatasimulator
+
+from dataclasses import dataclass
 from astropy.io import fits
 from astropy.table import Table
 from astropy.units import UnitConversionError
 from astropy.convolution import convolve_fft
 from shapely.geometry import Point, Polygon, box
 from pyneb import RedCorr
-
-import lvmdatasimulator
 from lvmdatasimulator import log
 from sympy import divisors
 from scipy.interpolate import RectBivariateSpline
-import pyCloudy as pc
+
+
+# unit conversions
+r_to_erg_ha = 5.661e-18 * u.erg/(u.cm * u.cm * u.s * u.arcsec**2)
 
 
 def assign_units(my_object, variables, default_units):
@@ -66,8 +71,18 @@ class Chunk:
     def __post_init__(self):
         self.shape = self.data.shape
 
-    def set_data(self, newdata):
-        self.data = newdata
+    def set_data(self, newdata, resize=True, orig_shape=None):
+
+        y0 = 0
+        y1 = newdata.shape[1]
+        x0 = 0
+        x1 = newdata.shape[2]
+        if self.original_position[0][0] != 0: y0 += self.overlap
+        if self.original_position[1][0] != 0: x0 += self.overlap
+        if self.original_position[0][1] < orig_shape[1]: y1 -= self.overlap
+        if self.original_position[1][1] < orig_shape[2]: x1 -= self.overlap
+
+        self.data = newdata[:, y0: y1, x0: x1]
 
     def __str__(self):
         return f'Original position: {self.original_position},\nOverlap: {self.overlap}'
@@ -189,10 +204,11 @@ def convolve_array(to_convolve, kernel, selected_points_x, selected_points_y,
         log.info(f'Dividing the array in {nchunks} with an overlap of {overlap*pix_size} arcsec')
         # dividing the cube in chuncks before convolving
         chunks = chunksize(to_convolve, nchunks=nchunks, overlap=overlap)
-        for chunk in chunks:
+        for i, chunk in enumerate(chunks):
+            print(i)
             tmp = convolve_fft(chunk.data, kernel, allow_huge=allow_huge,
                                normalize_kernel=normalize_kernel)
-            chunk.set_data(tmp)
+            chunk.set_data(tmp.astype(np.float32), resize=True, orig_shape=orig_shape)
 
         convolved = reconstruct_cube(chunks, orig_shape)
 
@@ -297,20 +313,20 @@ def reconstruct_cube(chunks, orig_shape):
     for chunk in chunks:
         corner = chunk.original_position
         data = chunk.data
-        shape = chunk.shape
+        # shape = chunk.shape
 
-        y0 = 0
-        y1 = shape[1]
-        x0 = 0
-        x1 = shape[2]
+        # resizing moved to chunk to reduce memory usage
+        # y0 = 0
+        # y1 = shape[1]
+        # x0 = 0
+        # x1 = shape[2]
 
-        if corner[0][0] != 0: y0 += chunk.overlap
-        if corner[1][0] != 0: x0 += chunk.overlap
-        if corner[0][1] < orig_shape[1]: y1 -= chunk.overlap
-        if corner[1][1] < orig_shape[2]: x1 -= chunk.overlap
+        # if corner[0][0] != 0: y0 += chunk.overlap
+        # if corner[1][0] != 0: x0 += chunk.overlap
+        # if corner[0][1] < orig_shape[1]: y1 -= chunk.overlap
+        # if corner[1][1] < orig_shape[2]: x1 -= chunk.overlap
 
-        new_cube[:, corner[0][0]: corner[0][1], corner[1][0]: corner[1][1]] = \
-            data[:, y0: y1, x0: x1]
+        new_cube[:, corner[0][0]: corner[0][1], corner[1][0]: corner[1][1]] = data
 
     return new_cube
 
@@ -452,6 +468,35 @@ def save_continuum_sb99_model(path_to_models, fileout):
     hdu[0].header['CUNIT1'] = 'Angstrom'
     hdu.writeto(fileout, overwrite=True)
 
+
+def set_geocoronal_ha(wave, flux, ha):
+
+    ha_flux = ha * r_to_erg_ha
+
+    log.info(f'Setting Geocoronal Ha to {ha} R ({ha_flux:0.3e})')
+
+    low_cont = np.all([wave > 6560, wave< 6562], axis=0)
+    high_cont = np.all([wave > 6564, wave< 6566], axis=0)
+
+    mask_cont = low_cont + high_cont
+
+    # measure baseline continuum
+    value_cont = flux[mask_cont].mean()
+
+    mask_line = np.all([wave > 6562, wave< 6564], axis=0)  # location of the line
+
+    # removing the line from the spectrum
+    flux[mask_line] = value_cont
+
+    sigma = 0.1  # from a fit of the Ha in the 'LVM_LVM160_SKY_0.dat' file
+
+    I0 = ha_flux.value / (sigma * np.sqrt(2*np.pi))  # from flux to peak
+
+    line = I0 * np.exp(-0.5* (wave[mask_line]-6562.79)**2/sigma**2)
+
+    flux[mask_line] += line
+
+    return flux
 
 
 
