@@ -107,7 +107,7 @@ def resample_spectrum(new_wave, old_wave, flux, fast=True):
             spectrum resampled onto the new_wave axis
     """
     if fast:
-        f = interp1d(old_wave, flux)
+        f = interp1d(old_wave, flux, fill_value='extrapolate')
         resampled = f(new_wave)
     else:
         resampled = spectres(new_wave, old_wave, flux)
@@ -152,7 +152,6 @@ class Simulator:
         telescope: Telescope,
         aperture: u.pix = 4 * u.pix,
         root: str = lvmdatasimulator.WORK_DIR,
-        input_spectra_names: dict = None,
         overwrite: bool = True,
         fast: bool = True
     ):
@@ -270,16 +269,9 @@ class Simulator:
 
         fiber_spec = OrderedDict()
         for branch in self.spectrograph.branches:
-            # computing the FWHM of the final kernel (LSF (A) + fiber dispersion (pix))
             lsf_fwhm = branch.lsf_fwhm / disp0  # from A to pix
 
-            # fiber dispersion must be converted to match the pixel scale of the tmp axis
-            dfib_lam = fiber.dispersion * branch.wavecoord.step / disp0
-
-            fwhm = np.sqrt((lsf_fwhm) ** 2 + (dfib_lam) ** 2)
-
-            # do both convolutions at the same time
-            convolved = convolve_for_gaussian(resampled_v0, fwhm, boundary="extend")
+            convolved = convolve_for_gaussian(resampled_v0, lsf_fwhm, boundary="extend")
             resampled_v1 = resample_spectrum(branch.wavecoord.wave.value, tmp_lam, convolved,
                                              fast=self.fast)
 
@@ -328,10 +320,8 @@ class Simulator:
 
         for branch in self.spectrograph.branches:
             lsf_fwhm = branch.lsf_fwhm / disp0  # from A to pix
-            dfib_lam = fiber.dispersion * branch.wavecoord.step / disp0
-            fwhm = np.sqrt(lsf_fwhm ** 2 + dfib_lam ** 2)
 
-            convolved = convolve_for_gaussian(original, fwhm, boundary="extend")
+            convolved = convolve_for_gaussian(original, lsf_fwhm, boundary="extend")
             resampled_v1 = resample_spectrum(branch.wavecoord.wave.value, wl_grid.value,
                                              convolved, fast=self.fast)
 
