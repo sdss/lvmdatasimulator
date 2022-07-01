@@ -37,7 +37,7 @@ from lvmdatasimulator.fibers import FiberBundle
 from lvmdatasimulator.observation import Observation
 from lvmdatasimulator.telescope import Telescope
 from lvmdatasimulator import log
-from lvmdatasimulator.utils import round_up_to_odd
+from lvmdatasimulator.utils import round_up_to_odd, set_geocoronal_ha
 from joblib import Parallel, delayed
 import os
 # import sys
@@ -215,10 +215,17 @@ class Simulator:
 
         log.info(f'Using sky file: {sky_file}')
 
-        area_fiber = np.pi * (self.bundle.fibers[0].diameter / 2) ** 2  # all fibers same diam.
         data = ascii.read(sky_file)
         wave = data["col1"]
-        brightness = data["col2"] * area_fiber.value  # converting to Fluxes from SBrightness
+        flux = data["col2"]
+
+        if self.observation.geocoronal is not None:
+            ha_flux = self.observation.geocoronal
+
+            flux = set_geocoronal_ha(wave, flux, ha_flux)
+
+        area_fiber = np.pi * (self.bundle.fibers[0].diameter / 2) ** 2  # all fibers same diam.
+        brightness = flux * area_fiber.value  # converting to Fluxes from SBrightness
 
         log.info('Resample sky emission to instrument wavelength solution.')
         return self._resample_and_convolve(wave, brightness, u.erg / (u.cm ** 2 * u.s * u.AA))

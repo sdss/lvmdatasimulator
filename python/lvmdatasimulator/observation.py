@@ -121,6 +121,7 @@ class Observation:
     airmass: float = None
     days_moon: int = None
     sky_template: str = None
+    geocoronal: float = None
 
     def __post_init__(self):
         # fix the unit of measurements
