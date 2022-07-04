@@ -29,11 +29,11 @@ def save_input_params(params):
                    ra=10,
                    dec=-10,
                    size=32,
-                   spaxel=1,
+                   pxsize=1,
                    unit_ra=u.degree,
                    unit_dec=u.degree,
                    unit_size=u.arcmin,
-                   unit_spaxel=u.arcsec,
+                   unit_pxsize=u.arcsec,
                    name='LVM_Field',
 
                    # Nebulae generation
@@ -134,11 +134,11 @@ def run_simulator_1d(params):
     my_lvmfield = LVMField(ra=params.get('ra', 10),
                            dec=params.get('dec', -10),
                            size=params.get('size', 32),
-                           spaxel=params.get('spaxel', 1),
+                           pxsize=params.get('pxsize', 1),
                            unit_ra=params.get('unit_ra', u.degree),
                            unit_dec=params.get('unit_dec', u.degree),
                            unit_size=params.get('unit_size', u.arcmin),
-                           unit_spaxel=params.get('unit_spaxel', u.arcsec),
+                           unit_pxsize=params.get('unit_pxsize', u.arcsec),
                            name=params.get('name', 'LVM_Field'))
 
     if params.get('nebulae_from_file', None) is not None:
@@ -242,11 +242,11 @@ def run_lvm_etc(params, check_lines=None, desired_snr=None, continuum=False):
     my_lvmfield = LVMField(ra=10,
                            dec=-10,
                            size=1,
-                           spaxel=1,
+                           pxsize=1,
                            unit_ra=u.deg,
                            unit_dec=u.deg,
                            unit_size=u.arcmin,
-                           unit_spaxel=u.arcsec,
+                           unit_pxsize=u.arcsec,
                            name=name)
 
     if nebula is not None:
