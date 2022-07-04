@@ -424,6 +424,114 @@ class Simulator:
             self.output_noise[exptime] = OrderedDict(zip(ids, noises))
             self.output_calib[exptime] = OrderedDict(zip(ids, calibs))
 
+    def simulate_observations_custom_spectrum(self, wave, flux, lsf_fwhm, norm=1,
+                                              unit_wave=u.AA,
+                                              unit_flux=u.erg*u.s**-1*u.cm**-2*u.arcsec**-2,
+                                              exptimes=None):
+        """
+        Function to simulate the observations of a specific spectrum provided by the user.
+
+        This function takes as an input a spectrum and it processes it in order to make it
+        observable by the simulator. It then proceed simulating the observation of a single fiber.
+        This function is supposed to be used only by the ETC.
+
+        Args:
+            exptimes (_type_, optional): _description_. Defaults to None.
+
+        """
+
+        log.info('Simulating real spectrum observation')
+
+        # fixing the unit of measurement
+
+        if isinstance(wave, np.ndarray):
+            wave *= unit_wave
+        else:
+            wave = wave.to(unit_wave)
+
+        # lsf same units as wave
+        if isinstance(lsf_fwhm, (int, float)):
+            lsf_fwhm *= unit_wave
+        else:
+            lsf_fwhm = lsf_fwhm.to(unit_wave)
+
+        if isinstance(flux, np.ndarray):
+            flux *= unit_flux
+        else:
+            flux = flux.to(unit_flux)
+
+        # if norm has units, convert it to the same uints as flux, and remove the units
+        if isinstance(norm, u.Quantity):
+            norm = norm.to(unit_flux).value
+
+        dlam = (wave[-1] - wave[0])/ len(wave)  # average dispersion
+
+        flux *= norm  # applying the normalization to the flux
+
+        out_spectrum = OrderedDict()
+
+        for fiber in self.bundle.fibers:
+
+            branch_spec = OrderedDict()
+            for branch in self.spectrograph.branches:
+
+                if lsf_fwhm < branch.lsf_fwhm:
+                    kernel_fwhm = np.sqrt(branch.lsf_fwhm**2 - lsf_fwhm**2) / dlam
+                    convolved = convolve_for_gaussian(flux.value, kernel_fwhm, boundary="extend")
+                    resampled_v1 = resample_spectrum(branch.wavecoord.wave.value, wave.value,
+                                                    convolved, fast=self.fast)
+                else:
+                    log.warning('The resolution of the spectrum is lower than the LVM one.')
+
+                resampled_v1 = resample_spectrum(branch.wavecoord.wave.value, wave.value,
+                                                 flux.value, fast=self.fast)
+
+                resampled_v1 *= unit_flux
+                to_flux = resampled_v1 * np.pi * (fiber.diameter/2)**2  # from SB to flux
+                branch_spec[branch.name] = to_flux
+
+            out_spectrum[fiber.id] = branch_spec
+
+        self.target_spectra = out_spectrum
+        self.extinction = self.extract_extinction()
+        self.sky = self.extract_sky()
+
+        # copy of the second part of simulate observations
+        if exptimes is None:
+            exptimes = self.observation.exptimes
+        else:
+            if not isinstance(exptimes, list):
+                exptimes = [exptimes]
+            log.warning('New exposure times have been provided. Overwriting the ones included in '
+                        + 'Observation')
+        for exptime in exptimes:
+            exptime_unit = exptime * u.s
+            if self.fast:
+                results = [self._simulate_observations_single_fiber((fiber, self.target_spectra,
+                                                                     exptime_unit))
+                        for fiber in self.bundle.fibers]
+            else:
+                with Pool(lvmdatasimulator.n_process) as pool:
+                    results = pool.map(self._simulate_observations_single_fiber, [(fiber,
+                                                                                   self.target_spectra,
+                                                                                   exptime_unit)
+                    for fiber in self.bundle.fibers])
+
+            # reorganize outputs
+            ids = []
+            realizations = []
+            noises = []
+            calibs = []
+            for item in results:
+                ids.append(item[0])
+                noises.append(item[1])
+                calibs.append(item[2])
+                realizations.append(item[3])
+
+            self.output_no_noise[exptime] = OrderedDict(zip(ids, realizations))
+            self.output_noise[exptime] = OrderedDict(zip(ids, noises))
+            self.output_calib[exptime] = OrderedDict(zip(ids, calibs))
+
     def save_outputs(self):
         """
         Main function to save the output of the simulation into rss file. Each different output is
@@ -1112,7 +1220,7 @@ class Simulator:
                 # converting to pixels
                 coord = self.observation.target_coords.spherical_offsets_by(fiber.x, fiber.y)
                 x, y = self.source.wcs.all_world2pix(coord.ra, coord.dec, 1)
-                r = fiber.diameter / (2 * self.source.spaxel.to(u.arcsec))
+                r = fiber.diameter / (2 * self.source.pxsize.to(u.arcsec))
                 print(f'circle({x:0.3f}, {y:0.3f}, {r:0.3f}) # text={{{fiber.id}}}', file=f)
 
         log.info(f' Saving {outname}...')
@@ -1121,7 +1229,7 @@ class Simulator:
 
         # I'm assuming that all fibers will have the same diameter on the sky
         # For now this is fine, but it might not be ok anymore with the real instrument
-        diameter = np.ceil(self.bundle.fibers[0].diameter / self.source.spaxel).value
+        diameter = np.ceil(self.bundle.fibers[0].diameter / self.source.pxsize).value
         if diameter % 2 == 0:
             size = int(diameter) + 3
         else:

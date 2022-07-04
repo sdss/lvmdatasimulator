@@ -29,11 +29,11 @@ def save_input_params(params):
                    ra=10,
                    dec=-10,
                    size=32,
-                   spaxel=1,
+                   pxsize=1,
                    unit_ra=u.degree,
                    unit_dec=u.degree,
                    unit_size=u.arcmin,
-                   unit_spaxel=u.arcsec,
+                   unit_pxsize=u.arcsec,
                    name='LVM_Field',
 
                    # Nebulae generation
@@ -92,7 +92,12 @@ def save_input_params(params):
 def save_input_params_etc(params):
 
     default = {'name': 'LVM_Field_ETC',
+               'spectrum': None,
+               'norm': 1,
+               'lsf_fwhm': 1.5,
                'airmass': 1.5,
+               'unit_wave': u.AA,
+               'unit_flux': u.erg*u.s**-1*u.cm**-2*u.arcsec**-2,
                'days_moon': 0,}
 
     for key in default.keys():
@@ -134,11 +139,11 @@ def run_simulator_1d(params):
     my_lvmfield = LVMField(ra=params.get('ra', 10),
                            dec=params.get('dec', -10),
                            size=params.get('size', 32),
-                           spaxel=params.get('spaxel', 1),
+                           pxsize=params.get('pxsize', 1),
                            unit_ra=params.get('unit_ra', u.degree),
                            unit_dec=params.get('unit_dec', u.degree),
                            unit_size=params.get('unit_size', u.arcmin),
-                           unit_spaxel=params.get('unit_spaxel', u.arcsec),
+                           unit_pxsize=params.get('unit_pxsize', u.arcsec),
                            name=params.get('name', 'LVM_Field'))
 
     if params.get('nebulae_from_file', None) is not None:
@@ -187,7 +192,7 @@ def run_simulator_1d(params):
     print('Elapsed time: {:0.1f}' .format(time.time()-start))
 
 
-def run_lvm_etc(params, check_lines=None, desired_snr=None, continuum=False):
+def run_lvm_etc(params, check_lines=None, desired_snr=None, continuum=False, delete=True):
     """
         Simple run the simulations in the mode of exposure time calculator.
 
@@ -220,8 +225,16 @@ def run_lvm_etc(params, check_lines=None, desired_snr=None, continuum=False):
     else:
         star = params['star']
 
-    if star is None and nebula is None:
-        raise ValueError('No nebula or star defined, or they are defined incorrectly. Aborting the simulation')
+    spectrum_name = params.get('spectrum', None)
+
+    if not isinstance(spectrum_name, str) and not spectrum_name is None:
+        raise TypeError(f'"spectrum" can be string or None. It is {type(params["spectrum"])}')
+
+    if (spectrum_name is not None) and (nebula is not None or star is not None):
+        raise ValueError(f'"spectrum cannot be used with other sources')
+
+    if star is None and nebula is None and spectrum_name is None:
+        raise ValueError('Neither nebula, nor star nor spectrum are defined, or they are defined incorrectly. Aborting the simulation')
 
     str_print = 'Start simulations in exposure time calculator mode for '
     if nebula is not None:
@@ -230,6 +243,9 @@ def run_lvm_etc(params, check_lines=None, desired_snr=None, continuum=False):
             str_print += 'and '
     if star is not None:
         str_print += '1 star '
+    if spectrum_name is not None:
+        str_print += '1 custom spectrum.'
+
     log.info(str_print)
 
     if check_lines is None:
@@ -242,11 +258,11 @@ def run_lvm_etc(params, check_lines=None, desired_snr=None, continuum=False):
     my_lvmfield = LVMField(ra=10,
                            dec=-10,
                            size=1,
-                           spaxel=1,
+                           pxsize=1,
                            unit_ra=u.deg,
                            unit_dec=u.deg,
                            unit_size=u.arcmin,
-                           unit_spaxel=u.arcsec,
+                           unit_pxsize=u.arcsec,
                            name=name)
 
     if nebula is not None:
@@ -279,7 +295,15 @@ def run_lvm_etc(params, check_lines=None, desired_snr=None, continuum=False):
     spec = LinearSpectrograph()
     bundle = FiberBundle(bundle_name='central')
     sim = Simulator(my_lvmfield, obs, spec, bundle, tel, fast=True)
-    sim.simulate_observations()
+
+    if spectrum_name is not None:
+        wave, flux = np.genfromtxt(spectrum_name, unpack=True, delimiter=',')
+        sim.simulate_observations_custom_spectrum(wave, flux,
+                                                  lsf_fwhm=params.get('lsf_fwhm', 1.5),
+                                                  norm=params.get('norm', 1))
+    else:
+        sim.simulate_observations()
+
     sim.save_outputs()
 
     save_input_params_etc(params)
@@ -287,6 +311,7 @@ def run_lvm_etc(params, check_lines=None, desired_snr=None, continuum=False):
     outdir = os.path.join(WORK_DIR, 'outputs')
 
     snr_output = np.zeros(shape=(len(check_lines), len(exptimes)))
+    snr_output_tot = np.zeros(shape=(len(check_lines), len(exptimes)))
     w_lam = 2.
     for exp_id, exptime in enumerate(exptimes):
         outname = os.path.join(outdir, f'{name}_linear_central_{exptime}_flux.fits')
@@ -300,39 +325,67 @@ def run_lvm_etc(params, check_lines=None, desired_snr=None, continuum=False):
                     rec_wl = (hdu['WAVE'].data > (line - w_lam)) & (hdu['WAVE'].data < (line + w_lam))
                     rec_wl_cnt = (hdu['WAVE'].data > (line - w_lam*30)) & (hdu['WAVE'].data < (line + w_lam*30))
                     flux = np.nansum(hdu['TARGET'].data[0, rec_wl] - np.nanmedian(hdu['TARGET'].data[0, rec_wl_cnt]))
+                    flux_tot = np.nansum(hdu['TARGET'].data[0, rec_wl])
                     if flux < 0:
                         flux = 0
+                    if flux_tot < 0:
+                        flux_tot = 0
                     snr_output[l_id, exp_id] = flux/np.sqrt(np.nansum(hdu['ERR'].data[0, rec_wl]**2))
+                    if snr_output[l_id, exp_id] < 0:
+                        snr_output[l_id, exp_id] = 0
+                    snr_output_tot[l_id, exp_id] = flux_tot/np.sqrt(np.nansum(hdu['ERR'].data[0, rec_wl]**2))
+                    if snr_output_tot[l_id, exp_id] < 0:
+                        snr_output_tot[l_id, exp_id] = 0
                     # snr_output[l_id, exp_id] = np.nanmax(hdu['SNR'].data[0,
                     #                                                      (hdu['WAVE'].data > (line - w_lam)) &
                     #                                                      (hdu['WAVE'].data < (line + w_lam))])
-        os.remove(outname)  # remove temporary files
-        os.remove(outname.replace('flux', 'realization'))
+        if delete:
+            os.remove(outname)  # remove temporary files
+            os.remove(outname.replace('flux', 'realization'))
 
-    os.remove(os.path.join(outdir, f'{name}_linear_central_input.fits'))
-    # remove output directory if empty
-    if len(os.listdir(outdir)) == 0:
-        os.rmdir(outdir)
+    if delete:
+        os.remove(os.path.join(outdir, f'{name}_linear_central_input.fits'))
+        # remove output directory if empty
+        if len(os.listdir(outdir)) == 0:
+            os.rmdir(outdir)
 
     if desired_snr is not None and (len(desired_snr) == len(check_lines)):
         desired_exptimes = []
     else:
-        default_exptimes = None
+        desired_exptimes = None
 
     fig, ax = plt.subplots()
     for l_id, line in enumerate(check_lines):
 
-        ax.scatter(exptimes, snr_output[l_id, :], label=str(line))
+        img1 = ax.scatter(exptimes, snr_output[l_id, :], label=str(line))
+        img2 = ax.scatter(exptimes, snr_output_tot[l_id, :], label=str(line)+'-tot')
 
-        res = np.polyfit(np.log10(snr_output[l_id, :]), np.log10(exptimes), 3)
+        try:
+            res = np.polyfit(np.log10(snr_output[l_id, :]), np.log10(exptimes), 3)
+            p = np.poly1d(res)
+            ax.plot(10**p(np.log10(snr_output[l_id, :])), snr_output[l_id, :],
+                    c=img1.get_facecolors()[-1].tolist())
+
+            if desired_snr is not None and (len(desired_snr) == len(check_lines)):
+
+                desired_exptimes.append(np.round(10**p(np.log10(desired_snr[l_id]))).astype(int))
+                print(f'To reach S/N={desired_snr[l_id]} in line = {line}±{w_lam}A we need '
+                    f'{desired_exptimes[-1]}s of single exposure')
+
+        except np.linalg.LinAlgError:
+            log.error('Low S/N in the line, not able to fit.')
+
+        # considering total flux (works for continuum)
+        res = np.polyfit(np.log10(snr_output_tot[l_id, :]), np.log10(exptimes), 3)
         p = np.poly1d(res)
-        ax.plot(10**p(np.log10(snr_output[l_id, :])), snr_output[l_id, :])
-
+        ax.plot(10**p(np.log10(snr_output_tot[l_id, :])), snr_output_tot[l_id, :], ls=':',
+                c=img2.get_facecolors()[-1].tolist())
         if desired_snr is not None and (len(desired_snr) == len(check_lines)):
 
             desired_exptimes.append(np.round(10**p(np.log10(desired_snr[l_id]))).astype(int))
-            print(f'To reach S/N={desired_snr[l_id]} in line = {line}±{w_lam}A we need '
-                  f'{desired_exptimes[-1]}s of single exposure')
+            print(f'To reach S/N={desired_snr[l_id]} in region = {line}±{w_lam}A we need '
+                f'{desired_exptimes[-1]}s of single exposure')
+
 
     ax.set_xscale('log')
     ax.set_yscale('log')
