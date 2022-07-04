@@ -4,6 +4,9 @@
 Change Log
 ==========
 
+2022/07/04 - Attributes "spaxel" and unit_spaxel in LVMField changed to "pxsize" and "unit_pxsize"
+             Tutorials updated to reflect this change
+
 2022/07/01 - Throughtput, RON and dark values updated to Photon Budget v0.12
              LSF set to 1.5AA
              More memory efficient division in chuncks

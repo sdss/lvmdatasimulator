@@ -74,8 +74,8 @@ class LVMField:
 
     """
 
-    def __init__(self, ra, dec, size, spaxel, unit_ra=u.deg, unit_dec=u.deg,
-                 unit_size=u.arcmin, unit_spaxel=u.arcsec,
+    def __init__(self, ra, dec, size, pxsize, unit_ra=u.deg, unit_dec=u.deg,
+                 unit_size=u.arcmin, unit_pxsize=u.arcsec,
                  name='LVM_field', ism_params=None):
 
         self.name = name
@@ -84,13 +84,13 @@ class LVMField:
         self.coord = SkyCoord(self.ra, self.dec)
         self.size = size * unit_size
         self.radius = self.size / 2  # to generate the star list
-        self.spaxel = spaxel * unit_spaxel
+        self.pxsize = pxsize * unit_pxsize
 
-        assign_units(self, ['spaxel', 'radius', 'size', 'ra', 'dec'],
+        assign_units(self, ['pxsize', 'radius', 'size', 'ra', 'dec'],
                      [u.arcsec, u.arcmin, u.arcmin, u.degree, u.degree])
 
         self.npixels = np.round((self.size.to(u.arcsec) /
-                                 self.spaxel.to(u.arcsec)).value/2.).astype(int) * 2 + 1
+                                 self.pxsize.to(u.arcsec)).value/2.).astype(int) * 2 + 1
         # made this odd for consistency with demands for some Nebulae (e.g. DIG)
 
         self.wcs = self._create_wcs()
@@ -120,7 +120,7 @@ class LVMField:
 
         # setting up the different fields
         wcs.wcs.crpix = [self.npixels / 2, self.npixels / 2]
-        wcs.wcs.cdelt = np.array([-self.spaxel.to(u.deg).value, self.spaxel.to(u.deg).value])
+        wcs.wcs.cdelt = np.array([-self.pxsize.to(u.deg).value, self.pxsize.to(u.deg).value])
         wcs.wcs.crval = [self.ra.to(u.deg).value, self.dec.to(u.deg).value]
         wcs.wcs.ctype = ["RA---TAN", "DEC--TAN"]
 
@@ -453,7 +453,7 @@ class LVMField:
                 pix_offsets[ind] = np.round(offset[ind]).astype(int)
             else:
                 try:
-                    pix_offsets[ind] = np.round((offset[ind] * units[ind]).to(u.arcsec) / self.spaxel).astype(int)
+                    pix_offsets[ind] = np.round((offset[ind] * units[ind]).to(u.arcsec) / self.pxsize).astype(int)
                 except Exception as e:
                     log.error("Exception raised during the shifting of the nebula_id={0} "
                               "along the {1} axis: {2}".format(nebula_id, xyname[ind], e))
@@ -504,7 +504,7 @@ class LVMField:
             cur_fiber_coord = obs_coords.spherical_offsets_by(fiber.x, fiber.y)
             xc, yc = self.wcs.world_to_pixel(cur_fiber_coord)
 
-            s = (fiber.diameter.to(u.degree) / self.spaxel.to(u.degree)).value / 2
+            s = (fiber.diameter.to(u.degree) / self.pxsize.to(u.degree)).value / 2
             fibers_coords[index, :] = [xc, yc, s]
             if (xc - s) < 0 or ((xc + s) >= self.npixels) \
                     or ((yc - s) < 0) or ((yc + s) >= self.npixels):
@@ -531,7 +531,7 @@ class LVMField:
             fibers_coords = fibers_coords[:np.max(aperture_mask), :]
         log.info("Start extracting nebular spectra")
         spectrum_ism = self.ism.get_spectrum(wl_grid.to(u.AA), aperture_mask, fibers_coords,
-                                             self.spaxel.value)
+                                             self.pxsize.value)
         if spectrum_ism is not None:
             spectrum[: len(spectrum_ism), :] += spectrum_ism
         return np.array(fiber_id), spectrum / dl.value / u.AA
