@@ -90,19 +90,23 @@ class BlueWave(WaveCoord):
 
     @cached_property
     def wave(self):
-        pass
+        filename = f'{ROOT_DIR}/data/instrument/blue_wave.dat'
+        data = np.genfromtxt(filename, skip_header=1, unpack=True)
+
+        return np.arange(data[0], data[1] + data[2], data[2]) * u.AA
 
     @cached_property
     def start(self):
-        pass
+        return self.wave[0]
 
     @cached_property
     def end(self):
-        pass
+        return self.wave[-1]
 
     @cached_property
     def step(self):
-        pass
+        delta = self.wave[1: -1] - self.wave[0: -2]
+        return delta.mean() / u.pix
 
     @cached_property
     def npix(self):
@@ -115,19 +119,23 @@ class RedWave(WaveCoord):
 
     @cached_property
     def wave(self):
-        pass
+        filename = f'{ROOT_DIR}/data/instrument/red_wave.dat'
+        data = np.genfromtxt(filename, skip_header=1, unpack=True)
+
+        return np.arange(data[0], data[1] + data[2], data[2]) * u.AA
 
     @cached_property
     def start(self):
-        pass
+        return self.wave[0]
 
     @cached_property
     def end(self):
-        pass
+        return self.wave[-1]
 
     @cached_property
     def step(self):
-        pass
+        delta = self.wave[1: -1] - self.wave[0: -2]
+        return delta.mean() / u.pix
 
     @cached_property
     def npix(self):
@@ -140,19 +148,23 @@ class IRWave(WaveCoord):
 
     @cached_property
     def wave(self):
-        pass
+        filename = f'{ROOT_DIR}/data/instrument/ir_wave.dat'
+        data = np.genfromtxt(filename, skip_header=1, unpack=True)
+
+        return np.arange(data[0], data[1] + data[2], data[2]) * u.AA
 
     @cached_property
     def start(self):
-        pass
+        return self.wave[0]
 
     @cached_property
     def end(self):
-        pass
+        return self.wave[-1]
 
     @cached_property
     def step(self):
-        pass
+        delta = self.wave[1: -1] - self.wave[0: -2]
+        return delta.mean() / u.pix
 
     @cached_property
     def npix(self):
