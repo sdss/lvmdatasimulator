@@ -205,7 +205,7 @@ def convolve_array(to_convolve, kernel, selected_points_x, selected_points_y,
         # dividing the cube in chuncks before convolving
         chunks = chunksize(to_convolve, nchunks=nchunks, overlap=overlap)
         for i, chunk in enumerate(chunks):
-            
+
             tmp = convolve_fft(chunk.data, kernel, allow_huge=allow_huge,
                                normalize_kernel=normalize_kernel)
             chunk.set_data(tmp.astype(np.float32), resize=True, orig_shape=orig_shape)
@@ -307,7 +307,7 @@ def reconstruct_cube(chunks, orig_shape):
 
     # create the empty cube
 
-    new_cube = np.zeros(orig_shape)
+    new_cube = np.zeros(orig_shape, dtype=np.float32)
 
     # loop through the chunks
     for chunk in chunks:

@@ -46,7 +46,7 @@ class LVMField:
         size (float):
             Size of the field to be created. The filed will be a square with side "size". size is
             expected in arcmin, but the unit can be changed using unit_size.
-        spaxel (float):
+        pxsize (float):
             Size of the squared spatial resolution element to be used to create the wcs object
             associated to the field. It is expected to be in arcsec, but the unit can be changed
             by using unit_spaxel.
@@ -56,7 +56,7 @@ class LVMField:
             Physical units of the declination. Defaults to u.deg.
         unit_size (astropy.unit):
             Physical units of the size. Defaults to u.arcmin.
-        unit_spaxel (astropy.unit):
+        unit_spxsize (astropy.unit):
             Physical units of the spaxel. Defaults to u.arcsec.
         name (str):
             Name of the field. Defaults to 'LVM_field'
