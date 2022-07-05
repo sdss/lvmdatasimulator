@@ -1127,7 +1127,7 @@ class Simulator:
 
         # I'm assuming that all fibers will have the same diameter on the sky
         # For now this is fine, but it might not be ok anymore with the real instrument
-        diameter = np.ceil(self.bundle.fibers[0].diameter / self.source.spaxel).value
+        diameter = np.ceil(self.bundle.fibers[0].diameter / self.source.pxsize).value
         if diameter % 2 == 0:
             size = int(diameter) + 3
         else:
