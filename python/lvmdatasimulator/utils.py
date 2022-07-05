@@ -205,7 +205,7 @@ def convolve_array(to_convolve, kernel, selected_points_x, selected_points_y,
         # dividing the cube in chuncks before convolving
         chunks = chunksize(to_convolve, nchunks=nchunks, overlap=overlap)
         for i, chunk in enumerate(chunks):
-            print(i)
+            
             tmp = convolve_fft(chunk.data, kernel, allow_huge=allow_huge,
                                normalize_kernel=normalize_kernel)
             chunk.set_data(tmp.astype(np.float32), resize=True, orig_shape=orig_shape)
