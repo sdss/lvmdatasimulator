@@ -293,7 +293,7 @@ class Simulator:
     def extract_target_spectra(self):
         """Extract spectra of the target from the field object"""
 
-        wl_grid = np.arange(3647, 9900.01, 0.06) * u.AA
+        wl_grid = np.arange(3500, 9910.01, 0.06) * u.AA
 
         log.info(f"Recovering target spectra for {self.bundle.nfibers} fibers.")
         index, spectra = self.source.extract_spectra(self.bundle.fibers, wl_grid,
@@ -562,15 +562,15 @@ class Simulator:
 
         primary = self._create_primary_hdu(branch)
 
-        signal_hdu = fits.ImageHDU(data=target, name="FLUX")
+        signal_hdu = fits.ImageHDU(data=target.astype(np.float32), name="FLUX")
         signal_hdu.header["BUNIT"] = "erg/(cm2 s A)"
         primary.header["EXT1"] = "FLUX"
 
-        sky_hdu = fits.ImageHDU(data=sky, name="SKY")
+        sky_hdu = fits.ImageHDU(data=sky.astype(np.float32), name="SKY")
         sky_hdu.header["BUNIT"] = "erg/(cm2 s A)"
         primary.header["EXT2"] = "SKY"
 
-        wave_hdu = fits.ImageHDU(data=branch.wavecoord.wave.value, name="WAVE")
+        wave_hdu = fits.ImageHDU(data=branch.wavecoord.wave.value.astype(np.float32), name="WAVE")
         wave_hdu.header["BUNIT"] = "Angstrom"
         primary.header["EXT3"] = "WAVE"
 
@@ -601,27 +601,27 @@ class Simulator:
 
             primary = self._create_primary_hdu(branch, exptime)
 
-            target_hdu = fits.ImageHDU(data=target, name="TARGET")
+            target_hdu = fits.ImageHDU(data=target.astype(np.float32), name="TARGET")
             target_hdu.header["BUNIT"] = "erg/ (cm2 s A)"
             primary.header["EXT1"] = "TARGET"
 
-            total_hdu = fits.ImageHDU(data=total, name="TOTAL")
+            total_hdu = fits.ImageHDU(data=total.astype(np.float32), name="TOTAL")
             total_hdu.header["BUNIT"] = "erg/ (cm2 s A)"
             primary.header["EXT2"] = "TOTAL"
 
-            noise_hdu = fits.ImageHDU(data=noise, name="ERR")
+            noise_hdu = fits.ImageHDU(data=noise.astype(np.float32), name="ERR")
             noise_hdu.header["BUNIT"] = "erg/ (cm2 s A)"
             primary.header["EXT3"] = "ERR"
 
-            stn_hdu = fits.ImageHDU(data=snr, name="SNR")
+            stn_hdu = fits.ImageHDU(data=snr.astype(np.float32), name="SNR")
             stn_hdu.header["BUNIT"] = ""
             primary.header["EXT4"] = "SNR"
 
-            sky_hdu = fits.ImageHDU(data=sky, name="SKY")
+            sky_hdu = fits.ImageHDU(data=sky.astype(np.float32), name="SKY")
             sky_hdu.header["BUNIT"] = "erg/ (cm2 s A)"
             primary.header["EXT5"] = "SKY"
 
-            wave_hdu = fits.ImageHDU(data=branch.wavecoord.wave.value, name="WAVE")
+            wave_hdu = fits.ImageHDU(data=branch.wavecoord.wave.value.astype(np.float32), name="WAVE")
             wave_hdu.header["BUNIT"] = "Angstrom"
             primary.header["EXT6"] = "WAVE"
 
@@ -651,27 +651,27 @@ class Simulator:
                                                       self.output_noise[exptime])
             primary = self._create_primary_hdu(branch, exptime)
 
-            target_hdu = fits.ImageHDU(data=target, name="TARGET")
+            target_hdu = fits.ImageHDU(data=target.astype(np.float32), name="TARGET")
             target_hdu.header["BUNIT"] = "e/pix"
             primary.header["EXT1"] = "TARGET"
 
-            total_hdu = fits.ImageHDU(data=total, name="TOTAL")
+            total_hdu = fits.ImageHDU(data=total.astype(np.float32), name="TOTAL")
             total_hdu.header["BUNIT"] = "e/pix"
             primary.header["EXT2"] = "TOTAL"
 
-            noise_hdu = fits.ImageHDU(data=noise, name="ERR")
+            noise_hdu = fits.ImageHDU(data=noise.astype(np.float32), name="ERR")
             noise_hdu.header["BUNIT"] = "e/pix"
             primary.header["EXT3"] = "ERR"
 
-            stn_hdu = fits.ImageHDU(data=snr, name="SNR")
+            stn_hdu = fits.ImageHDU(data=snr.astype(np.float32), name="SNR")
             stn_hdu.header["BUNIT"] = ""
             primary.header["EXT4"] = "SNR"
 
-            sky_hdu = fits.ImageHDU(data=sky, name="SKY")
+            sky_hdu = fits.ImageHDU(data=sky.astype(np.float32), name="SKY")
             sky_hdu.header["BUNIT"] = "e/pix"
             primary.header["EXT5"] = "SKY"
 
-            wave_hdu = fits.ImageHDU(data=branch.wavecoord.wave.value, name="WAVE")
+            wave_hdu = fits.ImageHDU(data=branch.wavecoord.wave.value.astype(np.float32), name="WAVE")
             wave_hdu.header["BUNIT"] = "Angstrom"
             primary.header["EXT6"] = "WAVE"
 
@@ -702,27 +702,27 @@ class Simulator:
                                                       self.output_no_noise[exptime])
             primary = self._create_primary_hdu(branch, exptime)
 
-            target_hdu = fits.ImageHDU(data=target, name="TARGET")
+            target_hdu = fits.ImageHDU(data=target.astype(np.float32), name="TARGET")
             target_hdu.header["BUNIT"] = "e/pix"
             primary.header["EXT1"] = "TARGET"
 
-            total_hdu = fits.ImageHDU(data=total, name="TOTAL")
+            total_hdu = fits.ImageHDU(data=total.astype(np.float32), name="TOTAL")
             total_hdu.header["BUNIT"] = "e/pix"
             primary.header["EXT2"] = "TOTAL"
 
-            noise_hdu = fits.ImageHDU(data=noise, name="ERR")
+            noise_hdu = fits.ImageHDU(data=noise.astype(np.float32), name="ERR")
             noise_hdu.header["BUNIT"] = "e/pix"
             primary.header["EXT3"] = "ERR"
 
-            stn_hdu = fits.ImageHDU(data=snr, name="SNR")
+            stn_hdu = fits.ImageHDU(data=snr.astype(np.float32), name="SNR")
             stn_hdu.header["BUNIT"] = ""
             primary.header["EXT4"] = "SNR"
 
-            sky_hdu = fits.ImageHDU(data=sky, name="SKY")
+            sky_hdu = fits.ImageHDU(data=sky.astype(np.float32), name="SKY")
             sky_hdu.header["BUNIT"] = "e/pix"
             primary.header["EXT5"] = "SKY"
 
-            wave_hdu = fits.ImageHDU(data=branch.wavecoord.wave.value, name="WAVE")
+            wave_hdu = fits.ImageHDU(data=branch.wavecoord.wave.value.astype(np.float32), name="WAVE")
             wave_hdu.header["BUNIT"] = "Angstrom"
             primary.header["EXT6"] = "WAVE"
 
@@ -999,8 +999,8 @@ class Simulator:
         nfibers = self.bundle.nfibers
         fib_id = []
 
-        signal = np.zeros((nfibers, branch.wavecoord.npix))
-        sky = np.zeros((nfibers, branch.wavecoord.npix))
+        signal = np.zeros((nfibers, branch.wavecoord.npix), dtype=np.float32)
+        sky = np.zeros((nfibers, branch.wavecoord.npix), dtype=np.float32)
 
         for i, fiber in enumerate(self.bundle.fibers):
             fib_id.append(fiber.to_table())
@@ -1043,11 +1043,11 @@ class Simulator:
         fib_id = []
 
         # outputs with noise
-        target = np.zeros((nfibers, branch.wavecoord.npix))
-        total = np.zeros((nfibers, branch.wavecoord.npix))
-        sky = np.zeros((nfibers, branch.wavecoord.npix))
-        noise = np.zeros((nfibers, branch.wavecoord.npix))
-        snr = np.zeros((nfibers, branch.wavecoord.npix))
+        target = np.zeros((nfibers, branch.wavecoord.npix), dtype=np.float32)
+        total = np.zeros((nfibers, branch.wavecoord.npix), dtype=np.float32)
+        sky = np.zeros((nfibers, branch.wavecoord.npix), dtype=np.float32)
+        noise = np.zeros((nfibers, branch.wavecoord.npix), dtype=np.float32)
+        snr = np.zeros((nfibers, branch.wavecoord.npix), dtype=np.float32)
 
         for i, spectra in enumerate(exposures.values()):
             fib_id.append(self.bundle.fibers[i].to_table())
@@ -1157,8 +1157,10 @@ class Simulator:
                     for exptime in self.observation.exptimes:
                         ids, target, total, _, _, _ = self._reorganize_to_rss(branch,
                                                                               self.output_calib[exptime])
-                        target_out = np.zeros((self.source.npixels, self.source.npixels))
-                        total_out = np.zeros((self.source.npixels, self.source.npixels))
+                        target_out = np.zeros((self.source.npixels, self.source.npixels),
+                                              dtype=np.float32)
+                        total_out = np.zeros((self.source.npixels, self.source.npixels),
+                                             dtype=np.float32)
                         wcs = self.source.wcs
                         head = wcs.to_header()
 
@@ -1182,7 +1184,7 @@ class Simulator:
                             + f"_{int(wavelength_range[0])}_{int(wavelength_range[1])}"
                             + f"_{exptime}s_target_map.fits")
 
-                        hdu = fits.PrimaryHDU(data=target_out, header=head)
+                        hdu = fits.PrimaryHDU(data=target_out.astype(np.float32), header=head)
 
                         hdu.writeto(filename, overwrite=True)
                         log.info(f' Saving {filename}...')
@@ -1194,7 +1196,7 @@ class Simulator:
                             f"{self.source.name}_{branch.name}_{self.bundle.bundle_name}"
                             + f"_{int(wavelength_range[0])}_{int(wavelength_range[1])}"
                             + f"_{exptime}s_total_map.fits")
-                        hdu = fits.PrimaryHDU(data=total_out, header=head)
+                        hdu = fits.PrimaryHDU(data=total_out.astype(np.float32), header=head)
 
                         hdu.writeto(filename, overwrite=True)
                         log.info(f' Saving {filename}...')
