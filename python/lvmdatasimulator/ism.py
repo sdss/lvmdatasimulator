@@ -1625,7 +1625,7 @@ class ISM:
                 add_fits_kw['CONTFLUX'] = (contflux,
                                            "Continuum brightness (in erg/s/cm^2/asec^2/AA) at ref. wl/Filter")
                 if cur_obj['continuum_mag'] is not None:
-                    contmag = cur_obj['continuum_mag'].to_value(u.mag)
+                    contmag = cur_obj['continuum_mag'].to_value(u.mag/u.arcsec**2)
                 else:
                     contmag = None
                 add_fits_kw['CONTMAG'] = (contmag,
