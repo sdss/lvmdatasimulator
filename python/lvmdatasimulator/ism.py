@@ -644,6 +644,7 @@ class Galaxy(Nebula):
         mask = convolve_fft(mask, kernels.Gaussian2DKernel(3.), fill_value=0, allow_huge=True)
         brt = brt * mask
         brt = brt.reshape(self.pix_height, self.pix_width, 1)
+        brt[brt < 0] = 0
         return brt
 
     def _get_2d_velocity(self):
@@ -1625,7 +1626,7 @@ class ISM:
                 add_fits_kw['CONTFLUX'] = (contflux,
                                            "Continuum brightness (in erg/s/cm^2/asec^2/AA) at ref. wl/Filter")
                 if cur_obj['continuum_mag'] is not None:
-                    contmag = cur_obj['continuum_mag'].to_value(u.mag)
+                    contmag = cur_obj['continuum_mag'].to_value(u.mag/u.arcsec**2)
                 else:
                     contmag = None
                 add_fits_kw['CONTMAG'] = (contmag,
@@ -2073,7 +2074,7 @@ class ISM:
                             prf_index = 0
                 else:
                     prf_index = 0
-                flux_norm_in_apertures = data_in_apertures.sum(axis=2)
+                flux_norm_in_apertures = np.nansum(data_in_apertures, axis=2)
                 line_prf_in_apertures = data_in_apertures[:, prf_index, :].reshape(
                     (data_in_apertures.shape[0], data_in_apertures.shape[2])) / \
                     flux_norm_in_apertures[:, prf_index].reshape(data_in_apertures.shape[0], 1)
