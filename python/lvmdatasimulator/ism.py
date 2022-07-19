@@ -982,8 +982,10 @@ class ISM:
             cont_model_max = np.sum(cont_fullrange * p(cont_wl_fullrange)) / w_filter
         if ~np.isfinite(cont_norm) or cont_norm <= 0:
             cont_norm = self.content[my_comp + "_CONTINUUM"].header.get("CONTMAG") * u.ABmag
-            cont_norm = cont_norm.to(u.STmag, u.spectral_density(cont_norm_wl * u.AA)).to(u.erg/u.s/u.cm**2/u.AA).value
-        return continuum / cont_model_max * cont_norm * (wl_grid[1] - wl_grid[0])
+            cont_norm = cont_norm.to(u.STmag, u.spectral_density(cont_norm_wl * u.AA)).to(
+                u.erg / u.s / u.cm ** 2 / u.AA).value
+        return continuum / cont_model_max * cont_norm * (wl_grid[1] - wl_grid[0]) * \
+               (proj_plane_pixel_scales(self.wcs)[0] * 3600) ** 2
 
     def _add_fits_extension(self, name, value, obj_to_add, zorder=0, cur_wavelength=0, add_fits_kw=None,
                             add_counter=False):
@@ -1270,7 +1272,7 @@ class ISM:
                                 'continuum_data': model_id or [poly_coefficients] or Teff or dict with "wl" and "flux"
                                                 # value defining cont. shape
                                 'continuum_flux': 1e-16 * u.erg / u.cm ** 2 / u.s / u.arcsec **2 / u.AA,
-                                'continuum_mag': 22 * u.mag,
+                                'continuum_mag': 22 * u.mag / u.arcsec ** 2,
                                 'continuum_wl': 5500, # could be also R, V, B,
                                 'ext_law': 'F99',  # Extinction law, one of those used by pyneb (used for dark nebulae)
                                 'ext_rv': 3.1,  # Value of R_V for extinction curve calculation (used for dark nebulae)
@@ -1310,7 +1312,7 @@ class ISM:
                                    None, None, 0, None, 5500., self.ext_law, self.R_V, 0, 0, kin_pa_default, None,
                                    None, None, None, None, self.pxscale],
                                   [fluxunit, u.mag, None, velunit, velunit, velunit, None, None,
-                                   u.pc, u.pc, u.kpc, None, None, fluxunit/u.AA, None, u.Angstrom,
+                                   u.pc, u.pc, u.kpc, None, None, fluxunit/u.AA, u.mag / u.arcsec ** 2, u.Angstrom,
                                    None, None, velunit / u.pc, velunit, u.degree, None, u.arcsec, u.arcsec,
                                    u.degree, u.degree, None]):
                 set_default_dict_values(cur_obj, k, v, unit=unit)
