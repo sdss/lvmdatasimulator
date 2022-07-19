@@ -470,7 +470,10 @@ class Simulator:
         ids_hdu = fits.BinTableHDU(ids, name="FIBERID")
         primary.header["EXT4"] = "FIBERID"
 
-        hdul = fits.HDUList([primary, signal_hdu, sky_hdu, wave_hdu, ids_hdu])
+        wcs_hdu = fits.ImageHDU(header=self._recover_wcs(), name='WCS')
+        primary.header["EXT5"] = "WCS"
+
+        hdul = fits.HDUList([primary, signal_hdu, sky_hdu, wave_hdu, ids_hdu, wcs_hdu])
 
         filename = os.path.join(self.outdir,
                                 f"{self.source.name}_{branch.name}_{self.bundle.bundle_name}"
@@ -522,8 +525,11 @@ class Simulator:
             ids_hdu = fits.BinTableHDU(ids, name="FIBERID")
             primary.header["EXT7"] = "FIBERID"
 
+            wcs_hdu = fits.ImageHDU(header=self._recover_wcs(), name='WCS')
+            primary.header["EXT8"] = "WCS"
+
             hdul = fits.HDUList([primary, target_hdu, total_hdu, noise_hdu, stn_hdu, sky_hdu, wave_hdu,
-                                ids_hdu])
+                                ids_hdu, wcs_hdu])
 
             filename = os.path.join(self.outdir,
                                     f"{self.source.name}_{branch.name}_{self.bundle.bundle_name}_"
@@ -573,8 +579,11 @@ class Simulator:
             ids_hdu = fits.BinTableHDU(ids, name="FIBERID")
             primary.header["EXT7"] = "FIBERID"
 
+            wcs_hdu = fits.ImageHDU(header=self._recover_wcs(), name='WCS')
+            primary.header["EXT8"] = "WCS"
+
             hdul = fits.HDUList([primary, target_hdu, total_hdu, noise_hdu, stn_hdu, sky_hdu, wave_hdu,
-                                ids_hdu])
+                                ids_hdu, wcs_hdu])
 
             filename = os.path.join(self.outdir,
                                     f"{self.source.name}_{branch.name}_{self.bundle.bundle_name}_"
@@ -625,8 +634,12 @@ class Simulator:
             ids_hdu = fits.BinTableHDU(ids, name="FIBERID")
             primary.header["EXT7"] = "FIBERID"
 
+            wcs_hdu = fits.ImageHDU(header=self._recover_wcs(), name='WCS')
+            primary.header["EXT8"] = "WCS"
+
+
             hdul = fits.HDUList([primary, target_hdu, total_hdu, noise_hdu, stn_hdu, sky_hdu, wave_hdu,
-                                ids_hdu])
+                                ids_hdu, wcs_hdu])
 
             filename = os.path.join(self.outdir,
                                     f"{self.source.name}_{branch.name}_{self.bundle.bundle_name}_"
@@ -960,12 +973,14 @@ class Simulator:
 
         primary = fits.PrimaryHDU()
         primary.header["TARGET"] = self.source.name
-        primary.header["RA"] = self.source.ra.value
-        primary.header["DEC"] = self.source.dec.value
+        primary.header["RA"] = (self.source.ra.value, 'ra of the observed field')
+        primary.header["DEC"] = (self.source.dec.value, 'dec of the observed field')
+        primary.header["OBS_RA"] = (self.observation.ra.to(u.deg).value, 'ra of the fiber array')
+        primary.header["OBS_DEC"] = (self.observation.dec.to(u.deg).value, 'dec of the fiber array')
         primary.header["AZ"] = (self.observation.target_coords_altaz.az.value,
-                                "Azimuth of the target")
+                                "Azimuth of the fiber array")
         primary.header["ALT"] = (self.observation.target_coords_altaz.alt.value,
-                                 "Altitude of the target")
+                                 "Altitude of the fiber target")
         primary.header["AIRMASS"] = self.observation.airmass
         primary.header["MJD"] = (self.observation.mjd, "MJD at start")
         if exptime is not None:
@@ -1151,3 +1166,12 @@ class Simulator:
             map[fiber_y-center: fiber_y+center+1, fiber_x-center: fiber_x+center+1] += kernel * flux
 
         return map
+
+    def _recover_wcs(self):
+
+        header = self.source.wcs.to_header()
+
+        header['OBS_RA'] = (self.observation.ra.to(u.deg).value, 'ra of the fiber array')
+        header['OBS_DEC'] = (self.observation.dec.to(u.deg).value, 'dec of the fiber array')
+
+        return header

@@ -4,6 +4,9 @@
 Change Log
 ==========
 
+2022/07/19 - New WCS extension added to all the WCS files.
+             Tutorial 2 modified to reflect these changes
+
 2022/07/04 - Attributes "spaxel" and unit_spaxel in LVMField changed to "pxsize" and "unit_pxsize"
              Tutorials updated to reflect this change
 
