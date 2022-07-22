@@ -9,6 +9,7 @@
 import os.path
 from astropy import units as u
 from astropy import constants as c
+from lvmdatasimulator.exceptions import ModelsError
 import numpy as np
 from astropy.io import fits, ascii
 from astropy.table import Table
@@ -99,14 +100,19 @@ def xyz_to_sphere(x, y, z, pxscale=1. * u.pc):
 
 
 def find_model_id(file=lvmdatasimulator.CLOUDY_MODELS,
-                  check_id=None, params=lvmdatasimulator.CLOUDY_SPEC_DEFAULTS['id']):
+                  check_id=None, params=lvmdatasimulator.CLOUDY_SPEC_DEFAULTS['id'],
+                  defaults=lvmdatasimulator.CLOUDY_SPEC_DEFAULTS['id']):
     """
     Checks the input parameters of the pre-computed Cloudy model and return corresponding index in the grid
     """
+
+    if file is None:
+        return None, None
+
     with fits.open(file) as hdu:
         if check_id is None:
             if params is None:
-                check_id = lvmdatasimulator.CLOUDY_SPEC_DEFAULTS['id']
+                check_id = defaults
                 log.warning(f'Default Cloudy model will be used (id = {check_id})')
             else:
                 summary_table = Table(hdu['Summary'].data)
@@ -132,9 +138,9 @@ def find_model_id(file=lvmdatasimulator.CLOUDY_MODELS,
                     if len(indexes) == 0:
                         break
                 if len(indexes) == 0 or len(indexes) == len(summary_table):
-                    check_id = lvmdatasimulator.CLOUDY_SPEC_DEFAULTS['id']
-                    log.warning('Input parameters do not correspond to any pre-computed Cloudy model.'
-                                'Default Cloudy model will be used (id = {0})'.format(check_id))
+                    check_id = defaults
+                    log.warning('Input parameters do not correspond to any pre-computed model.'
+                                'Default model will be used (id = {0})'.format(check_id))
                 elif len(indexes) == 1:
                     check_id = summary_table['Model_ID'][indexes[0]]
                     for p in params:
@@ -143,11 +149,11 @@ def find_model_id(file=lvmdatasimulator.CLOUDY_MODELS,
                                   isinstance(params[p], int)) and ~np.isfinite(params[p])):
                             continue
                         if params[p] != summary_table[p][indexes[0]]:
-                            log.warning(f'Use the closest pre-computed Cloudy model with id = {check_id}')
+                            log.warning(f'Use the closest pre-computed model with id = {check_id}')
                             break
                 else:
                     check_id = summary_table['Model_ID'][indexes[0]]
-                    log.warning(f'Select one of the closest pre-computed Cloudy model with id = {check_id}')
+                    log.warning(f'Select one of the closest pre-computed model with id = {check_id}')
                 #
                 # for cur_ext in range(len(hdu)):
                 #     if cur_ext == 0:
@@ -174,15 +180,15 @@ def find_model_id(file=lvmdatasimulator.CLOUDY_MODELS,
             extension_index = [cur_ext for cur_ext in range(len(hdu)) if (
                     check_id == hdu[cur_ext].header.get('MODEL_ID'))]
             if len(extension_index) == 0:
-                if check_id == lvmdatasimulator.CLOUDY_SPEC_DEFAULTS['id']:
-                    log.warning('Model_ID = {0} is not found in the Cloudy models grid. '
+                if check_id == defaults:
+                    log.warning('Model_ID = {0} is not found in the models grid. '
                                 'Use the first one in the grid instead'.format(check_id))
                     extension_index = 1
                 else:
-                    log.warning('Model_ID = {0} is not found in the Cloudy models grid. '
+                    log.warning('Model_ID = {0} is not found in the models grid. '
                                 'Use default ({1}) instead'.format(check_id,
-                                                                   lvmdatasimulator.CLOUDY_SPEC_DEFAULTS['id']))
-                    check_id = lvmdatasimulator.CLOUDY_SPEC_DEFAULTS['id']
+                                                                   defaults))
+                    check_id = defaults
                     extension_index = None
             else:
                 extension_index = extension_index[0]
@@ -206,7 +212,8 @@ class Nebula:
     width: u.pc = 0 * u.pc  # width of the nebula in pc (not used if pix_width is set up)
     height: u.pc = 0 * u.pc  # height of the nebula in pc (not used if pix_height is set up)
     pxscale: u.pc = 0.01 * u.pc  # pixel size in pc
-    spectrum_id: int = None  # ID of a template Cloudy emission spectrum for this nebula
+    spectrum_id: int = None  # ID of a template emission spectrum for this nebula
+    spectrum_type: str = None  # type of model spectrum (either mappings or cloudy)
     n_brightest_lines: int = None  # limit the number of the lines to the first N brightest
     sys_velocity: velunit = 0 * velunit  # Systemic velocity
     turbulent_sigma: velunit = 10 * velunit  # Velocity dispersion due to turbulence; included in calculations of LSF
@@ -224,6 +231,9 @@ class Nebula:
         self._assign_position_params()
         self._ref_line_id = 0
         self.linerat_constant = True  # True if the ratio of line fluxes shouldn't change across the nebula
+        if self.spectrum_type not in [None, 'mappings', 'cloudy']:
+            raise ModelsError('These models are not supported')
+
 
     def _assign_all_units(self):
         whole_list_properties = ['pxscale', 'sys_velocity', 'turbulent_sigma', 'max_brightness', 'max_extinction',
@@ -1090,19 +1100,29 @@ class ISM:
                             (obj_to_add.n_brightest_lines > 0) and (obj_to_add.n_brightest_lines < len(wl_list)):
                         wl_list = wl_list[np.argsort(np.max(brt_4d, axis=(1, 2)))[::-1][: obj_to_add.n_brightest_lines]]
                 else:
-                    with fits.open(lvmdatasimulator.CLOUDY_MODELS) as hdu:
+                    if obj_to_add.spectrum_type == 'cloudy':
+                        filename = lvmdatasimulator.CLOUDY_MODELS
+                    elif obj_to_add.spectrum_type == 'mappings':
+                        filename = lvmdatasimulator.MAPPINGS_MODELS
+                    with fits.open(filename) as hdu:
                         wl_list = hdu[obj_to_add.spectrum_id].data[1:, 0]
                         if obj_to_add.n_brightest_lines is not None and \
                                 (obj_to_add.n_brightest_lines > 0) and (obj_to_add.n_brightest_lines < len(wl_list)):
                             wl_list = wl_list[np.argsort(hdu[obj_to_add.spectrum_id].data[1:, 1]
-                                                         )[::-1][: obj_to_add.n_brightest_lines]]
+                                                        )[::-1][: obj_to_add.n_brightest_lines]]
+
                 for line_ind in range(brt_4d.shape[0]):
                     self._add_fits_extension(name="Comp_{0}_Flux_{1}".format(obj_id, wl_list[line_ind]),
                                              value=brt_4d[line_ind],
                                              obj_to_add=obj_to_add, zorder=zorder, add_fits_kw=add_fits_kw,
                                              cur_wavelength=wl_list[line_ind])
             elif obj_to_add.spectrum_id is not None and obj_to_add.linerat_constant:
-                with fits.open(lvmdatasimulator.CLOUDY_MODELS) as hdu:
+                if obj_to_add.spectrum_type == 'cloudy':
+                    filename = lvmdatasimulator.CLOUDY_MODELS
+                elif obj_to_add.spectrum_type == 'mappings':
+                    filename = lvmdatasimulator.MAPPINGS_MODELS
+
+                with fits.open(filename) as hdu:
                     data_save = hdu[obj_to_add.spectrum_id].data[1:, :2]
                     if obj_to_add.n_brightest_lines is not None and \
                             (obj_to_add.n_brightest_lines > 0) and \
@@ -1136,7 +1156,7 @@ class ISM:
         self.content.writeto(filename, overwrite=True)
         log.info("Generated ISM saved to {0}".format(filename))
 
-    def process_custom_nebula(self, params, xc=None, yc=None, cloudy_model_index=None):
+    def process_custom_nebula(self, params, xc=None, yc=None, model_index=None):
         """
         Processes the input parameters for custom nebula object
 
@@ -1146,7 +1166,7 @@ class ISM:
                          (calculated in 'generate' method based on provided offsets)
             yc: int -- pixel Y coordinate of the center of the nebula in FOV
                          (calculated in 'generate' method based on provided offsets)
-            cloudy_model_index: int or None -- ID of cloudy models to use if maps in different lines are not present
+            model_index: int or None -- ID of cloudy models to use if maps in different lines are not present
         Returns:
              CustomNebula object, or None if something went wrong
         """
@@ -1232,10 +1252,10 @@ class ISM:
             lines_maps = None
         else:
             lines_maps = brt_maps_out[1:]
-            cloudy_model_index = None
+            model_index = None
         neb = CustomNebula(xc=xc, yc=yc, max_brightness=brt_max, turbulent_sigma=params['turbulent_sigma'],
                            sys_velocity=params['sys_velocity'], vel_gradient=params['vel_gradient'],
-                           vel_pa=params['vel_pa'], spectrum_id=cloudy_model_index,
+                           vel_pa=params['vel_pa'], spectrum_id=model_index,
                            n_brightest_lines=params['n_brightest_lines'],
                            pxscale=self.pxscale * (params['distance'].to(u.pc) / self.distance.to(u.pc)),
                            pix_width=shape_out[1], pix_height=shape_out[0],
@@ -1264,6 +1284,9 @@ class ISM:
                                 'cloudy_id': None,  # id of pre-generated Cloudy model
                                 'cloudy_params': {'Z': 0.5, 'qH': 49., 'nH': 10, 'Teff': 30000, 'Geometry': 'Sphere'}, #
                                     parameters defining the pre-generated Cloudy model (used if spectrum_id is None)
+                                'mappings_id': None,  # id of pre-generated MAPPINGS model
+                                'mappings_params': None, #
+                                    parameters defining the pre-generated MAPPINGS model
                                 'n_brightest_lines': 10,  # only this number of the brightest lines will be evaluated
                                 'linerat_constant': False #  if True -> lines ratios don't vary across Cloud/Bubble
                                 'continuum_type': 'BB' or 'Model' or 'Poly' # type of the continuum model
@@ -1331,28 +1354,89 @@ class ISM:
                 log.warning("Wrong set of parameters for the nebula #{0}: skip this one".format(ind_obj))
                 continue
 
-            if lvmdatasimulator.CLOUDY_MODELS is None or (cur_obj['max_brightness'] <= 0):
-                cloudy_model_index = None
-                cloudy_model_id = None
-            else:
-                if cur_obj.get('cloudy_id') is None:
-                    if cur_obj.get('cloudy_params') is None or (type(cur_obj.get('cloudy_params')) is not dict):
-                        if not (cur_obj['type'] == 'CustomNebula' and
-                                isinstance(cur_obj.get('brightness_lines'), dict)):
-                            log.warning("Neither of 'cloudy_id' or 'cloudy_params' is set for the nebula #{0}: "
-                                        "use default 'cloudy_id={1}'".format(ind_obj,
-                                                                             lvmdatasimulator.CLOUDY_SPEC_DEFAULTS['id']))
-                        cur_obj['cloudy_id'] = lvmdatasimulator.CLOUDY_SPEC_DEFAULTS['id']
-                    else:
-                        for p in lvmdatasimulator.CLOUDY_SPEC_DEFAULTS:
-                            if p == 'id':
-                                continue
-                            if cur_obj['cloudy_params'].get(p) is None:
-                                cur_obj['cloudy_params'][p] = lvmdatasimulator.CLOUDY_SPEC_DEFAULTS[p]
+            check_mappings = (cur_obj.get('mappings_id') is not None or
+                              type(cur_obj.get('mappings_params')) is dict)
+            check_cloudy =  (cur_obj.get('cloudy_id') is not None or
+                             type(cur_obj.get('cloudy_params')) is dict)
 
-                cloudy_model_index, cloudy_model_id = find_model_id(file=lvmdatasimulator.CLOUDY_MODELS,
-                                                                    check_id=cur_obj.get('cloudy_id'),
-                                                                    params=cur_obj.get('cloudy_params'))
+            if check_mappings and check_cloudy:
+                raise ModelsError('Both Cloudy and MAPPINGS models have been defined.'
+                                  'Please select only one of the two')
+
+            # if no emission is wanted, do not set any model
+            if cur_obj['max_brightness'] <= 0:
+                model_index = None
+                model_id = None
+            else:
+                # if no model is selected, go for the standard one
+                if not check_mappings and not check_cloudy:
+                    if not (cur_obj['type'] == 'CustomNebula' and
+                            isinstance(cur_obj.get('brightness_lines'), dict)):
+                        log.warning("No model ids or model parameters are set for the nebula #{0}: "
+                                    "use default 'cloudy_id={1}'".format(ind_obj, lvmdatasimulator.CLOUDY_SPEC_DEFAULTS['id']))
+                    cur_obj['cloudy_id'] = lvmdatasimulator.CLOUDY_SPEC_DEFAULTS['id']
+
+                    model_index, model_id = find_model_id(file=lvmdatasimulator.CLOUDY_MODELS,
+                                                          check_id=cur_obj.get('cloudy_id'),
+                                                          params=cur_obj.get('cloudy_params'),
+                                                          defaults=lvmdatasimulator.CLOUDY_SPEC_DEFAULTS['id'])
+                    model_type = 'cloudy'
+
+                elif cur_obj.get('cloudy_id') is None and (type(cur_obj.get('cloudy_params')) is dict):
+                    for p in lvmdatasimulator.CLOUDY_SPEC_DEFAULTS:
+                        if p == 'id':
+                            continue
+                        if cur_obj['cloudy_params'].get(p) is None:
+                            cur_obj['cloudy_params'][p] = lvmdatasimulator.CLOUDY_SPEC_DEFAULTS[p]
+
+                    model_index, model_id = find_model_id(file=lvmdatasimulator.CLOUDY_MODELS,
+                                                          check_id=cur_obj.get('cloudy_id'),
+                                                          params=cur_obj.get('cloudy_params'),
+                                                          defaults=lvmdatasimulator.CLOUDY_SPEC_DEFAULTS['id'])
+                    model_type = 'cloudy'
+
+                elif cur_obj.get('mappings_id') is None and \
+                    type(cur_obj.get('mappings_params')) is dict:
+                    for p in lvmdatasimulator.MAPPINGS_SPEC_DEFAULTS:
+                        if p == 'id':
+                            continue
+                        if cur_obj['mappings_params'].get(p) is None:
+                            cur_obj['mappings_params'][p] = lvmdatasimulator.MAPPINGS_SPEC_DEFAULTS[p]
+
+                    model_index, model_id = find_model_id(file=lvmdatasimulator.MAPPINGS_MODELS,
+                                                          check_id=cur_obj.get('mappings_id'),
+                                                          params=cur_obj.get('mappings_params'),
+                                                          defaults=lvmdatasimulator.MAPPINGS_SPEC_DEFAULTS['id'])
+                    model_type = 'mappings'
+                elif cur_obj.get('mappings_id') is not None:
+                    model_index, model_id = find_model_id(file=lvmdatasimulator.MAPPINGS_MODELS,
+                                                          check_id=cur_obj.get('mappings_id'),
+                                                          params=cur_obj.get('mappings_params'),
+                                                          defaults=lvmdatasimulator.MAPPINGS_SPEC_DEFAULTS['id'])
+                    model_type = 'cloudy'
+
+            # if lvmdatasimulator.CLOUDY_MODELS is None or (cur_obj['max_brightness'] <= 0):
+            #     cloudy_model_index = None
+            #     model_id = None
+            # else:
+            #     if cur_obj.get('cloudy_id') is None:
+            #         if cur_obj.get('cloudy_params') is None or (type(cur_obj.get('cloudy_params')) is not dict):
+            #             if not (cur_obj['type'] == 'CustomNebula' and
+            #                     isinstance(cur_obj.get('brightness_lines'), dict)):
+            #                 log.warning("Neither of 'cloudy_id' or 'cloudy_params' is set for the nebula #{0}: "
+            #                             "use default 'cloudy_id={1}'".format(ind_obj,
+            #                                                                  lvmdatasimulator.CLOUDY_SPEC_DEFAULTS['id']))
+            #             cur_obj['cloudy_id'] = lvmdatasimulator.CLOUDY_SPEC_DEFAULTS['id']
+            #         else:
+            #             for p in lvmdatasimulator.CLOUDY_SPEC_DEFAULTS:
+            #                 if p == 'id':
+            #                     continue
+            #                 if cur_obj['cloudy_params'].get(p) is None:
+            #                     cur_obj['cloudy_params'][p] = lvmdatasimulator.CLOUDY_SPEC_DEFAULTS[p]
+
+            #     cloudy_model_index, model_id = find_model_id(file=lvmdatasimulator.CLOUDY_MODELS,
+            #                                                         check_id=cur_obj.get('cloudy_id'),
+            #                                                         params=cur_obj.get('cloudy_params'))
 
             if cur_obj.get('linerat_constant') is None:
                 if cur_obj['type'] in ['Bubble', 'Cloud']:
@@ -1379,7 +1463,8 @@ class ISM:
                                        sys_velocity=cur_obj['sys_velocity'],
                                        vel_gradient=cur_obj['vel_gradient'],
                                        vel_pa=cur_obj['vel_pa'],
-                                       spectrum_id=cloudy_model_index,
+                                       spectrum_id=model_index,
+                                       spectrum_type=model_type,
                                        n_brightest_lines=cur_obj['n_brightest_lines'],
                                        pxscale=self.pxscale * (cur_obj['distance'].to(u.pc) / self.distance.to(u.pc)),
                                        perturb_scale=cur_obj['perturb_scale'],
@@ -1398,6 +1483,9 @@ class ISM:
                     continue
                 if cur_obj['type'] in ['Rectangle', 'Nebula'] and not (('width' in cur_obj) and ('height' in cur_obj)):
                     log.warning("Wrong set of parameters for the nebula #{0}: skip this one".format(ind_obj))
+                    continue
+                if cur_obj['type'] in ["Bubble", "Cloud"] and (model_type == 'mappings'):
+                    log.warning("Mappings models are not spatially resolved. Skip object #{}.".format(ind_obj))
                     continue
                 if (cur_obj['type'] in ["Bubble", "Cloud", "Ellipse", 'Circle']) and (cur_obj['radius'] == 0):
                     log.warning("Wrong set of parameters for the nebula #{0}: skip this one".format(ind_obj))
@@ -1465,7 +1553,8 @@ class ISM:
                                               perturb_amplitude=cur_obj['perturb_amplitude'],
                                               turbulent_sigma=cur_obj['turbulent_sigma'],
                                               sys_velocity=cur_obj['sys_velocity'],
-                                              spectrum_id=cloudy_model_index,
+                                              spectrum_id=model_index,
+                                              spectrum_type=model_type,
                                               n_brightest_lines=cur_obj['n_brightest_lines'],
                                               linerat_constant=cur_obj['linerat_constant'],
                                               )
@@ -1479,7 +1568,8 @@ class ISM:
                                                                      self.distance.to(u.pc)),
                                              perturb_degree=cur_obj['perturb_degree'],
                                              perturb_amplitude=cur_obj['perturb_amplitude'],
-                                             spectrum_id=cloudy_model_index,
+                                             spectrum_id=model_index,
+                                             spectrum_type=model_type,
                                              n_brightest_lines=cur_obj['n_brightest_lines'],
                                              turbulent_sigma=cur_obj['turbulent_sigma'],
                                              sys_velocity=cur_obj['sys_velocity'],
@@ -1497,7 +1587,8 @@ class ISM:
                                                 PA=cur_obj['PA'],
                                                 vel_gradient=cur_obj['vel_gradient'],
                                                 vel_pa=cur_obj['vel_pa'],
-                                                spectrum_id=cloudy_model_index,
+                                                spectrum_id=model_index,
+                                                spectrum_type=model_type,
                                                 n_brightest_lines=cur_obj['n_brightest_lines'],
                                                 turbulent_sigma=cur_obj['turbulent_sigma'],
                                                 sys_velocity=cur_obj['sys_velocity'],
@@ -1516,7 +1607,8 @@ class ISM:
                                               n=cur_obj['n'],
                                               vel_rot=cur_obj.get('vel_rot'),
                                               vel_pa=cur_obj['vel_pa'],
-                                              spectrum_id=cloudy_model_index,
+                                              spectrum_id=model_index,
+                                              spectrum_type=model_type,
                                               n_brightest_lines=cur_obj['n_brightest_lines'],
                                               turbulent_sigma=cur_obj['turbulent_sigma'],
                                               sys_velocity=cur_obj['sys_velocity'],
@@ -1530,7 +1622,8 @@ class ISM:
                                                radius=cur_obj['radius'],
                                                ax_ratio=cur_obj['ax_ratio'],
                                                PA=cur_obj['PA'],
-                                               spectrum_id=cloudy_model_index,
+                                               spectrum_id=model_index,
+                                               spectrum_type=model_type,
                                                n_brightest_lines=cur_obj['n_brightest_lines'],
                                                turbulent_sigma=cur_obj['turbulent_sigma'],
                                                sys_velocity=cur_obj['sys_velocity'],
@@ -1546,7 +1639,8 @@ class ISM:
                                               max_brightness=cur_obj.get('max_brightness'),
                                               max_extinction=cur_obj.get('max_extinction'),
                                               radius=cur_obj['radius'],
-                                              spectrum_id=cloudy_model_index,
+                                              spectrum_id=model_index,
+                                              spectrum_type=model_type,
                                               n_brightest_lines=cur_obj['n_brightest_lines'],
                                               turbulent_sigma=cur_obj['turbulent_sigma'],
                                               sys_velocity=cur_obj['sys_velocity'],
@@ -1562,7 +1656,8 @@ class ISM:
                                                  width=cur_obj.get('width'), height=cur_obj.get('height'),
                                                  max_brightness=cur_obj.get('max_brightness'),
                                                  max_extinction=cur_obj.get('max_extinction'),
-                                                 spectrum_id=cloudy_model_index,
+                                                 spectrum_id=model_index,
+                                                 spectrum_type=model_type,
                                                  n_brightest_lines=cur_obj['n_brightest_lines'],
                                                  turbulent_sigma=cur_obj['turbulent_sigma'],
                                                  sys_velocity=cur_obj['sys_velocity'],
@@ -1575,19 +1670,19 @@ class ISM:
                                                  )
                 elif cur_obj['type'] == "CustomNebula":
                     generated_object = self.process_custom_nebula(cur_obj, xc=x, yc=y,
-                                                                  cloudy_model_index=cloudy_model_index)
+                                                                  model_index=model_index)
                     if generated_object is None:
                         log.warning("Something wrong with the Custom Nebula: skip it")
                         continue
                 else:
                     log.warning("Unrecognized type of the nebula #{0}: skip this one".format(ind_obj))
                     continue
-            if cloudy_model_index is not None:
+            if model_index is not None:
                 if cur_obj['linerat_constant']:
                     lr = "Constant"
                 else:
                     lr = "Variable"
-                add_fits_kw = {"Model_ID": cloudy_model_id, "LineRat": lr}
+                add_fits_kw = {"Model_ID": model_id, "LineRat": lr}
             else:
                 add_fits_kw = {}
 
