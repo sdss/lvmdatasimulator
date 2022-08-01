@@ -34,6 +34,9 @@ from astropy.convolution import convolve_fft, kernels
 from astropy.units import UnitConversionError
 from lvmdatasimulator.utils import calc_circular_mask, convolve_array, set_default_dict_values, \
     ism_extinction, check_overlap, assign_units
+
+import warnings
+
 fluxunit = u.erg / (u.cm ** 2 * u.s * u.arcsec ** 2)
 velunit = u.km / u.s
 
@@ -1281,12 +1284,12 @@ class ISM:
                                 'perturb_amplitude': 0.1, # relative max. amplitude of inhomogeneities,
                                 'perturb_scale': 200 * u.pc,  # spatial scale to generate inhomogeneities (DIG only)
                                 'distance': 50 * u.kpc,  # distance to the nebula (default is from ISM)
-                                'cloudy_id': None,  # id of pre-generated Cloudy model
-                                'cloudy_params': {'Z': 0.5, 'qH': 49., 'nH': 10, 'Teff': 30000, 'Geometry': 'Sphere'}, #
+                                'cloudy_id': None,
+                                'cloudy_params': {'Z': 0.5, 'qH': 49., 'nH': 10, 'Teff': 30000, 'Geometry': 'Sphere'},
+                                'model_id': None,  # id of pre-generated model
+                                'model_params': {'Z': 0.5, 'qH': 49., 'nH': 10, 'Teff': 30000, 'Geometry': 'Sphere'}, #
                                     parameters defining the pre-generated Cloudy model (used if spectrum_id is None)
-                                'mappings_id': None,  # id of pre-generated MAPPINGS model
-                                'mappings_params': None, #
-                                    parameters defining the pre-generated MAPPINGS model
+                                'model_type: 'cloudy',
                                 'n_brightest_lines': 10,  # only this number of the brightest lines will be evaluated
                                 'linerat_constant': False #  if True -> lines ratios don't vary across Cloud/Bubble
                                 'continuum_type': 'BB' or 'Model' or 'Poly' # type of the continuum model
@@ -1354,66 +1357,74 @@ class ISM:
                 log.warning("Wrong set of parameters for the nebula #{0}: skip this one".format(ind_obj))
                 continue
 
-            check_mappings = (cur_obj.get('mappings_id') is not None or
-                              type(cur_obj.get('mappings_params')) is dict)
-            check_cloudy =  (cur_obj.get('cloudy_id') is not None or
-                             type(cur_obj.get('cloudy_params')) is dict)
+            model_type = cur_obj.get('model_type', 'cloudy')  # define the model type before continuing
 
-            if check_mappings and check_cloudy:
-                raise ModelsError('Both Cloudy and MAPPINGS models have been defined.'
-                                  'Please select only one of the two')
+            if cur_obj.get('cloudy_id', None) is not None:
+                warnings.warn('Cloudy_id will be removed in the next versions of the code.'
+                              'Please use "model_id" and "model_type: cloudy" instead.', DeprecationWarning)
+
+                cur_obj['model_id'] = cur_obj.get('cloudy_id')
+                cur_obj['model_type'] = 'cloudy'
+
+            if cur_obj.get('cloudy_params', None) is not None:
+                warnings.warn('Cloudy_params will be removed in the next versions of the code.'
+                              'Please use "model_params" and "model_type: cloudy" instead.', DeprecationWarning)
+
+                cur_obj['model_params'] = cur_obj.get('cloudy_params')
+                cur_obj['model_type'] = 'cloudy'
+
+
+
+            # define which default models to use
+            if model_type == 'cloudy':
+                id_def = lvmdatasimulator.CLOUDY_SPEC_DEFAULTS['id']
+                param_def = lvmdatasimulator.CLOUDY_SPEC_DEFAULTS
+                model_file = lvmdatasimulator.CLOUDY_MODELS
+            elif model_type == 'mappings':
+                id_def = lvmdatasimulator.MAPPINGS_SPEC_DEFAULTS['id']
+                param_def = lvmdatasimulator.MAPPINGS_SPEC_DEFAULTS
+                model_file = lvmdatasimulator.MAPPINGS_MODELS
+            else:
+                raise ValueError(f'{model_type} models are not supported')
 
             # if no emission is wanted, do not set any model
             if cur_obj['max_brightness'] <= 0:
                 model_index = None
                 model_id = None
-            else:
                 # if no model is selected, go for the standard one
-                if not check_mappings and not check_cloudy:
-                    if not (cur_obj['type'] == 'CustomNebula' and
-                            isinstance(cur_obj.get('brightness_lines'), dict)):
-                        log.warning("No model ids or model parameters are set for the nebula #{0}: "
-                                    "use default 'cloudy_id={1}'".format(ind_obj, lvmdatasimulator.CLOUDY_SPEC_DEFAULTS['id']))
-                    cur_obj['cloudy_id'] = lvmdatasimulator.CLOUDY_SPEC_DEFAULTS['id']
+            elif cur_obj.get('model_id') is None and type(cur_obj.get('model_params')) is not dict:
 
-                    model_index, model_id = find_model_id(file=lvmdatasimulator.CLOUDY_MODELS,
-                                                          check_id=cur_obj.get('cloudy_id'),
-                                                          params=cur_obj.get('cloudy_params'),
-                                                          defaults=lvmdatasimulator.CLOUDY_SPEC_DEFAULTS['id'])
-                    model_type = 'cloudy'
+                if not (cur_obj['type'] == 'CustomNebula' and
+                        isinstance(cur_obj.get('brightness_lines'), dict)):
 
-                elif cur_obj.get('cloudy_id') is None and (type(cur_obj.get('cloudy_params')) is dict):
-                    for p in lvmdatasimulator.CLOUDY_SPEC_DEFAULTS:
-                        if p == 'id':
-                            continue
-                        if cur_obj['cloudy_params'].get(p) is None:
-                            cur_obj['cloudy_params'][p] = lvmdatasimulator.CLOUDY_SPEC_DEFAULTS[p]
+                    log.warning("No model ids or model parameters are set for the nebula #{0}: "
+                        "use default {1} 'model_id={2}'".format(ind_obj, model_type, id_def))
 
-                    model_index, model_id = find_model_id(file=lvmdatasimulator.CLOUDY_MODELS,
-                                                          check_id=cur_obj.get('cloudy_id'),
-                                                          params=cur_obj.get('cloudy_params'),
-                                                          defaults=lvmdatasimulator.CLOUDY_SPEC_DEFAULTS['id'])
-                    model_type = 'cloudy'
+                cur_obj['model_id'] = id_def
 
-                elif cur_obj.get('mappings_id') is None and \
-                    type(cur_obj.get('mappings_params')) is dict:
-                    for p in lvmdatasimulator.MAPPINGS_SPEC_DEFAULTS:
-                        if p == 'id':
-                            continue
-                        if cur_obj['mappings_params'].get(p) is None:
-                            cur_obj['mappings_params'][p] = lvmdatasimulator.MAPPINGS_SPEC_DEFAULTS[p]
+                model_index, model_id = find_model_id(file=model_file,
+                                                        check_id=cur_obj.get('model_id'),
+                                                        params=cur_obj.get('model_params'),
+                                                        defaults=id_def)
 
-                    model_index, model_id = find_model_id(file=lvmdatasimulator.MAPPINGS_MODELS,
-                                                          check_id=cur_obj.get('mappings_id'),
-                                                          params=cur_obj.get('mappings_params'),
-                                                          defaults=lvmdatasimulator.MAPPINGS_SPEC_DEFAULTS['id'])
-                    model_type = 'mappings'
-                elif cur_obj.get('mappings_id') is not None:
-                    model_index, model_id = find_model_id(file=lvmdatasimulator.MAPPINGS_MODELS,
-                                                          check_id=cur_obj.get('mappings_id'),
-                                                          params=cur_obj.get('mappings_params'),
-                                                          defaults=lvmdatasimulator.MAPPINGS_SPEC_DEFAULTS['id'])
-                    model_type = 'cloudy'
+
+            elif cur_obj.get('model_id') is None and (type(cur_obj.get('model_params')) is dict):
+                for p in param_def:
+                    if p == 'id':
+                        continue
+                    if cur_obj['model_params'].get(p) is None:
+                        cur_obj['model_params'][p] = param_def[p]
+
+                model_index, model_id = find_model_id(file=model_file,
+                                                        check_id=cur_obj.get('model_id'),
+                                                        params=cur_obj.get('model_params'),
+                                                        defaults=param_def['id'])
+            elif cur_obj.get('model_id'):
+
+                model_index, model_id = find_model_id(file=model_file,
+                                                        check_id=cur_obj.get('model_id'),
+                                                        params=cur_obj.get('model_params'),
+                                                        defaults=param_def['id'])
 
             # if lvmdatasimulator.CLOUDY_MODELS is None or (cur_obj['max_brightness'] <= 0):
             #     cloudy_model_index = None
