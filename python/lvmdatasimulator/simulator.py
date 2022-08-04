@@ -1084,8 +1084,10 @@ class Simulator:
                         mask2 = branch.wavecoord.wave < wavelength_range[1] * unit_range
                         mask = np.all([mask1, mask2], axis=0)
 
-                        target_val = np.nansum(target[:, mask], axis=1)
-                        total_val = np.nansum(total[:, mask], axis=1)
+                        dl = branch.wavecoord.step.value
+
+                        target_val = np.nansum(target[:, mask], axis=1) * dl
+                        total_val = np.nansum(total[:, mask], axis=1) * dl
 
                         # Just the target
                         target_out = self._populate_map(target_out, target_val, ids, wcs)
