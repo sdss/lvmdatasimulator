@@ -365,7 +365,7 @@ class LVMField:
                                 'continuum_type': 'BB' or 'Model' or 'Poly' # type of the continuum model
                                 'continuum_data': model_id or [poly_coefficients] or Teff # value defining cont. shape
                                 'continuum_flux': 1e-16 * u.erg / u.cm ** 2 / u.s / u.arcsec **2 / u.AA,
-                                'continuum_mag': 22 * u.mag,
+                                'continuum_mag': 22 * u.mag / u.arcsec ** 2,
                                 'continuum_wl': 5500, # could be also R, V, B,
                                 'ext_law': 'F99',  # Extinction law, one of those used by pyneb (used for dark nebulae)
                                 'ext_rv': 3.1,  # Value of R_V for extinction curve calculation (used for dark nebulae)
