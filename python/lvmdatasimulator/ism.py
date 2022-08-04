@@ -7,6 +7,7 @@
 # @Copyright: Oleg Egorov, Enrico Congiu
 
 import os.path
+from turtle import st
 from astropy import units as u
 from astropy import constants as c
 from lvmdatasimulator.exceptions import ModelsError
@@ -1360,20 +1361,19 @@ class ISM:
             model_type = cur_obj.get('model_type', 'cloudy')  # define the model type before continuing
 
             if cur_obj.get('cloudy_id', None) is not None:
-                warnings.warn('Cloudy_id will be removed in the next versions of the code.'
-                              'Please use "model_id" and "model_type: cloudy" instead.', DeprecationWarning)
+                log.warning('the "cloudy_id" parameter will be removed in future versions of the code.'
+                            'Please use "model_id" and "model_type: cloudy" instead.')
 
                 cur_obj['model_id'] = cur_obj.get('cloudy_id')
                 cur_obj['model_type'] = 'cloudy'
 
+
             if cur_obj.get('cloudy_params', None) is not None:
-                warnings.warn('Cloudy_params will be removed in the next versions of the code.'
-                              'Please use "model_params" and "model_type: cloudy" instead.', DeprecationWarning)
+                log.warning('The "cloudy_params" parameter will be removed in future versions of the code.'
+                            'Please use "model_params" and "model_type: cloudy" instead.')
 
                 cur_obj['model_params'] = cur_obj.get('cloudy_params')
                 cur_obj['model_type'] = 'cloudy'
-
-
 
             # define which default models to use
             if model_type == 'cloudy':
