@@ -1160,7 +1160,7 @@ class ISM:
         self.content.writeto(filename, overwrite=True)
         log.info("Generated ISM saved to {0}".format(filename))
 
-    def process_custom_nebula(self, params, xc=None, yc=None, model_index=None):
+    def process_custom_nebula(self, params, xc=None, yc=None, model_index=None, model_type=None):
         """
         Processes the input parameters for custom nebula object
 
@@ -1263,7 +1263,8 @@ class ISM:
                            n_brightest_lines=params['n_brightest_lines'],
                            pxscale=self.pxscale * (params['distance'].to(u.pc) / self.distance.to(u.pc)),
                            pix_width=shape_out[1], pix_height=shape_out[0],
-                           brt_map=brt_maps_out[0], lines_maps=lines_maps, lines_wl=wavelengths)
+                           brt_map=brt_maps_out[0], lines_maps=lines_maps, lines_wl=wavelengths,
+                           spectrum_type=model_type)
         return neb
 
     def generate(self, all_objects):
@@ -1341,6 +1342,14 @@ class ISM:
                                    None, None, velunit / u.pc, velunit, u.degree, None, u.arcsec, u.arcsec,
                                    u.degree, u.degree, None]):
                 set_default_dict_values(cur_obj, k, v, unit=unit)
+
+            tot = 0
+            for k in ['expansion_velocity', 'sys_velocity', 'vel_rot']:
+                tot += cur_obj[k]
+
+            if tot > self.vel_amplitude:
+                log.warning("the expected velocities are larger than 'vel_amplitude', "
+                            "there might be some problems with the outputs.")
 
             for k in ['max_brightness', 'max_extinction', 'radius', 'continuum_flux']:
                 if cur_obj[k] < 0:
@@ -1496,8 +1505,8 @@ class ISM:
                     log.warning("Wrong set of parameters for the nebula #{0}: skip this one".format(ind_obj))
                     continue
                 if cur_obj['type'] in ["Bubble", "Cloud"] and (model_type == 'mappings'):
-                    log.warning("Mappings models are not spatially resolved. Skip object #{}.".format(ind_obj))
-                    continue
+                    log.warning("Mappings models are not spatially resolved. Setting linerat_constant = True")
+                    cur_obj['linerat_constant'] = True
                 if (cur_obj['type'] in ["Bubble", "Cloud", "Ellipse", 'Circle']) and (cur_obj['radius'] == 0):
                     log.warning("Wrong set of parameters for the nebula #{0}: skip this one".format(ind_obj))
                     continue
@@ -1681,7 +1690,8 @@ class ISM:
                                                  )
                 elif cur_obj['type'] == "CustomNebula":
                     generated_object = self.process_custom_nebula(cur_obj, xc=x, yc=y,
-                                                                  model_index=model_index)
+                                                                  model_index=model_index,
+                                                                  model_type=model_type)
                     if generated_object is None:
                         log.warning("Something wrong with the Custom Nebula: skip it")
                         continue

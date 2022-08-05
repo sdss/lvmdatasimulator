@@ -4,6 +4,10 @@
 Change Log
 ==========
 
+2022/08/05 - v0.9.2 released
+             Adding the possibility to use Allen+08 shock models
+             added warning when vel_amplitude < range of expected velocities
+
 2022/07/19 - New WCS extension added to all the WCS files.
              Tutorial 2 modified to reflect these changes
 
