@@ -8,6 +8,7 @@ from lvmdatasimulator.simulator import Simulator
 from lvmdatasimulator.fibers import FiberBundle
 from lvmdatasimulator import log, WORK_DIR
 from astropy.io.misc import yaml
+from astropy.io import ascii
 
 import astropy.units as u
 import time
@@ -297,7 +298,9 @@ def run_lvm_etc(params, check_lines=None, desired_snr=None, continuum=False, del
     sim = Simulator(my_lvmfield, obs, spec, bundle, tel, fast=True)
 
     if spectrum_name is not None:
-        wave, flux = np.genfromtxt(spectrum_name, unpack=True, delimiter=',')
+        data = ascii.read(spectrum_name)
+        wave = data['col1']
+        flux = data['col2']
         sim.simulate_observations_custom_spectrum(wave, flux,
                                                   lsf_fwhm=params.get('lsf_fwhm', 1.5),
                                                   norm=params.get('norm', 1))
@@ -311,7 +314,6 @@ def run_lvm_etc(params, check_lines=None, desired_snr=None, continuum=False, del
     outdir = os.path.join(WORK_DIR, 'outputs')
 
     snr_output = np.zeros(shape=(len(check_lines), len(exptimes)))
-    snr_output_tot = np.zeros(shape=(len(check_lines), len(exptimes)))
     w_lam = 2.
     for exp_id, exptime in enumerate(exptimes):
         outname = os.path.join(outdir, f'{name}_linear_central_{exptime}_flux.fits')
@@ -325,23 +327,16 @@ def run_lvm_etc(params, check_lines=None, desired_snr=None, continuum=False, del
                     rec_wl = (hdu['WAVE'].data > (line - w_lam)) & (hdu['WAVE'].data < (line + w_lam))
                     rec_wl_cnt = (hdu['WAVE'].data > (line - w_lam*30)) & (hdu['WAVE'].data < (line + w_lam*30))
                     flux = np.nansum(hdu['TARGET'].data[0, rec_wl] - np.nanmedian(hdu['TARGET'].data[0, rec_wl_cnt]))
-                    flux_tot = np.nansum(hdu['TARGET'].data[0, rec_wl])
                     if flux < 0:
                         flux = 0
-                    if flux_tot < 0:
-                        flux_tot = 0
                     snr_output[l_id, exp_id] = flux/np.sqrt(np.nansum(hdu['ERR'].data[0, rec_wl]**2))
-                    if snr_output[l_id, exp_id] < 0:
-                        snr_output[l_id, exp_id] = 0
-                    snr_output_tot[l_id, exp_id] = flux_tot/np.sqrt(np.nansum(hdu['ERR'].data[0, rec_wl]**2))
-                    if snr_output_tot[l_id, exp_id] < 0:
-                        snr_output_tot[l_id, exp_id] = 0
                     # snr_output[l_id, exp_id] = np.nanmax(hdu['SNR'].data[0,
                     #                                                      (hdu['WAVE'].data > (line - w_lam)) &
                     #                                                      (hdu['WAVE'].data < (line + w_lam))])
         if delete:
             os.remove(outname)  # remove temporary files
             os.remove(outname.replace('flux', 'realization'))
+            os.remove(outname.replace('flux', 'no_noise'))
 
     if delete:
         os.remove(os.path.join(outdir, f'{name}_linear_central_input.fits'))
@@ -357,35 +352,17 @@ def run_lvm_etc(params, check_lines=None, desired_snr=None, continuum=False, del
     fig, ax = plt.subplots()
     for l_id, line in enumerate(check_lines):
 
-        img1 = ax.scatter(exptimes, snr_output[l_id, :], label=str(line))
-        img2 = ax.scatter(exptimes, snr_output_tot[l_id, :], label=str(line)+'-tot')
+        ax.scatter(exptimes, snr_output[l_id, :], label=str(line))
 
-        try:
-            res = np.polyfit(np.log10(snr_output[l_id, :]), np.log10(exptimes), 3)
-            p = np.poly1d(res)
-            ax.plot(10**p(np.log10(snr_output[l_id, :])), snr_output[l_id, :],
-                    c=img1.get_facecolors()[-1].tolist())
-
-            if desired_snr is not None and (len(desired_snr) == len(check_lines)):
-
-                desired_exptimes.append(np.round(10**p(np.log10(desired_snr[l_id]))).astype(int))
-                print(f'To reach S/N={desired_snr[l_id]} in line = {line}±{w_lam}A we need '
-                    f'{desired_exptimes[-1]}s of single exposure')
-
-        except np.linalg.LinAlgError:
-            log.error('Low S/N in the line, not able to fit.')
-
-        # considering total flux (works for continuum)
-        res = np.polyfit(np.log10(snr_output_tot[l_id, :]), np.log10(exptimes), 3)
+        res = np.polyfit(np.log10(snr_output[l_id, :]), np.log10(exptimes), 3)
         p = np.poly1d(res)
-        ax.plot(10**p(np.log10(snr_output_tot[l_id, :])), snr_output_tot[l_id, :], ls=':',
-                c=img2.get_facecolors()[-1].tolist())
+        ax.plot(10**p(np.log10(snr_output[l_id, :])), snr_output[l_id, :])
+
         if desired_snr is not None and (len(desired_snr) == len(check_lines)):
 
             desired_exptimes.append(np.round(10**p(np.log10(desired_snr[l_id]))).astype(int))
-            print(f'To reach S/N={desired_snr[l_id]} in region = {line}±{w_lam}A we need '
-                f'{desired_exptimes[-1]}s of single exposure')
-
+            print(f'To reach S/N={desired_snr[l_id]} in line = {line}±{w_lam}A we need '
+                  f'{desired_exptimes[-1]}s of single exposure')
 
     ax.set_xscale('log')
     ax.set_yscale('log')
