@@ -187,7 +187,7 @@ def run_simulator_1d(params):
     print('Elapsed time: {:0.1f}' .format(time.time()-start))
 
 
-def run_lvm_etc(params, check_lines=None, desired_snr=None, continuum=False):
+def run_lvm_etc(params, check_lines=None, desired_snr=None, continuum=False, delete=True):
     """
         Simple run the simulations in the mode of exposure time calculator.
 
@@ -203,6 +203,8 @@ def run_lvm_etc(params, check_lines=None, desired_snr=None, continuum=False):
                 If True, then S/N will be measured assuming the source spectrum is continuum (signal = flux per pixel);
                 otherwise (default) the flux is integrated in the window of ±2A assuming the
                 emission line spectrum(noise is also scaled)
+            delete (bool):
+                delete all the output files. Defaults to True.
     """
 
     if isinstance(params, str):
@@ -306,13 +308,16 @@ def run_lvm_etc(params, check_lines=None, desired_snr=None, continuum=False):
                     # snr_output[l_id, exp_id] = np.nanmax(hdu['SNR'].data[0,
                     #                                                      (hdu['WAVE'].data > (line - w_lam)) &
                     #                                                      (hdu['WAVE'].data < (line + w_lam))])
-        os.remove(outname)  # remove temporary files
-        os.remove(outname.replace('flux', 'realization'))
+        if delete:
+            os.remove(outname)  # remove temporary files
+            os.remove(outname.replace('flux', 'realization'))
+            os.remove(outname.replace('flux', 'no_noise'))
 
-    os.remove(os.path.join(outdir, f'{name}_linear_central_input.fits'))
-    # remove output directory if empty
-    if len(os.listdir(outdir)) == 0:
-        os.rmdir(outdir)
+    if delete:
+        os.remove(os.path.join(outdir, f'{name}_linear_central_input.fits'))
+        # remove output directory if empty
+        if len(os.listdir(outdir)) == 0:
+            os.rmdir(outdir)
 
     if desired_snr is not None and (len(desired_snr) == len(check_lines)):
         desired_exptimes = []
