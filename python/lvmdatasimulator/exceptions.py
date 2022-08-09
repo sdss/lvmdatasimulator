@@ -72,3 +72,12 @@ class LvmdatasimulatorSkippedTestWarning(LvmdatasimulatorUserWarning):
 class LvmdatasimulatorDeprecationWarning(LvmdatasimulatorUserWarning):
     """A warning for deprecated features."""
     pass
+
+class ModelsError(Exception):
+    """Error to manage problems with models"""
+    def __init__(self, message=None):
+
+        message = 'There has been an error with the models' \
+            if not message else message
+
+        super(ModelsError, self).__init__(message)

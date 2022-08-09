@@ -341,6 +341,8 @@ def models_grid_summary(model_type='cloudy'):
         name_models = lvmdatasimulator.CLOUDY_MODELS
     elif model_type.lower() in ['continuum', 'contin', 'cont']:
         name_models = lvmdatasimulator.CONTINUUM_MODELS
+    elif model_type.lower() == 'mappings':
+        name_models = lvmdatasimulator.MAPPINGS_MODELS
     else:
         print("Incorrect model_type.")
         return None
