@@ -558,14 +558,18 @@ class Simulator:
         sky_hdu.header["BUNIT"] = "erg/(cm2 s A)"
         primary.header["EXT2"] = "SKY"
 
-        wave_hdu = fits.ImageHDU(data=branch.wavecoord.wave.value.astype(np.float32), name="WAVE")
+        wave_hdu = fits.ImageHDU(data=branch.wavecoord.wave.value.astype(np.float32),
+                                 name="WAVE")
         wave_hdu.header["BUNIT"] = "Angstrom"
         primary.header["EXT3"] = "WAVE"
 
         ids_hdu = fits.BinTableHDU(ids, name="FIBERID")
         primary.header["EXT4"] = "FIBERID"
 
-        hdul = fits.HDUList([primary, signal_hdu, sky_hdu, wave_hdu, ids_hdu])
+        wcs_hdu = fits.ImageHDU(header=self._recover_wcs(), name='WCS')
+        primary.header["EXT5"] = "WCS"
+
+        hdul = fits.HDUList([primary, signal_hdu, sky_hdu, wave_hdu, ids_hdu, wcs_hdu])
 
         filename = os.path.join(self.outdir,
                                 f"{self.source.name}_{branch.name}_{self.bundle.bundle_name}"
@@ -609,15 +613,20 @@ class Simulator:
             sky_hdu.header["BUNIT"] = "erg/ (cm2 s A)"
             primary.header["EXT5"] = "SKY"
 
-            wave_hdu = fits.ImageHDU(data=branch.wavecoord.wave.value.astype(np.float32), name="WAVE")
+            wave_hdu = fits.ImageHDU(data=branch.wavecoord.wave.value.astype(np.float32),
+                                     name="WAVE")
+
             wave_hdu.header["BUNIT"] = "Angstrom"
             primary.header["EXT6"] = "WAVE"
 
             ids_hdu = fits.BinTableHDU(ids, name="FIBERID")
             primary.header["EXT7"] = "FIBERID"
 
+            wcs_hdu = fits.ImageHDU(header=self._recover_wcs(), name='WCS')
+            primary.header["EXT8"] = "WCS"
+
             hdul = fits.HDUList([primary, target_hdu, total_hdu, noise_hdu, stn_hdu, sky_hdu, wave_hdu,
-                                ids_hdu])
+                                ids_hdu, wcs_hdu])
 
             filename = os.path.join(self.outdir,
                                     f"{self.source.name}_{branch.name}_{self.bundle.bundle_name}_"
@@ -659,15 +668,19 @@ class Simulator:
             sky_hdu.header["BUNIT"] = "e/pix"
             primary.header["EXT5"] = "SKY"
 
-            wave_hdu = fits.ImageHDU(data=branch.wavecoord.wave.value.astype(np.float32), name="WAVE")
+            wave_hdu = fits.ImageHDU(data=branch.wavecoord.wave.value.astype(np.float32),
+                                     name="WAVE")
             wave_hdu.header["BUNIT"] = "Angstrom"
             primary.header["EXT6"] = "WAVE"
 
             ids_hdu = fits.BinTableHDU(ids, name="FIBERID")
             primary.header["EXT7"] = "FIBERID"
 
+            wcs_hdu = fits.ImageHDU(header=self._recover_wcs(), name='WCS')
+            primary.header["EXT8"] = "WCS"
+
             hdul = fits.HDUList([primary, target_hdu, total_hdu, noise_hdu, stn_hdu, sky_hdu, wave_hdu,
-                                ids_hdu])
+                                ids_hdu, wcs_hdu])
 
             filename = os.path.join(self.outdir,
                                     f"{self.source.name}_{branch.name}_{self.bundle.bundle_name}_"
@@ -709,16 +722,21 @@ class Simulator:
             sky_hdu = fits.ImageHDU(data=sky.astype(np.float32), name="SKY")
             sky_hdu.header["BUNIT"] = "e/pix"
             primary.header["EXT5"] = "SKY"
-
-            wave_hdu = fits.ImageHDU(data=branch.wavecoord.wave.value.astype(np.float32), name="WAVE")
+            
+            wave_hdu = fits.ImageHDU(data=branch.wavecoord.wave.value.astype(np.float32),
+                                     name="WAVE")
             wave_hdu.header["BUNIT"] = "Angstrom"
             primary.header["EXT6"] = "WAVE"
 
             ids_hdu = fits.BinTableHDU(ids, name="FIBERID")
             primary.header["EXT7"] = "FIBERID"
 
+            wcs_hdu = fits.ImageHDU(header=self._recover_wcs(), name='WCS')
+            primary.header["EXT8"] = "WCS"
+
+
             hdul = fits.HDUList([primary, target_hdu, total_hdu, noise_hdu, stn_hdu, sky_hdu, wave_hdu,
-                                ids_hdu])
+                                ids_hdu, wcs_hdu])
 
             filename = os.path.join(self.outdir,
                                     f"{self.source.name}_{branch.name}_{self.bundle.bundle_name}_"
@@ -776,8 +794,8 @@ class Simulator:
 
         out = OrderedDict()
         for branch in self.spectrograph.branches:
-            new_2d_array = np.zeros((len(spectrum[branch.name]), nypix))
-            ne_frac = np.zeros(nypix)
+            new_2d_array = np.zeros((len(spectrum[branch.name]), nypix), dtype=np.float32)
+            ne_frac = np.zeros(nypix, dtype=np.float32)
             # not sure what is happening here
             for i in range(nypix):
                 j = i - int(np.floor(nypix / 2))
@@ -883,9 +901,9 @@ class Simulator:
 
             # extracting the apertures
             # creating helper objects to keep working with arrays
-            flux_auxiliar = np.zeros(sely.shape)
-            error_auxiliar = np.zeros(sely.shape)
-            sky_auxiliar = np.zeros(sely.shape)
+            flux_auxiliar = np.zeros(sely.shape, dtype=np.float32)
+            error_auxiliar = np.zeros(sely.shape, dtype=np.float32)
+            sky_auxiliar = np.zeros(sely.shape, dtype=np.float32)
             flux_auxiliar[sely] = spec2d[branch.name][sely]  # spectrum
             error_auxiliar[sely] = noise2d[branch.name][sely]  # noise
             sky_auxiliar[sely] = sky2d[branch.name][sely]  # sky
@@ -1052,12 +1070,14 @@ class Simulator:
 
         primary = fits.PrimaryHDU()
         primary.header["TARGET"] = self.source.name
-        primary.header["RA"] = self.source.ra.value
-        primary.header["DEC"] = self.source.dec.value
+        primary.header["RA"] = (self.source.ra.value, 'ra of the observed field')
+        primary.header["DEC"] = (self.source.dec.value, 'dec of the observed field')
+        primary.header["OBS_RA"] = (self.observation.ra.to(u.deg).value, 'ra of the fiber array')
+        primary.header["OBS_DEC"] = (self.observation.dec.to(u.deg).value, 'dec of the fiber array')
         primary.header["AZ"] = (self.observation.target_coords_altaz.az.value,
-                                "Azimuth of the target")
+                                "Azimuth of the fiber array")
         primary.header["ALT"] = (self.observation.target_coords_altaz.alt.value,
-                                 "Altitude of the target")
+                                 "Altitude of the fiber target")
         primary.header["AIRMASS"] = self.observation.airmass
         primary.header["MJD"] = (self.observation.mjd, "MJD at start")
         if exptime is not None:
@@ -1148,7 +1168,8 @@ class Simulator:
                         target_out = np.zeros((self.source.npixels, self.source.npixels),
                                               dtype=np.float32)
                         total_out = np.zeros((self.source.npixels, self.source.npixels),
-                                             dtype=np.float32)
+                                              dtype=np.float32)
+
                         wcs = self.source.wcs
                         head = wcs.to_header()
 
@@ -1161,8 +1182,10 @@ class Simulator:
                         mask2 = branch.wavecoord.wave < wavelength_range[1] * unit_range
                         mask = np.all([mask1, mask2], axis=0)
 
-                        target_val = np.nansum(target[:, mask], axis=1)
-                        total_val = np.nansum(total[:, mask], axis=1)
+                        dl = branch.wavecoord.step.value
+
+                        target_val = np.nansum(target[:, mask], axis=1) * dl
+                        total_val = np.nansum(total[:, mask], axis=1) * dl
 
                         # Just the target
                         target_out = self._populate_map(target_out, target_val, ids, wcs)
@@ -1225,7 +1248,7 @@ class Simulator:
         else:
             size = int(diameter) + 2
 
-        kernel = np.zeros((size, size))
+        kernel = np.zeros((size, size), dtype=np.float32)
         center = kernel.shape[0] // 2  # center of new array
 
         yy, xx = np.mgrid[:kernel.shape[0], :kernel.shape[1]]
@@ -1243,3 +1266,12 @@ class Simulator:
             map[fiber_y-center: fiber_y+center+1, fiber_x-center: fiber_x+center+1] += kernel * flux
 
         return map
+
+    def _recover_wcs(self):
+
+        header = self.source.wcs.to_header()
+
+        header['OBS_RA'] = (self.observation.ra.to(u.deg).value, 'ra of the fiber array')
+        header['OBS_DEC'] = (self.observation.dec.to(u.deg).value, 'dec of the fiber array')
+
+        return header

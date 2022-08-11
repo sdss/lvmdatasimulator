@@ -46,7 +46,7 @@ class LVMField:
         size (float):
             Size of the field to be created. The filed will be a square with side "size". size is
             expected in arcmin, but the unit can be changed using unit_size.
-        spaxel (float):
+        pxsize (float):
             Size of the squared spatial resolution element to be used to create the wcs object
             associated to the field. It is expected to be in arcsec, but the unit can be changed
             by using unit_spaxel.
@@ -56,7 +56,7 @@ class LVMField:
             Physical units of the declination. Defaults to u.deg.
         unit_size (astropy.unit):
             Physical units of the size. Defaults to u.arcmin.
-        unit_spaxel (astropy.unit):
+        unit_spxsize (astropy.unit):
             Physical units of the spaxel. Defaults to u.arcsec.
         name (str):
             Name of the field. Defaults to 'LVM_field'
@@ -365,7 +365,7 @@ class LVMField:
                                 'continuum_type': 'BB' or 'Model' or 'Poly' # type of the continuum model
                                 'continuum_data': model_id or [poly_coefficients] or Teff # value defining cont. shape
                                 'continuum_flux': 1e-16 * u.erg / u.cm ** 2 / u.s / u.arcsec **2 / u.AA,
-                                'continuum_mag': 22 * u.mag,
+                                'continuum_mag': 22 * u.mag / u.arcsec ** 2,
                                 'continuum_wl': 5500, # could be also R, V, B,
                                 'ext_law': 'F99',  # Extinction law, one of those used by pyneb (used for dark nebulae)
                                 'ext_rv': 3.1,  # Value of R_V for extinction curve calculation (used for dark nebulae)

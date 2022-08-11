@@ -99,7 +99,9 @@ def save_input_params_etc(params):
                'airmass': 1.5,
                'unit_wave': u.AA,
                'unit_flux': u.erg*u.s**-1*u.cm**-2*u.arcsec**-2,
-               'days_moon': 0,}
+               'days_moon': 0,
+               'sky_template': None}
+
 
     for key in default.keys():
         if key not in params:
@@ -209,6 +211,8 @@ def run_lvm_etc(params, check_lines=None, desired_snr=None, continuum=False, del
                 If True, then S/N will be measured assuming the source spectrum is continuum (signal = flux per pixel);
                 otherwise (default) the flux is integrated in the window of ±2A assuming the
                 emission line spectrum(noise is also scaled)
+            delete (bool):
+                delete all the output files. Defaults to True.
     """
 
     if isinstance(params, str):
@@ -270,8 +274,9 @@ def run_lvm_etc(params, check_lines=None, desired_snr=None, continuum=False, del
         my_lvmfield.add_nebulae([{"type": 'DIG',
                                   'perturb_scale': 0, 'perturb_amplitude': 0,
                                   'max_brightness': nebula.get('max_brightness'),
-                                  'cloudy_id': nebula.get('cloudy_id'),
-                                  'cloudy_params': nebula.get('cloudy_params'),
+                                  'model_id': nebula.get('model_id'),
+                                  'model_params': nebula.get('model_params'),
+                                  'model_type': nebula.get('model_type', 'cloudy'),
                                   'continuum_type': nebula.get('continuum_type'),
                                   'continuum_data': nebula.get('continuum_data'),
                                   'continuum_mag': nebula.get('continuum_mag'),
@@ -290,7 +295,8 @@ def run_lvm_etc(params, check_lines=None, desired_snr=None, continuum=False, del
                       unit_dec=u.deg,
                       exptimes=exptimes,
                       airmass=params.get('airmass', 1.5),
-                      days_moon=params.get('days_moon', 0))
+                      days_moon=params.get('days_moon', 0),
+                      sky_template=params.get('sky_template', None))
 
     tel = LVM160()
     spec = LinearSpectrograph()

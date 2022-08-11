@@ -40,6 +40,21 @@ if not os.path.isfile(CLOUDY_MODELS):
     CLOUDY_MODELS = None
 CLOUDY_SPEC_DEFAULTS = config.get('cloudy_default_params')
 
+# path to the MAPPINGS models and some default parameters
+if config.get('data_dir').startswith("."):
+    MAPPINGS_MODELS = os.path.join(os.path.curdir, config.get('mappings_models_name'))
+elif config.get('data_dir').startswith("/") or config.get('data_dir').startswith("\\"):
+    MAPPINGS_MODELS = os.path.join(config.get('data_dir'), config.get('mappings_models_name'))
+else:
+    MAPPINGS_MODELS = os.path.join(os.path.join(ROOT_DIR, config.get('data_dir')),
+                                   config.get('mappings_models_name'))
+if not os.path.isfile(MAPPINGS_MODELS):
+    log.warning("Pre-computed grid of Cloudy models ({}) is not found. "
+                "Flux distribution in different lines will be unavailable".format(MAPPINGS_MODELS))
+    MAPPINGS_MODELS = None
+MAPPINGS_SPEC_DEFAULTS = config.get('mappings_default_params')
+
+
 # path to the modeled continuum
 if config.get('data_dir').startswith("."):
     CONTINUUM_MODELS = os.path.join(os.path.curdir, config.get('continuum_models_name'))
