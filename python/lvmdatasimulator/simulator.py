@@ -443,21 +443,27 @@ class Simulator:
 
         # fixing the unit of measurement
 
+        default_unit_wave = u.AA
+        default_unit_flux = u.erg*u.s**-1*u.cm**-2*u.arcsec**-2*u.AA**-1
+
         if isinstance(wave, np.ndarray):
             wave *= unit_wave
-        else:
-            wave = wave.to(unit_wave)
 
         flux *= norm  # applying the normalization to the flux
 
-        if isinstance(flux, u.Quantity):
-            try:
-                flux = flux.to(unit_flux)
-            except u.UnitConversionError:
-                raise u.UnitConversionError(f'Fluxes units {flux.unit} cannot be converted to {unit_flux}.')
-        else:
+
+        if not isinstance(flux, u.Quantity):
             flux *= unit_flux
 
+        try:
+            flux = flux.to(default_unit_flux)
+        except u.UnitConversionError:
+            raise u.UnitConversionError(f'Flux units {unit_flux} cannot be converted to {default_unit_flux}.')
+
+        try:
+            wave = wave.to(default_unit_wave)
+        except u.UnitConversionError:
+            raise u.UnitConversionError(f'Wavelength units {unit_wave} cannot be converted to {default_unit_wave}.')
 
         out_spectrum = OrderedDict()
 
@@ -722,7 +728,7 @@ class Simulator:
             sky_hdu = fits.ImageHDU(data=sky.astype(np.float32), name="SKY")
             sky_hdu.header["BUNIT"] = "e/pix"
             primary.header["EXT5"] = "SKY"
-            
+
             wave_hdu = fits.ImageHDU(data=branch.wavecoord.wave.value.astype(np.float32),
                                      name="WAVE")
             wave_hdu.header["BUNIT"] = "Angstrom"

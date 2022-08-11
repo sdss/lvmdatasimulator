@@ -307,7 +307,10 @@ def run_lvm_etc(params, check_lines=None, desired_snr=None, continuum=False, del
         data = ascii.read(spectrum_name)
         wave = data['col1']
         flux = data['col2']
-        sim.simulate_observations_custom_spectrum(wave, flux, norm=params.get('norm', 1))
+        unit_flux = u.erg*u.s**-1*u.cm**-2*u.arcsec**-2*u.AA**-1
+        sim.simulate_observations_custom_spectrum(wave, flux, norm=params.get('norm', 1),
+                                                  unit_wave=params.get('unit_wave', u.AA),
+                                                  unit_flux=params.get('unit_flux', unit_flux))
     else:
         sim.simulate_observations()
 
