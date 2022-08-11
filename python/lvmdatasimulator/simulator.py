@@ -150,7 +150,7 @@ class Simulator:
         spectrograph: Spectrograph,
         bundle: FiberBundle,
         telescope: Telescope,
-        aperture: u.pix = 4 * u.pix,
+        aperture: u.pix = 10 * u.pix,
         root: str = lvmdatasimulator.WORK_DIR,
         overwrite: bool = True,
         fast: bool = True
@@ -293,7 +293,7 @@ class Simulator:
     def extract_target_spectra(self):
         """Extract spectra of the target from the field object"""
 
-        wl_grid = np.arange(3647, 9900.01, 0.06) * u.AA
+        wl_grid = np.arange(3500, 9910.01, 0.06) * u.AA
 
         log.info(f"Recovering target spectra for {self.bundle.nfibers} fibers.")
         index, spectra = self.source.extract_spectra(self.bundle.fibers, wl_grid,
@@ -424,6 +424,102 @@ class Simulator:
             self.output_noise[exptime] = OrderedDict(zip(ids, noises))
             self.output_calib[exptime] = OrderedDict(zip(ids, calibs))
 
+    def simulate_observations_custom_spectrum(self, wave, flux, norm=1, unit_wave=u.AA,
+                                              unit_flux=u.erg*u.s**-1*u.cm**-2*u.arcsec**-2*u.AA**-1,
+                                              exptimes=None):
+        """
+        Function to simulate the observations of a specific spectrum provided by the user.
+
+        This function takes as an input a spectrum and it processes it in order to make it
+        observable by the simulator. It then proceed simulating the observation of a single fiber.
+        This function is supposed to be used only by the ETC.
+
+        Args:
+            exptimes (_type_, optional): _description_. Defaults to None.
+
+        """
+
+        log.info('Simulating real spectrum observation')
+
+        # fixing the unit of measurement
+
+        if isinstance(wave, np.ndarray):
+            wave *= unit_wave
+        else:
+            wave = wave.to(unit_wave)
+
+        flux *= norm  # applying the normalization to the flux
+
+        if isinstance(flux, u.Quantity):
+            try:
+                flux = flux.to(unit_flux)
+            except u.UnitConversionError:
+                raise u.UnitConversionError(f'Fluxes units {flux.unit} cannot be converted to {unit_flux}.')
+        else:
+            flux *= unit_flux
+
+
+        out_spectrum = OrderedDict()
+
+        for fiber in self.bundle.fibers:
+
+            branch_spec = OrderedDict()
+            for branch in self.spectrograph.branches:
+
+                dlam = (wave[-1] - wave[0]) / len(wave)
+
+                lsf_fwhm = branch.lsf_fwhm / dlam
+
+                convolved = convolve_for_gaussian(flux.value, lsf_fwhm, boundary="extend")
+                resampled_v1 = resample_spectrum(branch.wavecoord.wave.value, wave.value,
+                                                 convolved, fast=self.fast)
+
+                resampled_v1 *= unit_flux
+                to_flux = resampled_v1 * np.pi * (fiber.diameter/2)**2  # from SB to flux
+                branch_spec[branch.name] = to_flux
+
+            out_spectrum[fiber.id] = branch_spec
+
+        self.target_spectra = out_spectrum
+        self.extinction = self.extract_extinction()
+        self.sky = self.extract_sky()
+
+        # copy of the second part of simulate observations
+        if exptimes is None:
+            exptimes = self.observation.exptimes
+        else:
+            if not isinstance(exptimes, list):
+                exptimes = [exptimes]
+            log.warning('New exposure times have been provided. Overwriting the ones included in '
+                        + 'Observation')
+        for exptime in exptimes:
+            exptime_unit = exptime * u.s
+            if self.fast:
+                results = [self._simulate_observations_single_fiber((fiber, self.target_spectra,
+                                                                     exptime_unit))
+                        for fiber in self.bundle.fibers]
+            else:
+                with Pool(lvmdatasimulator.n_process) as pool:
+                    results = pool.map(self._simulate_observations_single_fiber, [(fiber,
+                                                                                   self.target_spectra,
+                                                                                   exptime_unit)
+                    for fiber in self.bundle.fibers])
+
+            # reorganize outputs
+            ids = []
+            realizations = []
+            noises = []
+            calibs = []
+            for item in results:
+                ids.append(item[0])
+                noises.append(item[1])
+                calibs.append(item[2])
+                realizations.append(item[3])
+
+            self.output_no_noise[exptime] = OrderedDict(zip(ids, realizations))
+            self.output_noise[exptime] = OrderedDict(zip(ids, noises))
+            self.output_calib[exptime] = OrderedDict(zip(ids, calibs))
+
     def save_outputs(self):
         """
         Main function to save the output of the simulation into rss file. Each different output is
@@ -519,6 +615,7 @@ class Simulator:
 
             wave_hdu = fits.ImageHDU(data=branch.wavecoord.wave.value.astype(np.float32),
                                      name="WAVE")
+
             wave_hdu.header["BUNIT"] = "Angstrom"
             primary.header["EXT6"] = "WAVE"
 
@@ -625,7 +722,7 @@ class Simulator:
             sky_hdu = fits.ImageHDU(data=sky.astype(np.float32), name="SKY")
             sky_hdu.header["BUNIT"] = "e/pix"
             primary.header["EXT5"] = "SKY"
-
+            
             wave_hdu = fits.ImageHDU(data=branch.wavecoord.wave.value.astype(np.float32),
                                      name="WAVE")
             wave_hdu.header["BUNIT"] = "Angstrom"
@@ -1072,6 +1169,7 @@ class Simulator:
                                               dtype=np.float32)
                         total_out = np.zeros((self.source.npixels, self.source.npixels),
                                               dtype=np.float32)
+
                         wcs = self.source.wcs
                         head = wcs.to_header()
 
@@ -1097,7 +1195,7 @@ class Simulator:
                             + f"_{int(wavelength_range[0])}_{int(wavelength_range[1])}"
                             + f"_{exptime}s_target_map.fits")
 
-                        hdu = fits.PrimaryHDU(data=target_out, header=head)
+                        hdu = fits.PrimaryHDU(data=target_out.astype(np.float32), header=head)
 
                         hdu.writeto(filename, overwrite=True)
                         log.info(f' Saving {filename}...')
@@ -1109,7 +1207,7 @@ class Simulator:
                             f"{self.source.name}_{branch.name}_{self.bundle.bundle_name}"
                             + f"_{int(wavelength_range[0])}_{int(wavelength_range[1])}"
                             + f"_{exptime}s_total_map.fits")
-                        hdu = fits.PrimaryHDU(data=total_out, header=head)
+                        hdu = fits.PrimaryHDU(data=total_out.astype(np.float32), header=head)
 
                         hdu.writeto(filename, overwrite=True)
                         log.info(f' Saving {filename}...')

@@ -4,12 +4,15 @@
 Change Log
 ==========
 
+2022/08/09 - adding possibility to run ETC with a user provided spectrum
+
 2022/08/05 - v0.9.2 released
              Adding the possibility to use Allen+08 shock models
              added warning when vel_amplitude < range of expected velocities
 
 2022/07/19 - New WCS extension added to all the WCS files.
              Tutorial 2 modified to reflect these changes
+
 
 2022/07/04 - Attributes "spaxel" and unit_spaxel in LVMField changed to "pxsize" and "unit_pxsize"
              Tutorials updated to reflect this change

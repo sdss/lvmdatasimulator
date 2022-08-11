@@ -8,6 +8,7 @@ from lvmdatasimulator.simulator import Simulator
 from lvmdatasimulator.fibers import FiberBundle
 from lvmdatasimulator import log, WORK_DIR
 from astropy.io.misc import yaml
+from astropy.io import ascii
 
 import astropy.units as u
 import time
@@ -92,9 +93,15 @@ def save_input_params(params):
 def save_input_params_etc(params):
 
     default = {'name': 'LVM_Field_ETC',
+               'spectrum': None,
+               'norm': 1,
+               'lsf_fwhm': 1.5,
                'airmass': 1.5,
+               'unit_wave': u.AA,
+               'unit_flux': u.erg*u.s**-1*u.cm**-2*u.arcsec**-2,
                'days_moon': 0,
                'sky_template': None}
+
 
     for key in default.keys():
         if key not in params:
@@ -223,8 +230,16 @@ def run_lvm_etc(params, check_lines=None, desired_snr=None, continuum=False, del
     else:
         star = params['star']
 
-    if star is None and nebula is None:
-        raise ValueError('No nebula or star defined, or they are defined incorrectly. Aborting the simulation')
+    spectrum_name = params.get('spectrum', None)
+
+    if not isinstance(spectrum_name, str) and not spectrum_name is None:
+        raise TypeError(f'"spectrum" can be string or None. It is {type(params["spectrum"])}')
+
+    if (spectrum_name is not None) and (nebula is not None or star is not None):
+        raise ValueError(f'"spectrum cannot be used with other sources')
+
+    if star is None and nebula is None and spectrum_name is None:
+        raise ValueError('Neither nebula, nor star nor spectrum are defined, or they are defined incorrectly. Aborting the simulation')
 
     str_print = 'Start simulations in exposure time calculator mode for '
     if nebula is not None:
@@ -233,6 +248,9 @@ def run_lvm_etc(params, check_lines=None, desired_snr=None, continuum=False, del
             str_print += 'and '
     if star is not None:
         str_print += '1 star '
+    if spectrum_name is not None:
+        str_print += '1 custom spectrum.'
+
     log.info(str_print)
 
     if check_lines is None:
@@ -284,7 +302,15 @@ def run_lvm_etc(params, check_lines=None, desired_snr=None, continuum=False, del
     spec = LinearSpectrograph()
     bundle = FiberBundle(bundle_name='central')
     sim = Simulator(my_lvmfield, obs, spec, bundle, tel, fast=True)
-    sim.simulate_observations()
+
+    if spectrum_name is not None:
+        data = ascii.read(spectrum_name)
+        wave = data['col1']
+        flux = data['col2']
+        sim.simulate_observations_custom_spectrum(wave, flux, norm=params.get('norm', 1))
+    else:
+        sim.simulate_observations()
+
     sim.save_outputs()
 
     save_input_params_etc(params)
@@ -325,7 +351,7 @@ def run_lvm_etc(params, check_lines=None, desired_snr=None, continuum=False, del
     if desired_snr is not None and (len(desired_snr) == len(check_lines)):
         desired_exptimes = []
     else:
-        default_exptimes = None
+        desired_exptimes = None
 
     fig, ax = plt.subplots()
     for l_id, line in enumerate(check_lines):
