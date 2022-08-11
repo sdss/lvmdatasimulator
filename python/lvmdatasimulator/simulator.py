@@ -150,7 +150,7 @@ class Simulator:
         spectrograph: Spectrograph,
         bundle: FiberBundle,
         telescope: Telescope,
-        aperture: u.pix = 4 * u.pix,
+        aperture: u.pix = 10 * u.pix,
         root: str = lvmdatasimulator.WORK_DIR,
         overwrite: bool = True,
         fast: bool = True
@@ -424,9 +424,8 @@ class Simulator:
             self.output_noise[exptime] = OrderedDict(zip(ids, noises))
             self.output_calib[exptime] = OrderedDict(zip(ids, calibs))
 
-    def simulate_observations_custom_spectrum(self, wave, flux, lsf_fwhm, norm=1,
-                                              unit_wave=u.AA,
-                                              unit_flux=u.erg*u.s**-1*u.cm**-2*u.arcsec**-2,
+    def simulate_observations_custom_spectrum(self, wave, flux, norm=1, unit_wave=u.AA,
+                                              unit_flux=u.erg*u.s**-1*u.cm**-2*u.arcsec**-2*u.AA**-1,
                                               exptimes=None):
         """
         Function to simulate the observations of a specific spectrum provided by the user.
@@ -449,24 +448,16 @@ class Simulator:
         else:
             wave = wave.to(unit_wave)
 
-        # lsf same units as wave
-        if isinstance(lsf_fwhm, (int, float)):
-            lsf_fwhm *= unit_wave
-        else:
-            lsf_fwhm = lsf_fwhm.to(unit_wave)
-
-        if isinstance(flux, np.ndarray):
-            flux *= unit_flux
-        else:
-            flux = flux.to(unit_flux)
-
-        # if norm has units, convert it to the same uints as flux, and remove the units
-        if isinstance(norm, u.Quantity):
-            norm = norm.to(unit_flux).value
-
-        dlam = (wave[-1] - wave[0])/ len(wave)  # average dispersion
-
         flux *= norm  # applying the normalization to the flux
+
+        if isinstance(flux, u.Quantity):
+            try:
+                flux = flux.to(unit_flux)
+            except u.UnitConversionError:
+                raise u.UnitConversionError(f'Fluxes units {flux.unit} cannot be converted to {unit_flux}.')
+        else:
+            flux *= unit_flux
+
 
         out_spectrum = OrderedDict()
 
@@ -475,16 +466,13 @@ class Simulator:
             branch_spec = OrderedDict()
             for branch in self.spectrograph.branches:
 
-                if lsf_fwhm < branch.lsf_fwhm:
-                    kernel_fwhm = np.sqrt(branch.lsf_fwhm**2 - lsf_fwhm**2) / dlam
-                    convolved = convolve_for_gaussian(flux.value, kernel_fwhm, boundary="extend")
-                    resampled_v1 = resample_spectrum(branch.wavecoord.wave.value, wave.value,
-                                                    convolved, fast=self.fast)
-                else:
-                    log.warning('The resolution of the spectrum is lower than the LVM one.')
+                dlam = (wave[-1] - wave[0]) / len(wave)
 
+                lsf_fwhm = branch.lsf_fwhm / dlam
+
+                convolved = convolve_for_gaussian(flux.value, lsf_fwhm, boundary="extend")
                 resampled_v1 = resample_spectrum(branch.wavecoord.wave.value, wave.value,
-                                                 flux.value, fast=self.fast)
+                                                 convolved, fast=self.fast)
 
                 resampled_v1 *= unit_flux
                 to_flux = resampled_v1 * np.pi * (fiber.diameter/2)**2  # from SB to flux

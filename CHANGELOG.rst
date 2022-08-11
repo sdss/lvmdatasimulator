@@ -4,6 +4,8 @@
 Change Log
 ==========
 
+2022/08/09 - adding possibility to run ETC with a user provided spectrum
+
 2022/07/04 - Attributes "spaxel" and unit_spaxel in LVMField changed to "pxsize" and "unit_pxsize"
              Tutorials updated to reflect this change
 
