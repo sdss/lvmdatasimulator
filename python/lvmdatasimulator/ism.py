@@ -29,7 +29,6 @@ from scipy.ndimage.interpolation import map_coordinates
 from scipy.interpolate import interp1d, RectBivariateSpline
 import lvmdatasimulator
 from lvmdatasimulator import log
-import progressbar
 from joblib import Parallel, delayed
 from astropy.convolution import convolve_fft, kernels
 from astropy.units import UnitConversionError
@@ -1319,11 +1318,9 @@ class ISM:
                                                                             'CustomNebula']]
         n_objects = len(all_objects)
         log.info("Start generating {} nebulae".format(n_objects))
-        bar = progressbar.ProgressBar(max_value=n_objects).start()
         obj_id = self.content[0].header['Nobj']
         obj_id_ini = self.content[0].header['Nobj']
         for ind_obj, cur_obj in enumerate(all_objects):
-            bar.update(ind_obj)
             # Setup default parameters for missing keywords
             kin_pa_default = 0
             if 'PA' in cur_obj:
@@ -1764,7 +1761,7 @@ class ISM:
             self.add_nebula(generated_object, obj_id=obj_id, zorder=cur_obj.get('zorder'), add_fits_kw=add_fits_kw,
                             continuum=continuum)
             obj_id += 1
-        bar.finish()
+
         if (obj_id - obj_id_ini) == 0:
             return None
         else:
@@ -2019,7 +2016,6 @@ class ISM:
         kern_mask = calc_circular_mask(fiber_radius)
         kern = kernels.CustomKernel(kern_mask.reshape((1, kern_mask.shape[0], kern_mask.shape[1])))
 
-        bar = progressbar.ProgressBar(max_value=len(all_extensions_brt)).start()
         for neb_index, cur_ext in enumerate(all_extensions_brt):
             cur_neb_in_mask = np.zeros_like(xx_sub)
             y0 = self.content[cur_ext].header.get("Y0")
@@ -2030,7 +2026,6 @@ class ISM:
                             (yy_sub >= (y0 - ystart)) & (yy_sub <= (y0 + ny - ystart))] = True
             cur_neb_in_mask_ap = cur_neb_in_mask * (aperture_mask_sub > 0)
             if not np.sum(cur_neb_in_mask_ap):
-                bar.update(neb_index + 1)
                 continue
             cur_mask_in_neb = np.zeros(shape=self.content[cur_ext].data.shape, dtype=bool)
             xx_neb, yy_neb = np.meshgrid(np.arange(self.content[cur_ext].data.shape[1]),
@@ -2047,7 +2042,6 @@ class ISM:
                                                 ((fibers_coords[:, 1] - fibers_coords[:, 2]) <= (y0 + ny - 1)))
             selected_apertures = np.array([sa for sa in selected_apertures if (sa+1) in aperture_mask_sub], dtype=int)
             if len(selected_apertures) == 0:
-                bar.update(neb_index + 1)
                 continue
 
             # Here I check if it is necessary to extend all involved arrays to account for fibers at the edges of neb.
@@ -2097,7 +2091,6 @@ class ISM:
                     spectrum[selected_apertures, :] * ism_extinction(av=data_in_apertures, r_v=cur_r_v,
                                                                      ext_law=cur_extinction_law, wavelength=wl_grid).T
 
-                bar.update(neb_index + 1)
                 continue
 
             my_comp = "_".join(cur_ext.split("_")[:2])
@@ -2253,6 +2246,4 @@ class ISM:
                                                                1))
                 spectrum[selected_apertures, :] += continuum[None, :] * data_in_apertures
 
-            bar.update(neb_index + 1)
-        bar.finish()
         return spectrum * (proj_plane_pixel_scales(self.wcs)[0] * 3600) ** 2 * fluxunit * u.arcsec ** 2

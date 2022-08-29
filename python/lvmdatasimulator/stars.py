@@ -10,7 +10,6 @@ from urllib.error import HTTPError
 import astropy.units as u
 import numpy as np
 import pyphot
-import progressbar
 # import matplotlib.pyplot as plt
 
 # from pyphot import unit
@@ -276,16 +275,13 @@ class StarsList:
 
         tmp_spectra = np.zeros((len(self), len(self.wave)))
 
-        bar = progressbar.ProgressBar(max_value=len(self)).start()
         for i, row in enumerate(self.stars_table):
             spectrum = get_spectrum(row['teff_val'], library)
             if shift and row['radial_velocity']:
                 spectrum = shift_spectrum(self.wave, spectrum, row['radial_velocity'])
 
             tmp_spectra[i] = spectrum
-            bar.update(i)
 
-        bar.finish()
         self.spectra = tmp_spectra
 
     def _append_spectra(self, library, shift=False):
@@ -308,7 +304,6 @@ class StarsList:
 
         tmp_spectra = np.zeros((nstars - nspectra, len(self.wave)))
 
-        bar = progressbar.ProgressBar(max_value=nstars - nspectra).start()
         for i, row in enumerate(self.stars_table):
             if i >= nspectra:
                 spectrum = get_spectrum(row['teff_val'], library)
@@ -316,9 +311,7 @@ class StarsList:
                     spectrum = shift_spectrum(self.wave, spectrum, row['radial_velocity'])
 
                 tmp_spectra[i - nspectra] = spectrum
-                bar.update(i - nspectra)
 
-        bar.finish()
         self.spectra = np.append(self.spectra, tmp_spectra, axis=0)
 
     def rescale_spectra(self):
