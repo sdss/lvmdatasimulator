@@ -1,8 +1,8 @@
 ---
 
-utah_cluster: False # If True, then it will alter the work_dir later for running at the UTAH cluster
+utah_cluster: True # If True, then it will alter the work_dir later for running at the UTAH cluster
 
-nprocess: 8  # number of processes for parallelization
+nprocess: 40  # number of processes for parallelization
 
 cloudy_models_name: 'LVM_cloudy_models.fits'         # Name for the pre-computed emission-line models to be used
                                                      # (should be stored in 'data' directory)

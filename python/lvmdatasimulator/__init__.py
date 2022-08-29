@@ -7,7 +7,7 @@ import warnings
 NAME = 'sdss-lvmdatasimulator'
 
 # Loads config. config name is the package name.
-config = get_config('lvmdatasimulator', config_envvar="LVMDSIM_CONFIG")
+config = get_config('lvmdatasimulator', config_envvar="LVM_SIMULATOR_SETTINGS")
 
 # Inits the logging system as NAME. Only shell logging, and exception and warning catching.
 # File logging can be started by calling log.start_file_logger(path).  Filename can be different
@@ -78,7 +78,9 @@ if not os.path.isfile(STELLAR_LIBS):
     STELLAR_LIBS = None
 
 # path to the directory where all computational results will be saved
-if config.get('work_dir').startswith("/") or config.get('work_dir').startswith("\\") or \
+if config.get('utah_cluster'):
+    WORK_DIR = os.environ.get('LVM_SIMULATOR_OUT')
+elif config.get('work_dir').startswith("/") or config.get('work_dir').startswith("\\") or \
         config.get('work_dir').startswith("."):
     WORK_DIR = config.get('work_dir')
 else:
