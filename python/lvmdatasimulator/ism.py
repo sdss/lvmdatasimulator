@@ -1995,8 +1995,8 @@ class ISM:
                                                             for cur_ext in all_extensions_brt])]
 
         wl_logscale = np.log(wl_grid.value)
-        wl_logscale_highres = np.arange((np.round(wl_logscale[-1] - wl_logscale[0]) * 1e6
-                                         ).astype(int)) * 1e-6 + np.round(wl_logscale[0], 6)
+        wl_logscale_highres = np.arange(np.round((wl_logscale[-1] - wl_logscale[0]) * 1e6).astype(int)) \
+                                * 1e-6 + np.round(wl_logscale[0], 6)
         delta_lr = np.roll(wl_logscale, -1) - wl_logscale
         delta_lr[-1] = delta_lr[-2]
 
