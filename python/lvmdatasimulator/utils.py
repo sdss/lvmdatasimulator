@@ -13,7 +13,7 @@ import astropy.units as u
 import lvmdatasimulator
 
 from dataclasses import dataclass
-from astropy.io import fits
+from astropy.io import fits, ascii
 from astropy.table import Table
 from astropy.units import UnitConversionError
 from astropy.convolution import convolve_fft
@@ -501,7 +501,20 @@ def set_geocoronal_ha(wave, flux, ha):
     return flux
 
 
+def open_sky_file(filename=None, days_moon=None, telescope_name='LVM160'):
 
+    if filename is None:
+        log.info(f'Simulating the sky emission {days_moon} days from new moon.')
+        sky_file = os.path.join(lvmdatasimulator.DATA_DIR, 'sky',
+                                    f'LVM_{telescope_name}_SKY_{days_moon}.dat')
+
+    log.info(f'Using sky file: {sky_file}')
+
+    data = ascii.read(sky_file)
+    wave = data["col1"]
+    flux = data["col2"]
+
+    return wave, flux
 
 
 
