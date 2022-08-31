@@ -16,7 +16,6 @@
 # 2020-09-28: New zeropoints and bug fixes ported from Guillermo's code
 # 2021-04-08: added 'run_lvmetc' function to facilitate importing this as a package
 
-from lvmdatasimulator import fibers
 import numpy as np
 import astropy.units as u
 
@@ -37,7 +36,7 @@ from lvmdatasimulator.fibers import FiberBundle
 from lvmdatasimulator.observation import Observation
 from lvmdatasimulator.telescope import Telescope
 from lvmdatasimulator import log
-from lvmdatasimulator.utils import round_up_to_odd, set_geocoronal_ha
+from lvmdatasimulator.utils import round_up_to_odd, set_geocoronal_ha, open_sky_file
 from joblib import Parallel, delayed
 import os
 # import sys
@@ -205,31 +204,18 @@ class Simulator:
         """
         Return sky emission spectrum sampled at instrumental wavelengths
         """
-
-        if self.observation.sky_template is None:
-            days_moon = self.observation.days_moon
-            log.info(f'Simulating the sky emission {days_moon} days from new moon.')
-            sky_file = os.path.join(lvmdatasimulator.DATA_DIR, 'sky',
-                                    f'LVM_{self.telescope.name}_SKY_{days_moon}.dat')
-        else:
-            sky_file = self.observation.sky_template
-
-        log.info(f'Using sky file: {sky_file}')
-
-        data = ascii.read(sky_file)
-        wave = data["col1"]
-        flux = data["col2"]
+        wave, brightness = open_sky_file(self.observation.sky_template, self.observation.days_moon,
+                                         self.telescope.name)
 
         if self.observation.geocoronal is not None:
-            ha_flux = self.observation.geocoronal
-
-            flux = set_geocoronal_ha(wave, flux, ha_flux)
+            ha = self.observation.geocoronal
+            brightness = set_geocoronal_ha(wave, brightness, ha)
 
         area_fiber = np.pi * (self.bundle.fibers[0].diameter / 2) ** 2  # all fibers same diam.
-        brightness = flux * area_fiber.value  # converting to Fluxes from SBrightness
+        flux = brightness * area_fiber.value  # converting to Fluxes from SBrightness
 
         log.info('Resample sky emission to instrument wavelength solution.')
-        return self._resample_and_convolve(wave, brightness, u.erg / (u.cm ** 2 * u.s * u.AA))
+        return self._resample_and_convolve(wave, flux, u.erg / (u.cm ** 2 * u.s * u.AA))
 
     def _resample_and_convolve(self, old_wave, old_flux, unit=None):
         """
