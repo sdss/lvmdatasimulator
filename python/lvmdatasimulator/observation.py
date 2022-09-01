@@ -233,7 +233,8 @@ class Observation:
 
         Args:
             dir (str, optional):
-                Directory where to save the output image. Defaults to '.'.
+                Directory where to save the output image. Defaults to WORK_DIR defined in the config file.
+                In this case, Name will be also added to the path.
             show (bool, optional):
                 If True, the plot is showed before saving. Otherwise, the plot is directly saved
                 to file. Defaults to False.
@@ -273,8 +274,11 @@ class Observation:
         ax.set_ylim(0 * u.deg, 90 * u.deg)
         ax.set_xlabel('Hours from UT Midnight')
         ax.set_ylabel('Altitude [deg]')
-
-        fig.savefig(os.path.join(dir, r'{self.name}_visibility.png'))
+        if dir == WORK_DIR:
+            subdir = self.name
+        else:
+            subdir = ''
+        fig.savefig(os.path.join(dir, subdir, r'{self.name}_visibility.png'))
 
         if show:
             plt.show()

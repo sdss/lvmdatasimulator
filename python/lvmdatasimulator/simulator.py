@@ -161,7 +161,11 @@ class Simulator:
         self.bundle = bundle
         self.telescope = telescope
         self.aperture = aperture
-        self.root = root
+        if root == lvmdatasimulator.WORK_DIR:
+            subdir = source.name
+        else:
+            subdir = ''
+        self.root = os.path.join(root, subdir)
         self.overwrite = overwrite
         self.fast = fast
 
@@ -176,7 +180,7 @@ class Simulator:
             log.warning(f"{self.outdir} already exist. Terminating the simulation.")
             return
         if not os.path.isdir(self.outdir):
-            os.mkdir(self.outdir)
+            os.makedirs(self.outdir)
 
         self.extinction = None
         self.sky = None

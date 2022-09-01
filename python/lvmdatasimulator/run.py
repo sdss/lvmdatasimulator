@@ -85,7 +85,7 @@ def save_input_params(params):
     outname = '{}_input_parameters.yml' .format(params['name'])
     log.info(f'Saving input parameters to {outname}')
 
-    outname = os.path.join(WORK_DIR, outname)  # putting it in the WORK directory
+    outname = os.path.join(WORK_DIR, params['name'], outname)  # putting it in the WORK/NAME directory
     with open(outname, 'w') as fp:
         yaml.dump(params, fp)
 
@@ -110,7 +110,7 @@ def save_input_params_etc(params):
     outname = '{}_input_parameters_etc.yml' .format(params['name'])
     log.info(f'Saving input ETC parameters to {outname}')
 
-    outname = os.path.join(WORK_DIR, outname)  # putting it in the WORK directory
+    outname = os.path.join(WORK_DIR, params['name'], outname)  # putting it in the WORK/NAME directory
     with open(outname, 'w') as fp:
         yaml.dump(params, fp)
 
@@ -217,7 +217,8 @@ def run_lvm_etc(params, check_lines=None, desired_snr=None, continuum=False, del
 
     if isinstance(params, str):
         params = open_input_params(params)
-
+    if ('name' not in params) or not isinstance(params.get('name'), str):
+        params['name'] = 'LVM_ETC'
     if ('nebula' not in params) or (type(params['nebula']) is not dict):
         nebula = None
     else:
@@ -232,14 +233,15 @@ def run_lvm_etc(params, check_lines=None, desired_snr=None, continuum=False, del
 
     spectrum_name = params.get('spectrum', None)
 
-    if not isinstance(spectrum_name, str) and not spectrum_name is None:
+    if not isinstance(spectrum_name, str) and spectrum_name is not None:
         raise TypeError(f'"spectrum" can be string or None. It is {type(params["spectrum"])}')
 
     if (spectrum_name is not None) and (nebula is not None or star is not None):
         raise ValueError(f'"spectrum cannot be used with other sources')
 
     if star is None and nebula is None and spectrum_name is None:
-        raise ValueError('Neither nebula, nor star nor spectrum are defined, or they are defined incorrectly. Aborting the simulation')
+        raise ValueError('Neither nebula, nor star nor spectrum are defined, '
+                         'or they are defined incorrectly. Aborting the simulation')
 
     str_print = 'Start simulations in exposure time calculator mode for '
     if nebula is not None:
@@ -318,7 +320,7 @@ def run_lvm_etc(params, check_lines=None, desired_snr=None, continuum=False, del
 
     save_input_params_etc(params)
 
-    outdir = os.path.join(WORK_DIR, 'outputs')
+    outdir = os.path.join(WORK_DIR, params['name'], 'outputs')
 
     snr_output = np.zeros(shape=(len(check_lines), len(exptimes)))
     w_lam = 2.
