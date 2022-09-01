@@ -62,6 +62,19 @@ def sphere_brt_in_line(brt_3d, rad_3d, rad_model, flux_model):
     return p(rad_3d) * brt_3d
 
 
+def interpolate_slice_to_circle(slice):
+    """
+    Auxiliary function to fill up the full projection of a cloud or bubble
+    by the brightness or velocities values from the central slice
+    """
+    slice_extended = np.pad(slice, (len(slice)-1, 0), 'reflect')
+    rad_slice = np.arange(len(slice_extended)) - len(slice)
+    x, y = np.meshgrid(np.arange(len(slice_extended)), np.arange(len(slice_extended)))
+    rad_all = np.sqrt((x - len(slice)) ** 2 + (y - len(slice)) ** 2)
+    p = interp1d(rad_slice.astype(float), slice_extended, bounds_error=False, fill_value=0)
+    return p(rad_all)
+
+
 def interpolate_sphere_to_cartesian(spherical_array, x_grid=None, y_grid=None, z_grid=None,
                                     rad_grid=None, theta_grid=None, phi_grid=None, pxscale=1. * u.pc):
     """
@@ -70,8 +83,8 @@ def interpolate_sphere_to_cartesian(spherical_array, x_grid=None, y_grid=None, z
     x, y, z = np.meshgrid(x_grid, y_grid, z_grid, indexing='ij')
     phi_c, theta_c, rad_c = xyz_to_sphere(x, y, z, pxscale=pxscale)
     ir = interp1d(rad_grid, np.arange(len(rad_grid)), bounds_error=False)
-    ith = interp1d(theta_grid, np.arange(len(theta_grid)))
-    iphi = interp1d(phi_grid, np.arange(len(phi_grid)))
+    ith = interp1d(theta_grid, np.arange(len(theta_grid)), bounds_error=False)
+    iphi = interp1d(phi_grid, np.arange(len(phi_grid)), bounds_error=False)
     new_ir = ir(rad_c.ravel())
     new_ith = ith(theta_c.ravel())
     new_iphi = iphi(phi_c.ravel())
@@ -236,7 +249,6 @@ class Nebula:
         self.linerat_constant = True  # True if the ratio of line fluxes shouldn't change across the nebula
         if self.spectrum_type not in [None, 'mappings', 'cloudy']:
             raise ModelsError('These models are not supported')
-
 
     def _assign_all_units(self):
         whole_list_properties = ['pxscale', 'sys_velocity', 'turbulent_sigma', 'max_brightness', 'max_extinction',
@@ -697,8 +709,8 @@ class Cloud(Nebula):
     thickness: float = 1.0
     perturb_degree: int = 0  # Degree of perturbations (max. degree of spherical harmonics for cloud)
     linerat_constant: bool = False  # True if the ratio of line fluxes shouldn't change across the nebula
-    _phi_bins: int = 90
-    _theta_bins: int = 90
+    _phi_bins: int = 90  # 90
+    _theta_bins: int = 2  # 15  # 90
     _rad_bins: int = 0
     _npix_los: int = 100
 
@@ -717,24 +729,25 @@ class Cloud(Nebula):
 
     @cached_property
     def _theta_grid(self):
-        return np.linspace(0, np.pi, self._theta_bins)
+        return np.linspace(0, np.pi / 2, self._theta_bins)
 
     @cached_property
     def _phi_grid(self):
-        return np.linspace(0, 2 * np.pi, self._phi_bins)
+        return np.linspace(0, np.pi, self._phi_bins)
 
     @cached_property
     def _rad_grid(self):
         return np.linspace(0, self.radius, self._rad_bins)
 
     @cached_property
-    def _cartesian_z_grid(self):
+    def _cartesian_y_grid(self):
         npix = np.ceil(1.02 * self.radius / self.pxscale).astype(int)
         return np.linspace(-npix, npix, 2 * npix + 1) * self.pxscale
 
     @cached_property
-    def _cartesian_y_grid(self):
-        return self._cartesian_z_grid.copy()
+    def _cartesian_z_grid(self):
+        return np.linspace(-1, 1, 3) * self.pxscale
+        # return self._cartesian_y_grid.copy()
 
     @cached_property
     def _cartesian_x_grid(self):
@@ -827,6 +840,53 @@ class Cloud(Nebula):
                                                                     for cur_line_array in self._brightness_4d_spherical)
                         ).reshape((s[0], len(self._cartesian_z_grid), len(self._cartesian_y_grid),
                                    len(self._cartesian_x_grid)))
+
+    @cached_property
+    def brightness_skyplane(self):
+        """
+        Project the 3D nebula onto sky plane (for emission or continuum sources)
+        """
+        slice = super().brightness_skyplane[1, :]
+        map2d = interpolate_slice_to_circle(slice[- (len(slice) - 1) // 2 - 1:].value)
+        # if map2d is None:
+        #     return None
+        # map2d[- (map2d.shape[0] - 1) // 2 - 1:, 0: (map2d.shape[1] - 1) // 2] = \
+        #     np.fliplr(map2d[- (map2d.shape[0] - 1) // 2 - 1:, -(map2d.shape[1] - 1) // 2:])
+        # map2d[: (map2d.shape[0] - 1) // 2, :] = \
+        #     np.flipud(map2d[-(map2d.shape[0] - 1) // 2:, :])
+        return map2d * slice.unit
+
+    @cached_property
+    def brightness_skyplane_lines(self):
+        """
+        Project the 3D emission nebula line onto sky plane (return images in each emission line)
+        """
+        slice = super().brightness_skyplane_lines[:, 1, :]
+        map2d = np.zeros(shape=(slice.shape[0], slice.shape[1], slice.shape[1]), dtype=float)
+        for lineind in range(slice.shape[0]):
+            map2d[lineind, :, :] = interpolate_slice_to_circle(slice[lineind, - (slice.shape[1] - 1) // 2 - 1:].value)
+        # if map2d is None:
+        #     return None
+        # map2d[:, - (map2d.shape[1] - 1) // 2 - 1:, 0: (map2d.shape[2] - 1) // 2] = \
+        #     np.flip(map2d[:, - (map2d.shape[1] - 1) // 2 - 1:, -(map2d.shape[2] - 1) // 2:], axis=2)
+        # map2d[:, : (map2d.shape[1] - 1) // 2, :] = \
+        #     np.flip(map2d[:, -(map2d.shape[1] - 1) // 2:, :], axis=1)
+        return map2d * slice.unit
+
+    @cached_property
+    def extinction_skyplane(self):
+        """
+        Project the 3D nebula onto sky plane (for dark clouds)
+        """
+        slice = super().extinction_skyplane[1, :]
+        map2d = interpolate_slice_to_circle(slice[- (len(slice) - 1) // 2 - 1:].value)
+        # if map2d is None:
+        #     return None
+        # map2d[- (map2d.shape[0] - 1) // 2 - 1:, : (map2d.shape[1] - 1) // 2] = \
+        #     np.fliplr(map2d[- (map2d.shape[0] - 1) // 2 - 1:, -(map2d.shape[1] - 1) // 2:])
+        # map2d[: (map2d.shape[0] - 1) // 2, :] = \
+        #     np.flipud(map2d[-(map2d.shape[0] - 1) // 2:, :])
+        return map2d * slice.unit
 
 
 @dataclass
