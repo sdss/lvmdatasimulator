@@ -141,25 +141,30 @@ class LVMField:
             filename (str, optional):
                 If set, then read already fetched stars from the file
             directory (str, optional):
-                Directory containing the file. Defaults to WORK_DIR defined in config file
+                Directory containing the file. Defaults to WORK_DIR defined in config file.
+                In this default case, NAME of the LVMField will be also added to the path
         """
+        if directory == lvmdatasimulator.WORK_DIR:
+            subdir = self.name
+        else:
+            subdir = ''
         if filename is not None:
-            log.info(f'Reading the star list from file {os.path.join(directory, filename)}')
-            self.starlist = StarsList(filename=filename, dir=directory)
+            log.info(f'Reading the star list from file {os.path.join(directory, subdir, filename)}')
+            self.starlist = StarsList(filename=filename, dir=os.path.join(directory, subdir))
             return
 
         self.starlist.generate_gaia(self.wcs, gmag_limit=gmag_limit, shift=shift)
 
         if save:
-            if not os.path.isdir(directory):
-                os.mkdir(directory)
-            outname = os.path.join(directory, f'{self.name}_starlist.fits.gz')
+            if not os.path.isdir(os.path.join(directory, subdir)):
+                os.makedirs(os.path.join(directory, subdir))
+            outname = os.path.join(directory, subdir, f'{self.name}_starlist.fits.gz')
             log.info(f'Saving star list to: {outname}')
             self.starlist.save_to_fits(outname=outname)
 
     def generate_single_stars(self, parameters={}, shift=False, save=False):
         """
-        Generate a list of stars by manually providing the basic informations
+        Generate a list of stars by manually providing the basic information
 
         Args:
             shift (bool, optional):
@@ -187,10 +192,14 @@ class LVMField:
             filename (str):
                 Name of the fits file containing the StarList.
             directory (str, optional):
-                Directory containing the file. Defaults to WORK_DIR defined in config file
+                Directory containing the file. Defaults to WORK_DIR defined in config file.
+                In this default case, NAME of the LVMField will be also added to the path
         """
-
-        self.starlist = StarsList(filename=filename, dir=directory)
+        if directory == lvmdatasimulator.WORK_DIR:
+            subdir = self.name
+        else:
+            subdir = ''
+        self.starlist = StarsList(filename=filename, dir=os.path.join(directory, subdir))
 
     def show(self, obs_coords=None, subplots_kw=None, scatter_kw=None, fibers=None, outname=None,
              cmap=plt.cm.Oranges, percentile=98.):
@@ -207,7 +216,8 @@ class LVMField:
             fibers (dict or list of fibers, optional):
                 structure defining the position and size of aperture(s) for spectra extraction.
             outname (str, optional):
-                name of the file where the output image will be saved (abs. path or relative to WORK_DIR or cur. dir)
+                name of the file where the output image will be saved
+                (abs. path or relative to WORK_DIR/NAME or cur.dir/name)
             cmap (plt.cm, optional):
                 colormap to use for imshow
             percentile (float, optional):
@@ -242,7 +252,7 @@ class LVMField:
             if outname.startswith("/") or outname.startswith("\\") or outname.startswith("."):
                 cur_outname = outname
             else:
-                cur_outname = os.path.join(lvmdatasimulator.WORK_DIR, outname)
+                cur_outname = os.path.join(lvmdatasimulator.WORK_DIR, self.name, outname)
             plt.savefig(cur_outname, dpi=200)
         plt.show()
 
@@ -324,7 +334,9 @@ class LVMField:
                 self.ism_map += self.ism.get_map(wavelength=wavelength_range, get_continuum=True)
 
             save_file = f'{self.name}_{int(wavelength_range[0])}_{int(wavelength_range[1])}_input_map.fits'
-            cur_save_file = os.path.join(lvmdatasimulator.WORK_DIR, save_file)
+            if not os.path.isdir(os.path.join(lvmdatasimulator.WORK_DIR, self.name)):
+                os.makedirs(os.path.join(lvmdatasimulator.WORK_DIR, self.name))
+            cur_save_file = os.path.join(lvmdatasimulator.WORK_DIR, self.name, save_file)
             header = self.wcs.to_header()
             header['LAMRANGE'] = ("{0}-{1}".format(wavelength_range[0], wavelength_range[1]),
                                   "Wavelength range used for image extraction")
@@ -370,10 +382,10 @@ class LVMField:
                                 'ext_law': 'F99',  # Extinction law, one of those used by pyneb (used for dark nebulae)
                                 'ext_rv': 3.1,  # Value of R_V for extinction curve calculation (used for dark nebulae)
                                 }]
-            load_from_file: path (asbolute or relative to work_dir) to the file with previously
+            load_from_file: path (asbolute or relative to work_dir/name) to the file with previously
                             calculated ISM part (preferred if both load_from_file and
                             list_of_nebulae are present)
-            save_nebulae: path (asbolute or relative to WORK_DIR or current dir) where to save fits with
+            save_nebulae: path (asbolute or relative to WORK_DIR/NAME or current_dir/NAME) where to save fits with
                           calculated ISM (only used if list_of_nebulae is present and
                           load_from_file is not)
             overwrite: if True (default) then the ISM content will be overwritten,
@@ -384,7 +396,7 @@ class LVMField:
         if load_from_file is not None:
             cfile = load_from_file
             if not os.path.isfile(cfile):
-                cfile = os.path.join(lvmdatasimulator.WORK_DIR, load_from_file)
+                cfile = os.path.join(lvmdatasimulator.WORK_DIR, self.name, load_from_file)
                 if not os.path.isfile(cfile):
                     log.warning("Cannot find file with ISM content to load: {}".format(load_from_file))
                     cfile = None
@@ -420,7 +432,9 @@ class LVMField:
             log.warning("Cannot save the nebulae! Check input parameters.")
             return
         if not (filename.startswith('/') or filename.startswith(r'\\') or filename.startswith('.')):
-            self.ism.save_ism(os.path.join(lvmdatasimulator.WORK_DIR, filename))
+            if not os.path.isdir(os.path.join(lvmdatasimulator.WORK_DIR, self.name)):
+                os.makedirs(os.path.join(lvmdatasimulator.WORK_DIR, self.name))
+            self.ism.save_ism(os.path.join(lvmdatasimulator.WORK_DIR, self.name, filename))
             log.info(f"ISM content saved to {filename}")
 
     def shift_nebula(self, nebula_id, offset=(0., 0.), units=(u.pixel, u.pixel), save=None):
@@ -429,7 +443,7 @@ class LVMField:
         :param nebula_id: number of the target component in the ISM storage (starting from 0)
         :param offset: tuple or list, defining the offset along x or y axes
         :param units: units of the offsets (in astropy.units values; default are pixels)
-        :param save: path (asbolute or relative to WORK_DIR or current dir) where to save the updated fits file
+        :param save: path (asbolute or relative to WORK_DIR/NAME or current_dir/name) where to save the updated file
         """
         if (offset[0] == 0) and (offset[1] == 0):
             log.warning("Both offsets are equal to 0 for nebula id={0}".format(nebula_id))

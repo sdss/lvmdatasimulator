@@ -7,7 +7,7 @@ import warnings
 NAME = 'sdss-lvmdatasimulator'
 
 # Loads config. config name is the package name.
-config = get_config('lvmdatasimulator', config_envvar="LVM_SIMULATOR_SETTINGS")
+config = get_config('lvmdatasimulator', config_envvar="LVM_SIMULATOR_CONFIG")
 
 # Inits the logging system as NAME. Only shell logging, and exception and warning catching.
 # File logging can be started by calling log.start_file_logger(path).  Filename can be different
