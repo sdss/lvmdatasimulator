@@ -125,6 +125,61 @@ def open_input_params(filename):
     return params
 
 
+def run_test(name='LVMsimulator_test'):
+    """
+    Run simple simulation as the test
+    """
+    if name == 'LVMsimulator_test':
+        name = name + f"_os.environ['USER']"
+    my_nebulae = [{"type": 'DIG', 'max_brightness': 1e-17,
+                   'perturb_amplitude': 0.1, 'perturb_scale': 200 * u.pc},
+                  {'type': 'Bubble', 'max_brightness': 8e-16, 'thickness': 0.2, 'radius': 50,
+                   'expansion_velocity': 30, 'sys_velocity': 20,
+                   'n_brightest_lines': 20,
+                   'model_params': {'Z': 1., 'Teff': 65000, 'LogLsun': 5., 'nH': 150, 'Geometry': 'Shell'},
+                   'model_type': 'cloudy', 'offset_RA': 0, 'offset_DEC': 0}
+                  ]
+    parameters = dict(
+        # LVMField inputs
+        ra=10,  # RA of the source field
+        dec=-10,  # DEC of the source field
+        size=15,  # size of the source field
+        pxsize=1,  # spaxel size of the source field
+        unit_ra=u.degree,  # unit of RA
+        unit_dec=u.degree,  # unit of DEC
+        unit_size=u.arcmin,  # unit of size
+        unit_pxsize=u.arcsec,  # unit of spaxel
+        name=name,  # name of the field
+
+        # Nebulae generation
+        nebulae=my_nebulae,  # list of dictionaries defining the nebulae in the field
+        nebulae_name=f"{name}_nebulae.fits",  # name of the output source field file
+
+        # Star list generation
+        gmag_limit=18,  # maximum magnitude of gaia stars to include in the field
+
+        # save input/output map
+        wavelength_ranges=[[6550, 6570]],  # wavelength ranges to integrate for the input and output maps
+        unit_range=u.AA,  # units of measurement of the wavelength ranges
+
+        # parameters of Observation
+        ra_bundle=10,  # RA of the center of the bundle
+        dec_bundle=-10,  # DEC of the center of the bundle
+        unit_ra_bundle=u.deg,  # unit of ra_bundle
+        unit_dec_bundle=u.deg,  # unit of dec_bundle
+        exptimes=[24 * 900],  # list of exposure times in s
+
+        # bundle properties
+        bundle_name='full',  # type of fiber configuration
+        nrings=10,  # number of rings to simulate
+        angle=0,  # rotation to apply to the bundle.
+
+        # parameters of the simulator
+        fast=True  # use normal interpolation or precise resampling.
+    )
+    run_simulator_1d(parameters)
+
+
 def run_simulator_1d(params):
     """
     Main function to run the simulation of an LVM field.

@@ -965,6 +965,214 @@ class Bubble(Cloud):
 
 
 @dataclass
+class Cloud3D(Nebula):
+    """PLACEHOLDER FOR NOW - do not use!
+    Class of an isotropic spherical gas cloud without any ionization source.
+    Defined by its position, radius, density, maximal optical depth"""
+    radius: u.pc = 1.0 * u.pc
+    max_brightness: fluxunit = 0 * fluxunit
+    max_extinction: u.mag = 2.0 * u.mag
+    thickness: float = 1.0
+    perturb_degree: int = 0  # Degree of perturbations (max. degree of spherical harmonics for cloud)
+    linerat_constant: bool = False  # True if the ratio of line fluxes shouldn't change across the nebula
+    _phi_bins: int = 90
+    _theta_bins: int = 90
+    _rad_bins: int = 0
+    _npix_los: int = 100
+
+    def __post_init__(self):
+        self._assign_all_units()
+        if self._rad_bins == 0:
+            self._rad_bins = np.ceil(self.radius.to(u.pc).value / self.pxscale.to(u.pc).value * 3).astype(int)
+        delta = np.round((len(self._cartesian_y_grid) - 1) / 2).astype(int)
+        if (self.xc is not None) and (self.yc is not None):
+            self.x0 = self.xc - delta
+            self.y0 = self.yc - delta
+        elif (self.x0 is not None) and (self.y0 is not None):
+            self.xc = self.x0 + delta
+            self.yc = self.y0 + delta
+        self._ref_line_id = 0
+
+    @cached_property
+    def _theta_grid(self):
+        return np.linspace(0, np.pi, self._theta_bins)
+
+    @cached_property
+    def _phi_grid(self):
+        return np.linspace(0, 2 * np.pi, self._phi_bins)
+
+    @cached_property
+    def _rad_grid(self):
+        return np.linspace(0, self.radius, self._rad_bins)
+
+    @cached_property
+    def _cartesian_z_grid(self):
+        npix = np.ceil(1.02 * self.radius / self.pxscale).astype(int)
+        return np.linspace(-npix, npix, 2 * npix + 1) * self.pxscale
+
+    @cached_property
+    def _cartesian_y_grid(self):
+        return self._cartesian_z_grid.copy()
+
+    @cached_property
+    def _cartesian_x_grid(self):
+        return np.linspace(-1.02, 1.02, self._npix_los) * self.radius
+
+    @cached_property
+    def _brightness_3d_spherical(self):
+        """
+        Method to calculate brightness (or opacity) of the cloud at given theta, phi and radii
+
+        theta: float -- polar angle [0, np.pi]
+        phi: float -- azimuthal angle [0, 2 * np.pi]
+        rad: float -- radius [0, self.radius]
+        Returns:
+            3D cube of normalized brightness in theta-phi-rad grid; total brightness = 1
+        """
+        rho, theta, phi = np.meshgrid(self._rad_grid, self._theta_grid, self._phi_grid, indexing='ij')
+        brt = np.ones_like(theta)
+        brt[rho < (self.radius * (1 - self.thickness))] = 0
+        brt[rho > self.radius] = 0
+        med = np.median(brt[brt > 0])
+        if self.perturb_degree > 0:
+            phi_cur = limit_angle(phi + np.random.uniform(0, 2 * np.pi, 1), 0, 2 * np.pi)
+            theta_cur = limit_angle(theta + np.random.uniform(0, np.pi, 1), 0, np.pi)
+            harm_amplitudes = self.perturb_amplitude * np.random.randn(self.perturb_degree * (self.perturb_degree + 2))
+
+            brt += np.nansum(Parallel(n_jobs=lvmdatasimulator.n_process)(delayed(brightness_inhomogeneities_sphere)
+                                                                         (harm_amplitudes, ll, phi_cur, theta_cur,
+                                                                         rho, med, self.radius, self.thickness)
+                                                                         for ll in np.arange(1,
+                                                                                             self.perturb_degree + 1)),
+                             axis=0)
+            brt[brt < 0] = 0
+        if med > 0:
+            brt = brt / np.nansum(brt)
+        return brt
+
+    @cached_property
+    def _brightness_4d_spherical(self):
+        """
+        Method to calculate brightness of the cloud at given theta, phi and radii for each line
+
+        theta: float -- polar angle [0, np.pi]
+        phi: float -- azimuthal angle [0, 2 * np.pi]
+        rad: float -- radius [0, self.radius]
+        Returns:
+            4D cube of brightness in line-theta-phi-rad grid; normalized to the total brightness in Halpha
+        """
+        s = self._brightness_3d_spherical.shape
+        if self.spectrum_id is None or self.linerat_constant:
+            return self._brightness_3d_spherical.reshape((1, s[0], s[1], s[2]))
+        rho, _, _ = np.meshgrid(self._rad_grid, self._theta_grid, self._phi_grid, indexing='ij')
+        with fits.open(lvmdatasimulator.CLOUDY_MODELS) as hdu:
+            radius = hdu[self.spectrum_id].data[0, 2:] * (self.thickness * self.radius) + \
+                     self.radius * (1 - self.thickness)
+            fluxes = hdu[self.spectrum_id].data[1:, 2:]
+            radius = np.insert(radius, 0, self.radius * (1 - self.thickness))
+            fluxes = np.insert(fluxes, 0, fluxes[:, 0], axis=1)
+            index_ha = np.flatnonzero(hdu[self.spectrum_id].data[1:, 0] == 6562.81)
+            if self.n_brightest_lines is not None and \
+                    (self.n_brightest_lines > 0) and (self.n_brightest_lines < len(fluxes)):
+                indexes_sorted = np.argsort(hdu[self.spectrum_id].data[1:, 1])[::-1]
+                fluxes = fluxes[indexes_sorted[:self.n_brightest_lines], :]
+                index_ha = np.flatnonzero(hdu[self.spectrum_id].data[1:, 0][indexes_sorted] == 6562.81)
+            if len(index_ha) == 1:
+                self._ref_line_id = index_ha[0]
+
+            brt = np.array(Parallel(n_jobs=lvmdatasimulator.n_process)(delayed(sphere_brt_in_line)
+                                                                       (self._brightness_3d_spherical, rho,
+                                                                        radius, flux)
+                                                                       for flux in fluxes)).reshape((fluxes.shape[0],
+                                                                                                     s[0], s[1], s[2]))
+            return brt / np.nansum(brt[self._ref_line_id])
+
+    @cached_property
+    def _brightness_3d_cartesian(self):
+        return interpolate_sphere_to_cartesian(self._brightness_3d_spherical, x_grid=self._cartesian_x_grid,
+                                               y_grid=self._cartesian_y_grid, z_grid=self._cartesian_z_grid,
+                                               rad_grid=self._rad_grid, theta_grid=self._theta_grid,
+                                               phi_grid=self._phi_grid, pxscale=self.pxscale)
+
+    @cached_property
+    def _brightness_4d_cartesian(self):
+        s = self._brightness_4d_spherical.shape
+        return np.array(Parallel(n_jobs=lvmdatasimulator.n_process)(delayed(interpolate_sphere_to_cartesian)
+                                                                    (cur_line_array,
+                                                                     self._cartesian_x_grid, self._cartesian_y_grid,
+                                                                     self._cartesian_z_grid, self._rad_grid,
+                                                                     self._theta_grid, self._phi_grid, self.pxscale)
+                                                                    for cur_line_array in self._brightness_4d_spherical)
+                        ).reshape((s[0], len(self._cartesian_z_grid), len(self._cartesian_y_grid),
+                                   len(self._cartesian_x_grid)))
+
+
+@dataclass
+class Bubble3D(Cloud3D):
+    """PLACEHOLDER FOR NOW - do not use!
+    Class of an isotropic thin expanding bubble."""
+    spectral_axis: velunit = np.arange(-20, 20, 10) * velunit
+    expansion_velocity: velunit = 20 * velunit
+    max_brightness: fluxunit = 1e-15 * fluxunit
+    max_extinction: u.mag = 0 * u.mag
+    thickness: float = 0.2
+
+    @cached_property
+    def _velocity_3d_spherical(self) -> velunit:
+        """
+        Calculate line of sight velocity at given radius, phi, theta
+
+        V ~ 1/brightness (given that v~1/n_e^2 and brightness~ne^2)
+        """
+        rho, theta, phi = np.meshgrid(self._rad_grid, self._theta_grid, self._phi_grid, indexing='ij')
+        vel_cube = np.zeros_like(self._brightness_3d_spherical)
+        rec = (rho <= self.radius) & (rho >= (self.radius * (1 - self.thickness)))
+        vel_cube[rec] = \
+            np.sin(theta[rec]) * \
+            np.cos(phi[rec]) * \
+            self.expansion_velocity / self._brightness_3d_spherical[rec] * \
+            np.median(self._brightness_3d_spherical[self._brightness_3d_spherical > 0])
+        return vel_cube
+
+    @cached_property
+    def _velocity_3d_cartesian(self) -> velunit:
+        return interpolate_sphere_to_cartesian(self._velocity_3d_spherical, x_grid=self._cartesian_x_grid,
+                                               y_grid=self._cartesian_y_grid, z_grid=self._cartesian_z_grid,
+                                               rad_grid=self._rad_grid, theta_grid=self._theta_grid,
+                                               phi_grid=self._phi_grid, pxscale=self.pxscale)
+
+    def _turbulent_lsf(self, velocity):
+        """Line spread function as a function of coorinates, including the velocity center shift"""
+        # mu = self.velocity(theta, phi)
+        mu = self._velocity_3d_cartesian[:, :, :, None] * velunit + self.sys_velocity
+        sig = self.turbulent_sigma
+        return 1. / (np.sqrt(2. * np.pi) * sig) * np.exp(-np.power((velocity - mu) / sig, 2.) / 2)
+
+    def _d_spectrum_cartesian(self, velocity: velunit):
+        """Returns local spectrum, per pc**3 of area"""
+        return (self._brightness_3d_cartesian[:, :, :, None] * (
+                fluxunit / u.pc ** 3) * self._turbulent_lsf(velocity)).to(fluxunit / velunit / u.pc ** 3)
+
+    @cached_property
+    def line_profile(self) -> (fluxunit / velunit):
+        """
+        Produces the distribution of the observed line profiles in each pixels of the sky plane
+        """
+        vel_axis = self.spectral_axis.to(velunit, equivalencies=u.spectral())
+        _, _, _, vels = np.meshgrid(self._cartesian_z_grid,
+                                    self._cartesian_y_grid,
+                                    self._cartesian_x_grid,
+                                    vel_axis, indexing='ij')
+        spectrum = (
+                np.sum(self._d_spectrum_cartesian(vels), axis=2
+                       ).T * (self._cartesian_x_grid[1] - self._cartesian_x_grid[0]
+                              ) * (self._cartesian_y_grid[1] - self._cartesian_y_grid[0]
+                                   ) * (self._cartesian_z_grid[1] - self._cartesian_z_grid[0])
+        )
+        return spectrum / np.sum(spectrum, axis=0)
+
+
+@dataclass
 class CustomNebula(Nebula):
     """
         Class defining the custom nebulae with the user-defined distribution of the brighntess, continuum
