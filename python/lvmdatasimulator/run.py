@@ -130,10 +130,10 @@ def run_test(name='LVMsimulator_test'):
     Run simple simulation as the test
     """
     if name == 'LVMsimulator_test':
-        name = name + f"_os.environ['USER']"
+        name = name + f"_{os.environ['USER']}"
     my_nebulae = [{"type": 'DIG', 'max_brightness': 1e-17,
                    'perturb_amplitude': 0.1, 'perturb_scale': 200 * u.pc},
-                  {'type': 'Bubble', 'max_brightness': 8e-16, 'thickness': 0.2, 'radius': 50,
+                  {'type': 'Bubble', 'max_brightness': 8e-16, 'thickness': 0.2, 'radius': 40,
                    'expansion_velocity': 30, 'sys_velocity': 20,
                    'n_brightest_lines': 20,
                    'model_params': {'Z': 1., 'Teff': 65000, 'LogLsun': 5., 'nH': 150, 'Geometry': 'Shell'},
@@ -171,12 +171,13 @@ def run_test(name='LVMsimulator_test'):
 
         # bundle properties
         bundle_name='full',  # type of fiber configuration
-        nrings=10,  # number of rings to simulate
+        nrings=8,  # number of rings to simulate
         angle=0,  # rotation to apply to the bundle.
 
         # parameters of the simulator
         fast=True  # use normal interpolation or precise resampling.
     )
+    log.info('Start test simulations. It should take several minutes')
     run_simulator_1d(parameters)
 
 
@@ -247,7 +248,7 @@ def run_simulator_1d(params):
 
     save_input_params(params)
 
-    print('Elapsed time: {:0.1f}' .format(time.time()-start))
+    log.info('Done. Elapsed time: {:0.1f}'.format(time.time()-start))
 
 
 def run_lvm_etc(params, check_lines=None, desired_snr=None, continuum=False, delete=True):
