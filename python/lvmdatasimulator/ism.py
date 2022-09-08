@@ -769,18 +769,20 @@ class Cloud(Nebula):
         brt[rho < (self.radius * (1 - self.thickness))] = 0
         brt[rho > self.radius] = 0
         med = np.median(brt[brt > 0])
-        if self.perturb_degree > 0:
-            phi_cur = limit_angle(phi + np.random.uniform(0, 2 * np.pi, 1), 0, 2 * np.pi)
-            theta_cur = limit_angle(theta + np.random.uniform(0, np.pi, 1), 0, np.pi)
-            harm_amplitudes = self.perturb_amplitude * np.random.randn(self.perturb_degree * (self.perturb_degree + 2))
-
-            brt += np.nansum(Parallel(n_jobs=lvmdatasimulator.n_process)(delayed(brightness_inhomogeneities_sphere)
-                                                                         (harm_amplitudes, ll, phi_cur, theta_cur,
-                                                                         rho, med, self.radius, self.thickness)
-                                                                         for ll in np.arange(1,
-                                                                                             self.perturb_degree + 1)),
-                             axis=0)
-            brt[brt < 0] = 0
+        # if self.perturb_degree > 0:
+        #     phi_cur = limit_angle(phi + np.random.uniform(0, 2 * np.pi, 1), 0, 2 * np.pi)
+        #     theta_cur = limit_angle(theta + np.random.uniform(0, np.pi, 1), 0, np.pi)
+        #     harm_amplitudes = self.perturb_amplitude * np.random.randn(
+        #         self.perturb_degree * (self.perturb_degree + 2))
+        #
+        #     brt += np.nansum(Parallel(n_jobs=lvmdatasimulator.n_process)(delayed(brightness_inhomogeneities_sphere)
+        #                                                                  (harm_amplitudes, ll, phi_cur, theta_cur,
+        #                                                                  rho, med, self.radius, self.thickness)
+        #                                                                  for ll in np.arange(1,
+        #                                                                                      self.perturb_degree + 1)
+        #                                                                  ),
+        #                      axis=0)
+        #     brt[brt < 0] = 0
         if med > 0:
             brt = brt / np.nansum(brt)
         return brt
@@ -950,7 +952,16 @@ class Bubble(Cloud):
                               ) * (self._cartesian_y_grid[1] - self._cartesian_y_grid[0]
                                    ) * (self._cartesian_z_grid[1] - self._cartesian_z_grid[0])
         )
-        return spectrum / np.sum(spectrum, axis=0)
+        spec_slice = spectrum[:, :, 1]
+        spec_units = spec_slice.unit
+        spec_slice = spec_slice / np.nansum(spec_slice)
+        spec_slice[~np.isfinite(spec_slice)] = 0
+        spectrum = np.zeros(shape=(spec_slice.shape[0], spec_slice.shape[1], spec_slice.shape[1]), dtype=float)
+        for channel_ind in range(spec_slice.shape[0]):
+            spectrum[channel_ind, :, :] = interpolate_slice_to_circle(
+                spec_slice[channel_ind, - (spec_slice.shape[1] - 1) // 2 - 1:].value)
+
+        return spectrum * spec_units
 
 
 @dataclass
