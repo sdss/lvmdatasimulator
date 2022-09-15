@@ -122,6 +122,8 @@ class Observation:
     days_moon: int = None
     sky_template: str = None
     geocoronal: float = None
+    narcs: int = 1
+    arc_exptimes: List[int] = field(default_factory=lambda: ['10'])
 
     def __post_init__(self):
         # fix the unit of measurements
@@ -131,6 +133,8 @@ class Observation:
             self.dec *= self.unit_dec
         if not isinstance(self.exptimes, list):
             self.exptimes = [self.exptimes]
+        if not isinstance(self.arc_exptimes, list):
+            self.arc_exptimes = [self.arc_exptimes]
 
         self.time = Time(self.time, format='isot', scale='utc')  # time of obs.
         if self.sky_transparency not in ['PHOT', 'CLR', 'THIN']:
@@ -198,7 +202,7 @@ class Observation:
     @cached_property
     def mjd(self):
         '''get modified julian date'''
-        return self.time.mjd
+        return int(self.time.mjd)
 
     @cached_property
     def jd(self):

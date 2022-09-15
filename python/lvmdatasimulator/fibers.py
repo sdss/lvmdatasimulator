@@ -99,7 +99,8 @@ class FiberBundle:
         applied. Defaults to None
     """
 
-    def __init__(self, bundle_name='central', nrings=None, custom_fibers=None, angle=None):
+    def __init__(self, bundle_name='central', nrings=None, custom_fibers=None, angle=None,
+                 max_fibers=1944, max_obj_fibers=1801, max_sky_fibers=119, max_std_fibers=24):
 
         if bundle_name not in [None, 'central', 'full', 'horizontal', 'diagonals']:
             log.error(f'{bundle_name} is not a valid option for bundle_name')
@@ -108,6 +109,10 @@ class FiberBundle:
         self.bundle_name = bundle_name
         self.nrings = nrings
         self.custom_fibers = custom_fibers
+        self.max_fibers = max_fibers
+        self.max_obj_fibers = max_obj_fibers
+        self.max_sky_fibers = max_sky_fibers
+        self.max_std_fibers = max_std_fibers
 
         if custom_fibers is not None:
             log.warning('custom_fibers is defined. bundle_name will be ignored.')

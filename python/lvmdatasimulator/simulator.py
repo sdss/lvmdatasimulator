@@ -769,7 +769,7 @@ class Simulator:
                                   branch.wavecoord.step)
 
             # compute constant
-            constant = exptime * branch.efficiency *\
+            constant = exptime * branch.efficiency() *\
                 self.telescope.aperture_area
 
             # atmospheric extinction

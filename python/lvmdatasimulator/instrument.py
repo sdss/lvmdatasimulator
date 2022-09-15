@@ -51,13 +51,14 @@ class Branch:
     gain: u.electron / u.adu = 1.0 * u.electron / u.adu
     ron: u.electron = 3.8 * u.electron / u.pix
     dark: u.electron / u.s = 0.00314 * u.electron / u.s / u.pix
+    cosmic_rates: 1/u.s = 0.15 / u.s
 
     def __post_init__(self):
         if self.name not in ['linear', 'red', 'blue', 'ir']:
             raise ValueError(f'{self.name} is not an acepted branch name.')
 
-    @cached_property
-    def efficiency(self):
+
+    def efficiency(self, wave=None):
         """Read the branch efficiency from a file."""
 
         filename = os.path.join(DATA_DIR, 'instrument', f'LVM_ELAM_{self.name}.dat')
@@ -65,7 +66,10 @@ class Branch:
         lam0 = data['col1']
         elam0 = data['col2']
         f = interp1d(lam0, elam0, fill_value='extrapolate')
-        return f(self.wavecoord.wave)
+        if wave is not None:
+            return f(wave)
+        else:
+            return f(self.wavecoord.wave)
 
 
 class Spectrograph(ABC):
