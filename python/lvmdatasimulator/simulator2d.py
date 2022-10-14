@@ -99,7 +99,7 @@ class Simulator2D:
         self._disp = 0.06
         self._wl_grid = np.arange(3500, 9910.01, self._disp) * u.AA
         self._area_fiber = np.pi * (self.bundle.fibers[0].diameter / 2) ** 2
-        self._fibers_per_spec = int(self.max_fibers / 3)
+        self._fibers_per_spec = int(self.bundle.max_fibers / 3)
 
 
     def create_flat(self):
@@ -157,8 +157,8 @@ class Simulator2D:
         # collapsing in the single required arc
         arcs = arcs.sum(axis=0)
 
-        self._project_2d_calibs(arcs, 'arc', self.observation.arc_exptimes)
 
+        self._project_2d_calibs(arcs, 'arc', self.observation.arc_exptimes)
 
     def extract_extinction(self, extinction_file=os.path.join(DATA_DIR, 'sky',
                                                               'LVM_LVM160_KLAM.dat')):
@@ -254,6 +254,20 @@ class Simulator2D:
         # per telescope area
         calib = data * self._area_fiber.value
 
+        # for now the calibrations are independent from the position of the fibers in the field
+        # THIS WILL CHANGE IN THE FUTURE.
+
+        sky1 = ascii.read(os.path.join(DATA_DIR, 'instrument', 'sky1_array.dat'))
+        sky2 = ascii.read(os.path.join(DATA_DIR, 'instrument', 'sky2_array.dat'))
+        science = ascii.read(os.path.join(DATA_DIR, 'instrument', 'full_array.dat'))
+        std = ascii.read(os.path.join(DATA_DIR, 'instrument', 'std_array.dat'))
+
+        new = vstack([science, sky1, sky2, std])
+        ringid = new['ring_id']
+        fibtype = new['type']
+        pos = new['fiber_id']
+        fibid = np.arange(len(new), dtype=int)
+
         # applying the sensitivity function and reducing the size to spare memory
         new_calib = {}
         for branch in self.spectrograph.branches:
@@ -261,7 +275,7 @@ class Simulator2D:
             new_calib[branch.name] = reduce_size(tmp, self._wl_grid,
                                                  branch.wavecoord.start, branch.wavecoord.end)
 
-        id_t = np.arange(self.max_fibers) + 1  #this is the id of the fibers
+        id_t = np.arange(self.bundle.max_fibers) + 1  #this is the id of the fibers
 
         for time in exptimes:
 
@@ -271,13 +285,30 @@ class Simulator2D:
                 calib = new_calib[name] * time
 
                 calib_final = expand_to_full_fiber(calib, self.bundle.max_fibers)
-                calib_final = calib_final.T
+                # calib_final = calib_final.T
 
                 n_cr = int(branch.cosmic_rates.value * time)
 
+                if name == 'blue':
+                    expn='00002998'
+                    cam='b1'
+                elif name == 'red':
+                    expn='00001563'
+                    cam='r1'
+                elif name == 'ir':
+                    expn='00001563'
+                    cam='z1'
+
+                cube_file='/mnt/DATA/LVM/LVM_2D/drp_input/'+name+'-channel-data/sdR-s-'+\
+                           cam+'-'+expn+'.disp.fits'
+                wave2d, _ = fits.getdata(cube_file, 0, header=True)
+                wave_s=np.nanmean(wave2d,axis=0)
+
                 # this is a good point for parallelization but we need to modify run_2d
                 for cam in range(0, 3):
-                    twodlvm.run_2d(calib_final, id_t, nfib=self._fibers_per_spec, type=name,
+                    twodlvm.run_2d(calib_final, fibid=fibid, fibtype=fibtype, ring=ringid,
+                                   position=pos, wave_s=wave_s, wave=self._wl_grid,
+                                   nfib=self._fibers_per_spec, type=name,
                                    cam=cam+1, n_cr=n_cr, expN=self.observation.narcs,
                                    expt=time, ra=0, dec=0, mjd=str(self.observation.mjd),
                                    flb=calib_name, base_name='sdR', dir1=self.outdir)
