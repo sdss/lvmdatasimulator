@@ -119,7 +119,7 @@ class StarsList:
     def __len__(self):
         return len(self.stars_table)
 
-    def add_star(self, ra, dec, gmag, teff, ag, v):
+    def add_star(self, ra, dec, gmag, teff, ag, v, check=True):
         """
         Manually add a single star to the list.
 
@@ -147,7 +147,8 @@ class StarsList:
 
         # check if the star is within the simulated FOV
 
-        self._check_inside(ra, dec)
+        if check:
+            self._check_inside(ra, dec)
 
         new_row = {'star_id': len(self.stars_table) + 1,
                    'ra': ra,
