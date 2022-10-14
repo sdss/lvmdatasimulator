@@ -130,7 +130,7 @@ class FiberBundle:
 
         self.angle = angle
 
-        self.fibers = self.build_bundle()
+        self.fibers, self.fibers_table = self.build_bundle()
 
         self.nfibers = len(self.fibers)
 
@@ -199,7 +199,9 @@ class FiberBundle:
                                 row['d'] * u.arcsec,
                                 row['disp'] * u.pix))
 
-        return fibers
+        fibers_table = fiber_table['ring_id', 'fiber_id', 'type'].copy()
+
+        return fibers, fibers_table
 
     @staticmethod
     def _read_fiber_file():
