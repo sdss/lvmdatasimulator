@@ -19,6 +19,7 @@ from lvmdatasimulator.fibers import FiberBundle
 from lvmdatasimulator.observation import Observation
 from lvmdatasimulator.telescope import Telescope
 from lvmdatasimulator.simulator import flam2epp, resample_spectrum
+from lvmdatasimulator.stars import StarsList
 from lvmdatasimulator import log
 from lvmdatasimulator.utils import round_up_to_odd, set_geocoronal_ha, open_sky_file
 from joblib import Parallel, delayed
@@ -47,6 +48,26 @@ def expand_to_full_fiber(input_array, nfibers):
     output = np.repeat(input_array, nfibers, axis=0)
 
     return output
+
+
+def get_fibers_table(science=None):
+    """Build the table that tells which fibers are being used"""
+
+    sky1 = ascii.read(os.path.join(DATA_DIR, 'instrument', 'sky1_array.dat'))
+    sky2 = ascii.read(os.path.join(DATA_DIR, 'instrument', 'sky2_array.dat'))
+    std = ascii.read(os.path.join(DATA_DIR, 'instrument', 'std_array.dat'))
+
+    if science is None:
+        science = ascii.read(os.path.join(DATA_DIR, 'instrument', 'full_array.dat'))
+
+    new = vstack([science, sky1, sky2, std])
+
+    ringid = new['ring_id']
+    fibtype = new['type']
+    pos = new['fiber_id']
+    fibid = np.arange(len(new), dtype=int)
+
+    return ringid, pos, fibtype, fibid
 
 
 class Simulator2D:
@@ -195,8 +216,27 @@ class Simulator2D:
         self.index = index
         self.target_spectra = spectra * unit
 
-    def extract_std_spectra(self, nstd, delta_t=500):
-        pass
+    def extract_std_spectra(self, nstd, tmin=5500, tmax=8000, dt=500,
+                            gmin=8, gmax=12, dg=0.1):
+
+        # selecting the temperature of the stars
+        T_aval = np.arange(tmin, tmax+dt, dt, dtype=int)  # possible values
+        T_sel = np.random.choice(T_aval, nstd)  # randomly selected
+
+        # generating the brightness of these stars
+        g_aval = np.arange(gmin, gmax+dg, dg)
+        g_sel = np.random.choice(g_aval, nstd)
+
+
+        # generate the star list
+        stars = StarsList()
+        for T, g in zip(T_sel, g_sel):
+            stars.add_star(ra=0, dec=0, gmag=g, teff=T, check=False)
+
+        stars.associate_spectra(shift=False)
+        stars.rescale_spectra()
+
+        self.standards = stars
 
     def simulate_science(self):
 
@@ -245,7 +285,68 @@ class Simulator2D:
 
 
     def _project_2d(self, science, sky, std):
-        pass
+
+        # get the tables for the different components of the final output
+        sci_fibers = self.bundle.fibers_table
+
+        ringid, pos, fibtype, fibid = get_fibers_table(science=sci_fibers)
+
+        new_sky = {}
+        new_sci = {}
+        new_std = {}
+
+        # separating the full spectrum in the different branches
+
+        for branch in self.spectrograph.branches:
+            tmp_sky = sky * branch.efficiency(self._wl_grid)
+            tmp_science = science * branch.efficiency(self._wl_grid)
+            tmp_std = std * branch.efficiency(self._wl_grid)
+            new_sky[branch.name] = reduce_size(tmp_sky, self._wl_grid, branch.wavecoord.start,
+                                               branch.wavecoord.end)
+            new_sci[branch.name] = reduce_size(tmp_science, self._wl_grid, branch.wavecoord.start,
+                                               branch.wavecoord.end)
+            new_std[branch.name] = reduce_size(tmp_std, self._wl_grid, branch.wavecoord.start,
+                                               branch.wavecoord.end)
+
+        for time in self.observation.exptimes:
+            for time_std in self.observation.std_exptimes:
+                log.info(f'Saving science exposures with {time}s exposures and {time_std}s '
+                         'of exposure for each standard star')
+
+                for branch in self.spectrograph.branches:
+                    name = branch.name
+
+                    sci_corr = new_sci[name] * time
+                    sky_corr = new_sky[name] * time
+                    std_corr = new_std[name] * time_std
+
+                    spectra_final = np.vstack([sci_corr, sky_corr, std_corr])
+
+                    n_cr = int(branch.cosmic_rates.value * time)
+
+                    if name == 'blue':
+                        expn='00002998'
+                        cam='b1'
+                    elif name == 'red':
+                        expn='00001563'
+                        cam='r1'
+                    elif name == 'ir':
+                        expn='00001563'
+                        cam='z1'
+
+                    cube_file='/mnt/DATA/LVM/LVM_2D/drp_input/'+name+'-channel-data/sdR-s-'+\
+                            cam+'-'+expn+'.disp.fits'
+                    wave2d, _ = fits.getdata(cube_file, 0, header=True)
+                    wave_s=np.nanmean(wave2d,axis=0)
+
+                    # this is a good point for parallelization but we need to modify run_2d
+                    for cam in range(0, 3):
+                        twodlvm.run_2d(spectra_final, fibid=fibid, fibtype=fibtype, ring=ringid,
+                                       position=pos, wave_s=wave_s, wave=self._wl_grid,
+                                       nfib=self._fibers_per_spec, type=name,
+                                       cam=cam+1, n_cr=n_cr, expN=self.observation.narcs,
+                                       expt=time, ra=0, dec=0, mjd=str(self.observation.mjd),
+                                       flb='science', base_name='sdR', dir1=self.outdir)
 
     def _project_2d_calibs(self, data, calib_name, exptimes):
 
@@ -257,16 +358,7 @@ class Simulator2D:
         # for now the calibrations are independent from the position of the fibers in the field
         # THIS WILL CHANGE IN THE FUTURE.
 
-        sky1 = ascii.read(os.path.join(DATA_DIR, 'instrument', 'sky1_array.dat'))
-        sky2 = ascii.read(os.path.join(DATA_DIR, 'instrument', 'sky2_array.dat'))
-        science = ascii.read(os.path.join(DATA_DIR, 'instrument', 'full_array.dat'))
-        std = ascii.read(os.path.join(DATA_DIR, 'instrument', 'std_array.dat'))
-
-        new = vstack([science, sky1, sky2, std])
-        ringid = new['ring_id']
-        fibtype = new['type']
-        pos = new['fiber_id']
-        fibid = np.arange(len(new), dtype=int)
+        ringid, pos, fibtype, fibid = get_fibers_table(science=None)
 
         # applying the sensitivity function and reducing the size to spare memory
         new_calib = {}
@@ -274,8 +366,6 @@ class Simulator2D:
             tmp = calib * branch.efficiency(self._wl_grid)
             new_calib[branch.name] = reduce_size(tmp, self._wl_grid,
                                                  branch.wavecoord.start, branch.wavecoord.end)
-
-        id_t = np.arange(self.bundle.max_fibers) + 1  #this is the id of the fibers
 
         for time in exptimes:
 
