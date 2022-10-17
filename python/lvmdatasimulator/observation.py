@@ -124,6 +124,8 @@ class Observation:
     geocoronal: float = None
     narcs: int = 1
     arc_exptimes: List[int] = field(default_factory=lambda: ['10'])
+    flat_exptimes: List[int] = field(default_factory=lambda: ['10'])
+    std_exptimes: List[int] = field(default_factory=lambda: ['10'])
 
     def __post_init__(self):
         # fix the unit of measurements
@@ -135,6 +137,10 @@ class Observation:
             self.exptimes = [self.exptimes]
         if not isinstance(self.arc_exptimes, list):
             self.arc_exptimes = [self.arc_exptimes]
+        if not isinstance(self.flat_exptimes, list):
+            self.flat_exptimes = [self.flat_exptimes]
+        if not isinstance(self.std_exptimes, list):
+            self.std_exptimes = [self.std_exptimes]
 
         self.time = Time(self.time, format='isot', scale='utc')  # time of obs.
         if self.sky_transparency not in ['PHOT', 'CLR', 'THIN']:
