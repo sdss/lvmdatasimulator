@@ -33,6 +33,8 @@ twodlvm = imp.load_source('2d_LVM', f'{DATA_DIR}/../../LVM_2D/2d_projection.py')
 def reduce_size(spectrum, wave, wave_min, wave_max):
 
     mask = np.all([wave > wave_min, wave< wave_max], axis=0)
+    if len(spectrum.shape) == 2:
+        mask = expand_to_full_fiber(mask, spectrum.shape[0])
 
     out = spectrum[mask]
 
