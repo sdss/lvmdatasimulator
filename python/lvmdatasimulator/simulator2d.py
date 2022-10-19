@@ -203,7 +203,7 @@ class Simulator2D:
             ha = self.observation.geocoronal
             brightness = set_geocoronal_ha(wave, brightness, ha)
 
-        flux = brightness * self.area_fiber.value  # converting to Fluxes from SBrightness
+        flux = brightness * self._area_fiber.value  # converting to Fluxes from SBrightness
 
         log.info('Resample sky emission to instrument wavelength solution.')
         self.sky = resample_spectrum(self._wl_grid, wave, flux, fast=self.fast) * unit
@@ -216,9 +216,10 @@ class Simulator2D:
         self.index = index
         self.target_spectra = spectra
 
-    def extract_std_spectra(self, nstd, tmin=5500, tmax=8000, dt=500,
+    def extract_std_spectra(self, nstd=24, tmin=5500, tmax=8000, dt=500,
                             gmin=8, gmax=12, dg=0.1):
 
+        log.info('Generating standard stars')
         # selecting the temperature of the stars
         T_aval = np.arange(tmin, tmax+dt, dt, dtype=int)  # possible values
         T_sel = np.random.choice(T_aval, nstd)  # randomly selected
@@ -231,7 +232,7 @@ class Simulator2D:
         # generate the star list
         stars = StarsList()
         for T, g in zip(T_sel, g_sel):
-            stars.add_star(ra=0, dec=0, gmag=g, teff=T, check=False)
+            stars.add_star(ra=0, dec=0, gmag=g, teff=T, ag=0, v=0, check=False)
 
         stars.associate_spectra(shift=False)
         stars.rescale_spectra()
@@ -240,21 +241,24 @@ class Simulator2D:
 
     def simulate_science(self):
 
+        unit_e = u.electron / (u.s * u.pix * u.cm**2)
         # get the target spectra and expand the array to cover all the unused fibers
         # I assume that the fiber rearranging will be performed at a later stage
         self.extract_target_spectra()
-        spectra = np.zeros_like(self.target_spectra.value) * u.electron / (u.s * u.pix * u.cm**2)
+        spectra = np.zeros_like(self.target_spectra.value) * unit_e
         for i, spectrum in enumerate(self.target_spectra):
             spectra[i] = flam2epp(self._wl_grid, spectrum, self._disp) * u.electron
 
         # simulating spectra
         spectra *= self.telescope.aperture_area
+        self.extract_extinction()
         extinction = expand_to_full_fiber(self.extinction, len(spectra))
         atmosphere = self.observation.airmass * extinction
         spectra *= 10 ** (-0.4 * (atmosphere))
 
         #simulating sky
-        sky_e = flam2epp(self._wl_grid, self.sky, self._disp)
+        self.extract_sky()
+        sky_e = flam2epp(self._wl_grid, self.sky, self._disp) * u.electron
         sky_fiber = sky_e * self.telescope.aperture_area
         sky = expand_to_full_fiber(sky_fiber, len(self.index))
 
@@ -269,10 +273,13 @@ class Simulator2D:
         sky_projection = expand_to_full_fiber(sky_fiber, self.bundle.max_sky_fibers)
 
         # get standard stars spectra
-        standards = self.extract_std_spectra()
-        self.standards = standards
-        for i, std in enumerate(standards):
-            standards[i] = flam2epp(self._wl_grid, std, self._disp)
+        self.extract_std_spectra()
+        standards = np.zeros((len(self.standards), len(self._wl_grid))) * unit_e
+        for i, std in enumerate(self.standards.spectra):
+            tmp = resample_spectrum(self._wl_grid.value, self.standards.wave.value, std, fast=True)
+            standards[i] = flam2epp(self._wl_grid,
+                                    tmp*u.erg / (u.cm ** 2 * u.s * u.AA),
+                                    self._disp) * u.electron
         standards *= self.telescope.aperture_area
         extinction = expand_to_full_fiber(self.extinction, len(standards))
         atmosphere = self.observation.airmass * extinction
