@@ -117,8 +117,8 @@ class Simulator2D:
         self.arc = None
 
         # auxiliary definitions
-        self._disp = 0.06
-        self._wl_grid = np.arange(3500, 9910.01, self._disp) * u.AA
+        self._disp = 0.06 * u.AA/ u.pix
+        self._wl_grid = np.arange(3500, 9910.01, self._disp.value) * u.AA
         self._area_fiber = np.pi * (self.bundle.fibers[0].diameter / 2) ** 2
         self._fibers_per_spec = int(self.bundle.max_fibers / 3)
 
@@ -214,7 +214,7 @@ class Simulator2D:
         index, spectra = self.source.extract_spectra(self.bundle.fibers, self._wl_grid,
                                                      obs_coords=self.observation.target_coords)
         self.index = index
-        self.target_spectra = spectra * unit
+        self.target_spectra = spectra
 
     def extract_std_spectra(self, nstd, tmin=5500, tmax=8000, dt=500,
                             gmin=8, gmax=12, dg=0.1):
@@ -243,9 +243,9 @@ class Simulator2D:
         # get the target spectra and expand the array to cover all the unused fibers
         # I assume that the fiber rearranging will be performed at a later stage
         self.extract_target_spectra()
-        spectra = np.zeros_like(self.target_spectra)
+        spectra = np.zeros_like(self.target_spectra.value) * u.electron / (u.s * u.pix * u.cm**2)
         for i, spectrum in enumerate(self.target_spectra):
-            spectra[i] = flam2epp(self._wl_grid, spectrum, self._disp)
+            spectra[i] = flam2epp(self._wl_grid, spectrum, self._disp) * u.electron
 
         # simulating spectra
         spectra *= self.telescope.aperture_area
