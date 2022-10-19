@@ -199,7 +199,7 @@ class FiberBundle:
                                 row['d'] * u.arcsec,
                                 row['disp'] * u.pix))
 
-        fibers_table = fiber_table['ring_id', 'fiber_id', 'type'].copy()
+        fibers_table = selected['ring_id', 'fiber_id', 'type'].copy()
 
         return fibers, fibers_table
 
