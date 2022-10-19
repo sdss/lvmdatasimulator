@@ -33,10 +33,12 @@ twodlvm = imp.load_source('2d_LVM', f'{DATA_DIR}/../../LVM_2D/2d_projection.py')
 def reduce_size(spectrum, wave, wave_min, wave_max):
 
     mask = np.all([wave > wave_min, wave< wave_max], axis=0)
+    out_shape = (spectrum.shape[0], mask.sum())
     if len(spectrum.shape) == 2:
         mask = expand_to_full_fiber(mask, spectrum.shape[0])
-
-    out = spectrum[mask]
+        out = spectrum[mask].reshape(out_shape)
+    else:
+        out = spectrum[mask]
 
     return out
 
@@ -267,9 +269,9 @@ class Simulator2D:
         assert sky.shape == spectra.shape, 'Something wrong with sky and spectra'
 
         self.total_spectra = sky + spectra   # this is in electron
-        science_projection = np.zeros((self.bundle.max_obj_fibers, len(self._wl_grid)))
-        for i, spec in enumerate(self.total_spectra):
-            science_projection[i] = spec
+        # science_projection = np.zeros((self.bundle.max_obj_fibers, len(self._wl_grid)))
+        # for i, spec in enumerate(self.total_spectra):
+        #     science_projection[i] = spec
 
         # reshape sky spectra
         sky_projection = expand_to_full_fiber(sky_fiber, self.bundle.max_sky_fibers)
@@ -290,7 +292,7 @@ class Simulator2D:
         sky_std = expand_to_full_fiber(sky_fiber, len(standards))
 
         standards += sky_std
-        self._project_2d(science_projection, sky_projection, standards)
+        self._project_2d(self.total_spectra, sky_projection, standards)
 
 
     def _project_2d(self, science, sky, std):
@@ -310,6 +312,7 @@ class Simulator2D:
             tmp_sky = sky * branch.efficiency(self._wl_grid)
             tmp_science = science * branch.efficiency(self._wl_grid)
             tmp_std = std * branch.efficiency(self._wl_grid)
+
             new_sky[branch.name] = reduce_size(tmp_sky, self._wl_grid, branch.wavecoord.start,
                                                branch.wavecoord.end)
             new_sci[branch.name] = reduce_size(tmp_science, self._wl_grid, branch.wavecoord.start,
@@ -331,31 +334,8 @@ class Simulator2D:
 
                     spectra_final = np.vstack([sci_corr, sky_corr, std_corr])
 
-                    n_cr = int(branch.cosmic_rates.value * time)
-
-                    if name == 'blue':
-                        expn='00002998'
-                        cam='b1'
-                    elif name == 'red':
-                        expn='00001563'
-                        cam='r1'
-                    elif name == 'ir':
-                        expn='00001563'
-                        cam='z1'
-
-                    cube_file='/mnt/DATA/LVM/LVM_2D/drp_input/'+name+'-channel-data/sdR-s-'+\
-                            cam+'-'+expn+'.disp.fits'
-                    wave2d, _ = fits.getdata(cube_file, 0, header=True)
-                    wave_s=np.nanmean(wave2d,axis=0)
-
-                    # this is a good point for parallelization but we need to modify run_2d
-                    for cam in range(0, 3):
-                        twodlvm.run_2d(spectra_final, fibid=fibid, fibtype=fibtype, ring=ringid,
-                                       position=pos, wave_s=wave_s, wave=self._wl_grid,
-                                       nfib=self._fibers_per_spec, type=name,
-                                       cam=cam+1, n_cr=n_cr, expN=self.observation.narcs,
-                                       expt=time, ra=0, dec=0, mjd=str(self.observation.mjd),
-                                       flb='science', base_name='sdR', dir1=self.outdir)
+                    self._to_camera(spectra_final, fibid, fibtype, ringid, pos,
+                                    time, name, 'science', branch)
 
     def _project_2d_calibs(self, data, calib_name, exptimes):
 
@@ -386,28 +366,33 @@ class Simulator2D:
                 calib_final = expand_to_full_fiber(calib, self.bundle.max_fibers)
                 # calib_final = calib_final.T
 
-                n_cr = int(branch.cosmic_rates.value * time)
+                self._to_camera(calib_final, fibid, fibtype, ringid, pos, self.observation.narcs,
+                                name, calib_name, branch)
 
-                if name == 'blue':
-                    expn='00002998'
-                    cam='b1'
-                elif name == 'red':
-                    expn='00001563'
-                    cam='r1'
-                elif name == 'ir':
-                    expn='00001563'
-                    cam='z1'
+    def _to_camera(self, spectra, fibid, fibtype, ringid, pos, exptime, name, exp_type, branch):
 
-                cube_file='/mnt/DATA/LVM/LVM_2D/drp_input/'+name+'-channel-data/sdR-s-'+\
-                           cam+'-'+expn+'.disp.fits'
-                wave2d, _ = fits.getdata(cube_file, 0, header=True)
-                wave_s=np.nanmean(wave2d,axis=0)
+        n_cr = int(branch.cosmic_rates.value * exptime)
 
-                # this is a good point for parallelization but we need to modify run_2d
-                for cam in range(0, 3):
-                    twodlvm.run_2d(calib_final, fibid=fibid, fibtype=fibtype, ring=ringid,
-                                   position=pos, wave_s=wave_s, wave=self._wl_grid,
-                                   nfib=self._fibers_per_spec, type=name,
-                                   cam=cam+1, n_cr=n_cr, expN=self.observation.narcs,
-                                   expt=time, ra=0, dec=0, mjd=str(self.observation.mjd),
-                                   flb=calib_name, base_name='sdR', dir1=self.outdir)
+        if name == 'blue':
+            expn='00002998'
+            cam='b1'
+        elif name == 'red':
+            expn='00001563'
+            cam='r1'
+        elif name == 'ir':
+            expn='00001563'
+            cam='z1'
+
+        cube_file = cube_file=f'{DATA_DIR}/lab/sdR-s-{cam}-{expn}.disp.fits'
+        wave2d, _ = fits.getdata(cube_file, 0, header=True)
+        wave_s=np.nanmean(wave2d,axis=0)
+
+        # this is a good point for parallelization but we need to modify run_2d
+        for cam in range(0, 3):
+            twodlvm.run_2d(spectra, fibid=fibid, fibtype=fibtype, ring=ringid,
+                            position=pos, wave_s=wave_s, wave=self._wl_grid,
+                            nfib=self._fibers_per_spec, type=name,
+                            cam=cam+1, n_cr=n_cr, expN=expn,
+                            expt=self.observation.narcs, ra=0, dec=0, mjd=str(self.observation.mjd),
+                            flb=exp_type, base_name='sdR', dir1=self.outdir)
+
