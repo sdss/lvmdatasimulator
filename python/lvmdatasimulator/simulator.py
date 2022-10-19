@@ -826,7 +826,7 @@ class Simulator:
                              branch.wavecoord.step)
 
             # compute constant
-            constant = exptime * branch.efficiency * self.telescope.aperture_area
+            constant = exptime * branch.efficiency() * self.telescope.aperture_area
             out[branch.name] = sky_e * constant * u.electron
 
         return out
@@ -1095,7 +1095,7 @@ class Simulator:
 
         for branch in self.spectrograph.branches:
             # this remove the signature of the instruments and goes back to the real spectrum
-            fluxcalib = exptime * branch.efficiency *\
+            fluxcalib = exptime * branch.efficiency() *\
                 self.telescope.aperture_area
             telluric = self.extinction[fiber_id][branch.name] * self.observation.airmass
 
