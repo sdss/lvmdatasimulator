@@ -123,9 +123,9 @@ class Observation:
     sky_template: str = None
     geocoronal: float = None
     narcs: int = 1
-    arc_exptimes: List[int] = field(default_factory=lambda: ['10'])
-    flat_exptimes: List[int] = field(default_factory=lambda: ['10'])
-    std_exptimes: List[int] = field(default_factory=lambda: ['10'])
+    arc_exptimes: List[int] = field(default_factory=lambda: [10])
+    flat_exptimes: List[int] = field(default_factory=lambda: [10])
+    std_exptimes: List[int] = field(default_factory=lambda: [10])
 
     def __post_init__(self):
         # fix the unit of measurements
