@@ -579,7 +579,11 @@ class Simulator:
         wcs_hdu = fits.ImageHDU(header=self._recover_wcs(), name='WCS')
         primary.header["EXT5"] = "WCS"
 
-        hdul = fits.HDUList([primary, signal_hdu, sky_hdu, wave_hdu, ids_hdu, wcs_hdu])
+        hdul = [primary, signal_hdu, sky_hdu, wave_hdu, ids_hdu, wcs_hdu]
+        for hdu in hdul:
+            hdu = self._add_wcs_header(hdu, branch)
+
+        hdul = fits.HDUList(hdul)
 
         filename = os.path.join(self.outdir,
                                 f"{self.source.name}_{branch.name}_{self.bundle.bundle_name}"
@@ -635,8 +639,13 @@ class Simulator:
             wcs_hdu = fits.ImageHDU(header=self._recover_wcs(), name='WCS')
             primary.header["EXT8"] = "WCS"
 
-            hdul = fits.HDUList([primary, target_hdu, total_hdu, noise_hdu, stn_hdu, sky_hdu, wave_hdu,
-                                ids_hdu, wcs_hdu])
+            hdul = [primary, target_hdu, total_hdu, noise_hdu, stn_hdu, sky_hdu, wave_hdu,
+                    ids_hdu, wcs_hdu]
+
+            for hdu in hdul:
+                hdu = self._add_wcs_header(hdu, branch)
+
+            hdul = fits.HDUList(hdul)
 
             filename = os.path.join(self.outdir,
                                     f"{self.source.name}_{branch.name}_{self.bundle.bundle_name}_"
@@ -689,8 +698,12 @@ class Simulator:
             wcs_hdu = fits.ImageHDU(header=self._recover_wcs(), name='WCS')
             primary.header["EXT8"] = "WCS"
 
-            hdul = fits.HDUList([primary, target_hdu, total_hdu, noise_hdu, stn_hdu, sky_hdu, wave_hdu,
-                                ids_hdu, wcs_hdu])
+            hdul = [primary, target_hdu, total_hdu, noise_hdu, stn_hdu, sky_hdu, wave_hdu,
+                    ids_hdu, wcs_hdu]
+            for hdu in hdul:
+                hdu = self._add_wcs_header(hdu, branch)
+
+            hdul = fits.HDUList(hdul)
 
             filename = os.path.join(self.outdir,
                                     f"{self.source.name}_{branch.name}_{self.bundle.bundle_name}_"
@@ -744,6 +757,13 @@ class Simulator:
             wcs_hdu = fits.ImageHDU(header=self._recover_wcs(), name='WCS')
             primary.header["EXT8"] = "WCS"
 
+            hdul = [primary, target_hdu, total_hdu, noise_hdu, stn_hdu, sky_hdu, wave_hdu,
+                    ids_hdu, wcs_hdu]
+
+            for hdu in hdul:
+                hdu = self._add_wcs_header(hdu, branch)
+
+            hdul = fits.HDUList(hdul)
 
             hdul = fits.HDUList([primary, target_hdu, total_hdu, noise_hdu, stn_hdu, sky_hdu, wave_hdu,
                                 ids_hdu, wcs_hdu])
@@ -1285,3 +1305,18 @@ class Simulator:
         header['OBS_DEC'] = (self.observation.dec.to(u.deg).value, 'dec of the fiber array')
 
         return header
+
+    def _add_wcs_header(self, hdu, branch):
+
+        hdu.header['CTYPE1'] = 'LINEAR'
+        hdu.header['CTYPE2'] = 'LINEAR'
+        hdu.header['CRVAL1'] = branch.wavecoord.start.value
+        hdu.header['CRVAL2'] = 1.
+        hdu.header['CRPIX1'] = 1.
+        hdu.header['CRPIX2'] = 1.
+        hdu.header['CDELT1'] = branch.wavecoord.step.value
+        hdu.header['CDELT2'] = 1.
+        hdu.header['CD1_1'] = branch.wavecoord.step.value
+        hdu.header['CD2_2'] = 1.
+
+        return hdu.header
