@@ -33,6 +33,7 @@ twodlvm = imp.load_source('2d_LVM', f'{DATA_DIR}/../../LVM_2D/2d_projection.py')
 def reduce_size(spectrum, wave, wave_min, wave_max):
 
     mask = np.all([wave > wave_min, wave< wave_max], axis=0)
+    newwave = wave[mask]
     out_shape = (spectrum.shape[0], mask.sum())
     if len(spectrum.shape) == 2:
         mask = expand_to_full_fiber(mask, spectrum.shape[0])
@@ -40,7 +41,7 @@ def reduce_size(spectrum, wave, wave_min, wave_max):
     else:
         out = spectrum[mask]
 
-    return out
+    return out, newwave
 
 
 def expand_to_full_fiber(input_array, nfibers):
@@ -127,16 +128,16 @@ class Simulator2D:
         self._fibers_per_spec = int(self.bundle.max_fibers / 3)
 
 
-    def create_flat(self):
+    def create_flat(self, nexpo=1):
 
         log.info('Creating flat fields...')
 
-        filename = os.path.join(DATA_DIR, 'lamps', 'flat_sb.dat')
+        filename = os.path.join(DATA_DIR, 'lamps', 'flat.dat')
         data = ascii.read(filename)
 
         flat = resample_spectrum(self._wl_grid, data['wave'], data['flux'], fast=self.fast)
 
-        self._project_2d_calibs(flat, 'flat')
+        self._project_2d_calibs(flat, 'flat', self.observation.flat_exptimes, nexpo)
 
 
     def create_arc(self, hg=False, ne=False, ar=False, xe=False, nexpo=1):
@@ -305,7 +306,7 @@ class Simulator2D:
         new_sky = {}
         new_sci = {}
         new_std = {}
-
+        new_wave = {}
         # separating the full spectrum in the different branches
 
         for branch in self.spectrograph.branches:
@@ -313,12 +314,13 @@ class Simulator2D:
             tmp_science = science * branch.efficiency(self._wl_grid)
             tmp_std = std * branch.efficiency(self._wl_grid)
 
-            new_sky[branch.name] = reduce_size(tmp_sky, self._wl_grid, branch.wavecoord.start,
+            new_sky[branch.name], _ = reduce_size(tmp_sky, self._wl_grid, branch.wavecoord.start,
                                                branch.wavecoord.end)
-            new_sci[branch.name] = reduce_size(tmp_science, self._wl_grid, branch.wavecoord.start,
+            new_sci[branch.name], _ = reduce_size(tmp_science, self._wl_grid, branch.wavecoord.start,
                                                branch.wavecoord.end)
-            new_std[branch.name] = reduce_size(tmp_std, self._wl_grid, branch.wavecoord.start,
-                                               branch.wavecoord.end)
+            new_std[branch.name], wave = reduce_size(tmp_std, self._wl_grid, branch.wavecoord.start,
+                                                     branch.wavecoord.end)
+            new_wave[branch.name] = wave
 
         for i, time in enumerate(self.observation.exptimes):
             for j, time_std in enumerate(self.observation.std_exptimes):
@@ -336,9 +338,10 @@ class Simulator2D:
 
                     spectra_final = np.vstack([sci_corr, sky_corr, std_corr])
 
-                    self._to_camera(spectra=spectra_final, fibid=fibid, fibtype=fibtype,
-                                    ringid=ringid, pos=pos, exptime=time, camera=name,
-                                    exp_type='science', branch=branch, exp_name=expname)
+                    self._to_camera(spectra=spectra_final, wave=new_wave[name], fibid=fibid,
+                                    fibtype=fibtype, ringid=ringid, pos=pos, exptime=time,
+                                    camera=name, exp_type='science', branch=branch,
+                                    exp_name=expname)
 
     def _project_2d_calibs(self, data, calib_name, exptimes, nexpo):
 
@@ -354,10 +357,13 @@ class Simulator2D:
 
         # applying the sensitivity function and reducing the size to spare memory
         new_calib = {}
+        new_wave = {}
         for branch in self.spectrograph.branches:
             tmp = calib * branch.efficiency(self._wl_grid)
-            new_calib[branch.name] = reduce_size(tmp, self._wl_grid,
-                                                 branch.wavecoord.start, branch.wavecoord.end)
+            resized, wave = reduce_size(tmp, self._wl_grid,
+                                        branch.wavecoord.start, branch.wavecoord.end)
+            new_calib[branch.name] = resized
+            new_wave[branch.name] = wave
 
         for i, time in enumerate(exptimes):
             for j in range(nexpo):
@@ -374,12 +380,13 @@ class Simulator2D:
                     calib_final = expand_to_full_fiber(calib, self.bundle.max_fibers)
                     # calib_final = calib_final.T
 
-                    self._to_camera(spectra=calib_final, fibid=fibid, fibtype=fibtype,
-                                    ringid=ringid, pos=pos, exptime=time, camera=name,
-                                    exp_type=calib_name, branch=branch, exp_name=exp_name)
+                    self._to_camera(spectra=calib_final, wave=new_wave[name], fibid=fibid,
+                                    fibtype=fibtype, ringid=ringid, pos=pos, exptime=time,
+                                    camera=name, exp_type=calib_name, branch=branch,
+                                    exp_name=exp_name)
 
-    def _to_camera(self, spectra, fibid, fibtype, ringid, pos, exptime, camera, exp_type, branch,
-                   exp_name):
+    def _to_camera(self, spectra, wave, fibid, fibtype, ringid, pos, exptime, camera, exp_type,
+                   branch, exp_name):
 
         n_cr = int(branch.cosmic_rates.value * exptime)
 
@@ -400,7 +407,7 @@ class Simulator2D:
         # this is a good point for parallelization but we need to modify run_2d
         for cam in range(3):
             twodlvm.run_2d(spectra, fibid=fibid, fibtype=fibtype, ring=ringid,
-                            position=pos, wave_s=wave_s, wave=self._wl_grid,
+                            position=pos, wave_s=wave_s, wave=wave,
                             nfib=self._fibers_per_spec, type=camera,
                             cam=cam+1, n_cr=n_cr, expN=exp_name,
                             expt=self.observation.narcs, ra=0, dec=0, mjd=str(self.observation.mjd),
