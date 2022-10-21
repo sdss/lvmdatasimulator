@@ -139,7 +139,7 @@ class Simulator2D:
         self._project_2d_calibs(flat, 'flat')
 
 
-    def create_arc(self, hg=False, ne=False, ar=False, xe=False):
+    def create_arc(self, hg=False, ne=False, ar=False, xe=False, nexpo=1):
 
         if not np.any([hg, ne, ar, xe]):
             raise ValueError('At least one lamp should be selected')
@@ -183,7 +183,7 @@ class Simulator2D:
         arcs = arcs.sum(axis=0)
 
 
-        self._project_2d_calibs(arcs, 'arc', self.observation.arc_exptimes)
+        self._project_2d_calibs(arcs, 'arc', self.observation.arc_exptimes, nexpo)
 
     def extract_extinction(self, extinction_file=os.path.join(DATA_DIR, 'sky',
                                                               'LVM_LVM160_KLAM.dat')):
@@ -320,10 +320,12 @@ class Simulator2D:
             new_std[branch.name] = reduce_size(tmp_std, self._wl_grid, branch.wavecoord.start,
                                                branch.wavecoord.end)
 
-        for time in self.observation.exptimes:
-            for time_std in self.observation.std_exptimes:
+        for i, time in enumerate(self.observation.exptimes):
+            for j, time_std in enumerate(self.observation.std_exptimes):
                 log.info(f'Saving science exposures with {time}s exposures and {time_std}s '
                          'of exposure for each standard star')
+
+                expname = (i*j)+j+1
 
                 for branch in self.spectrograph.branches:
                     name = branch.name
@@ -334,10 +336,11 @@ class Simulator2D:
 
                     spectra_final = np.vstack([sci_corr, sky_corr, std_corr])
 
-                    self._to_camera(spectra_final, fibid, fibtype, ringid, pos,
-                                    time, name, 'science', branch)
+                    self._to_camera(spectra=spectra_final, fibid=fibid, fibtype=fibtype,
+                                    ringid=ringid, pos=pos, exptime=time, camera=name,
+                                    exp_type='science', branch=branch, exp_name=expname)
 
-    def _project_2d_calibs(self, data, calib_name, exptimes):
+    def _project_2d_calibs(self, data, calib_name, exptimes, nexpo):
 
         # moving from SB to flux
         # the arc files are already in e/s/pix/arcsec^2 no need to tranform and multiply
@@ -356,30 +359,37 @@ class Simulator2D:
             new_calib[branch.name] = reduce_size(tmp, self._wl_grid,
                                                  branch.wavecoord.start, branch.wavecoord.end)
 
-        for time in exptimes:
+        for i, time in enumerate(exptimes):
+            for j in range(nexpo):
+                if calib_name == 'arc':
+                    exp_name = str(10000+(i*j)+j+1)
+                elif calib_name == 'flat':
+                    exp_name = str(1000+(i*j)+j+1)
 
-            log.info(f'Saving {calib_name} exposures with exptime {time}s')
-            for branch in self.spectrograph.branches:
-                name = branch.name
-                calib = new_calib[name] * time
+                log.info(f'Saving {calib_name} exposures with exptime {time}s')
+                for branch in self.spectrograph.branches:
+                    name = branch.name
+                    calib = new_calib[name] * time
 
-                calib_final = expand_to_full_fiber(calib, self.bundle.max_fibers)
-                # calib_final = calib_final.T
+                    calib_final = expand_to_full_fiber(calib, self.bundle.max_fibers)
+                    # calib_final = calib_final.T
 
-                self._to_camera(calib_final, fibid, fibtype, ringid, pos, self.observation.narcs,
-                                name, calib_name, branch)
+                    self._to_camera(spectra=calib_final, fibid=fibid, fibtype=fibtype,
+                                    ringid=ringid, pos=pos, exptime=time, camera=name,
+                                    exp_type=calib_name, branch=branch, exp_name=exp_name)
 
-    def _to_camera(self, spectra, fibid, fibtype, ringid, pos, exptime, name, exp_type, branch):
+    def _to_camera(self, spectra, fibid, fibtype, ringid, pos, exptime, camera, exp_type, branch,
+                   exp_name):
 
         n_cr = int(branch.cosmic_rates.value * exptime)
 
-        if name == 'blue':
+        if camera == 'blue':
             expn='00002998'
             cam='b1'
-        elif name == 'red':
+        elif camera == 'red':
             expn='00001563'
             cam='r1'
-        elif name == 'ir':
+        elif camera == 'ir':
             expn='00001563'
             cam='z1'
 
@@ -388,11 +398,11 @@ class Simulator2D:
         wave_s=np.nanmean(wave2d,axis=0)
 
         # this is a good point for parallelization but we need to modify run_2d
-        for cam in range(0, 3):
+        for cam in range(3):
             twodlvm.run_2d(spectra, fibid=fibid, fibtype=fibtype, ring=ringid,
                             position=pos, wave_s=wave_s, wave=self._wl_grid,
-                            nfib=self._fibers_per_spec, type=name,
-                            cam=cam+1, n_cr=n_cr, expN=expn,
+                            nfib=self._fibers_per_spec, type=camera,
+                            cam=cam+1, n_cr=n_cr, expN=exp_name,
                             expt=self.observation.narcs, ra=0, dec=0, mjd=str(self.observation.mjd),
                             flb=exp_type, base_name='sdR', dir1=self.outdir)
 
