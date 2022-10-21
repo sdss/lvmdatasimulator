@@ -215,7 +215,7 @@ def convolve_array(to_convolve, kernel, selected_points_x, selected_points_y,
     else:
         # convolving the cube in a single try
         convolved = convolve_fft(to_convolve, kernel, allow_huge=allow_huge,
-                                normalize_kernel=normalize_kernel)
+                                 normalize_kernel=normalize_kernel)
 
     # data_in_aperture = convolved[:, np.round(selected_points_y).astype(int), np.round(selected_points_x).astype(int)]
     data_in_aperture = np.zeros(shape=(convolved.shape[0], len(selected_points_x)),

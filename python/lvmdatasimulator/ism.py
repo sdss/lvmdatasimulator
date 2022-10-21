@@ -37,7 +37,8 @@ from lvmdatasimulator.utils import calc_circular_mask, convolve_array, set_defau
 
 import warnings
 
-fluxunit = u.erg / (u.cm ** 2 * u.s * u.arcsec ** 2)
+fluxunit = u.erg / (u.cm ** 2 * u.s)
+brtunit = u.erg / (u.cm ** 2 * u.s * u.arcsec ** 2)
 velunit = u.km / u.s
 
 
@@ -223,18 +224,20 @@ class Nebula:
     yc: int = None  # Center of the region in the field of view, pix
     x0: int = 0  # Coordinates of the bottom-left corner in the field of view, pix
     y0: int = 0  # Coordinates of the bottom-left corner in the field of view, pix
-    pix_width: int = None  # full width of cartesian grid, pix (should be odd)
-    pix_height: int = None  # full height of cartesian grid, pix (should be odd)
+    pix_width: int = None  # full width of cartesian grid, pix (have to be odd)
+    pix_height: int = None  # full height of cartesian grid, pix (have to be odd)
     width: u.pc = 0 * u.pc  # width of the nebula in pc (not used if pix_width is set up)
     height: u.pc = 0 * u.pc  # height of the nebula in pc (not used if pix_height is set up)
     pxscale: u.pc = 0.01 * u.pc  # pixel size in pc
+    angscale: u.arcsec = 0 * u.arcsec  # pixel size in arcsec (use only if total_flux > 0)
     spectrum_id: int = None  # ID of a template emission spectrum for this nebula
     spectrum_type: str = None  # type of model spectrum (either mappings or cloudy)
     n_brightest_lines: int = None  # limit the number of the lines to the first N brightest
     sys_velocity: velunit = 0 * velunit  # Systemic velocity
     turbulent_sigma: velunit = 10 * velunit  # Velocity dispersion due to turbulence; included in calculations of LSF
-    max_brightness: fluxunit = 1e-15 * fluxunit
-    max_extinction: u.mag = 0 * u.mag
+    max_brightness: brtunit = 1e-15 * brtunit  # Maximal surf. brightness in Ha line (ignored if total_flux is present)
+    total_flux: fluxunit = 0 * fluxunit  # Total flux in Halpha line
+    max_extinction: u.mag = 0 * u.mag  # Maximal extinction (in case of dark nebulae)
     perturb_scale: int = 0 * u.pc  # Spatial scale of correlated perturbations
     perturb_amplitude: float = 0.1  # Maximal amplitude of perturbations
     _npix_los: int = 1  # full size along line of sight in pixels
@@ -251,10 +254,11 @@ class Nebula:
             raise ModelsError('These models are not supported')
 
     def _assign_all_units(self):
-        whole_list_properties = ['pxscale', 'sys_velocity', 'turbulent_sigma', 'max_brightness', 'max_extinction',
+        whole_list_properties = ['pxscale', 'sys_velocity', 'turbulent_sigma', 'max_brightness', 'total_flux',
+                                 'max_extinction',
                                  'perturb_scale', 'radius', 'PA', 'length', 'width', 'vel_gradient', 'r_eff',
                                  'vel_rot', 'expansion_velocity', 'spectral_axis', 'vel_pa']
-        whole_list_units = [u.pc, velunit, velunit, fluxunit, u.mag, u.pc, u.pc, u.degree, u.pc, u.pc,
+        whole_list_units = [u.pc, velunit, velunit, brtunit, fluxunit, u.mag, u.pc, u.pc, u.degree, u.pc, u.pc,
                             (velunit / u.pc), u.kpc, velunit, velunit, velunit, u.degree]
         cur_list_properties = []
         cur_list_units = []
@@ -356,21 +360,26 @@ class Nebula:
         """
         Project the 3D nebula onto sky plane (for emission or continuum sources)
         """
-        if self.max_brightness > 0:
-            norm_max = self.max_brightness
-        else:
-            norm_max = 1
         map2d = np.nansum(self._brightness_3d_cartesian, 2)
-        return map2d / np.nanmax(map2d) * norm_max
+        if self.total_flux > 0:
+            norm_factor = self.total_flux / np.nansum(map2d) / self.angscale ** 2
+        elif self.max_brightness > 0:
+            norm_factor = self.max_brightness / np.nanmax(map2d)
+        else:
+            norm_factor = 1. / np.nanmax(map2d)
+        return map2d * norm_factor
 
     @cached_property
     def brightness_skyplane_lines(self):
         """
         Project the 3D emission nebula line onto sky plane (return images in each emission line)
         """
-        if self.max_brightness > 0:
+        if (self.max_brightness > 0) or ((self.total_flux > 0) & (self.angscale > 0)):
             map2d = np.nansum(self._brightness_4d_cartesian, 3)
-            return map2d / np.nanmax(map2d[self._ref_line_id, :, :]) * self.max_brightness
+            if self.total_flux > 0:
+                return map2d / np.nansum(map2d[self._ref_line_id, :, :]) * self.total_flux / self.angscale ** 2
+            else:
+                return map2d / np.nanmax(map2d[self._ref_line_id, :, :]) * self.max_brightness
         else:
             return None
 
@@ -689,13 +698,13 @@ class Galaxy(Nebula):
             return None
 
 
-
 @dataclass
 class DIG(Nebula):
     """
     Class defining the DIG component. For now it is defined just by its brightness (constant)
     """
-    max_brightness: fluxunit = 1e-17 * fluxunit
+    max_brightness: brtunit = 1e-17 * brtunit  # Maximal surf. brightness in Ha. Ignored if total_flux is present
+    total_flux: fluxunit = 0 * fluxunit  # Total flux in Halpha line
     vel_gradient: (velunit / u.pc) = 0
 
 
@@ -704,7 +713,8 @@ class Cloud(Nebula):
     """Class of an isotropic spherical gas cloud without any ionization source.
     Defined by its position, radius, density, maximal optical depth"""
     radius: u.pc = 1.0 * u.pc
-    max_brightness: fluxunit = 0 * fluxunit
+    max_brightness: brtunit = 0 * brtunit  # Maximal surf. brightness in Ha. Ignored if total_flux is present
+    total_flux: fluxunit = 0 * fluxunit  # Total flux in Halpha line
     max_extinction: u.mag = 2.0 * u.mag
     thickness: float = 1.0
     perturb_degree: int = 0  # Degree of perturbations (max. degree of spherical harmonics for cloud)
@@ -896,7 +906,8 @@ class Bubble(Cloud):
     """Class of an isotropic thin expanding bubble."""
     spectral_axis: velunit = np.arange(-20, 20, 10) * velunit
     expansion_velocity: velunit = 20 * velunit
-    max_brightness: fluxunit = 1e-15 * fluxunit
+    max_brightness: brtunit = 1e-15 * brtunit  # Maximal surf. brightness in Ha. Ignored if total_flux is present
+    total_flux: fluxunit = 0 * fluxunit  # Total flux in Halpha line
     max_extinction: u.mag = 0 * u.mag
     thickness: float = 0.2
 
@@ -934,10 +945,10 @@ class Bubble(Cloud):
     def _d_spectrum_cartesian(self, velocity: velunit):
         """Returns local spectrum, per pc**3 of area"""
         return (self._brightness_3d_cartesian[:, :, :, None] * (
-                fluxunit / u.pc ** 3) * self._turbulent_lsf(velocity)).to(fluxunit / velunit / u.pc ** 3)
+                brtunit / u.pc ** 3) * self._turbulent_lsf(velocity)).to(brtunit / velunit / u.pc ** 3)
 
     @cached_property
-    def line_profile(self) -> (fluxunit / velunit):
+    def line_profile(self) -> (brtunit / velunit):
         """
         Produces the distribution of the observed line profiles in each pixels of the sky plane
         """
@@ -954,7 +965,7 @@ class Bubble(Cloud):
         )
         spec_slice = spectrum[:, :, 1]
         spec_units = spec_slice.unit
-        spec_slice = spec_slice / np.nansum(spec_slice)
+        spec_slice = spec_slice / np.nansum(spec_slice, axis=0)
         spec_slice[~np.isfinite(spec_slice)] = 0
         spectrum = np.zeros(shape=(spec_slice.shape[0], spec_slice.shape[1], spec_slice.shape[1]), dtype=float)
         for channel_ind in range(spec_slice.shape[0]):
@@ -970,7 +981,8 @@ class Cloud3D(Nebula):
     Class of an isotropic spherical gas cloud without any ionization source.
     Defined by its position, radius, density, maximal optical depth"""
     radius: u.pc = 1.0 * u.pc
-    max_brightness: fluxunit = 0 * fluxunit
+    max_brightness: brtunit = 0 * brtunit  # Maximal surf. brightness in Ha. Ignored if total_flux is present
+    total_flux: fluxunit = 0 * fluxunit  # Total flux in Halpha line
     max_extinction: u.mag = 2.0 * u.mag
     thickness: float = 1.0
     perturb_degree: int = 0  # Degree of perturbations (max. degree of spherical harmonics for cloud)
@@ -1113,7 +1125,8 @@ class Bubble3D(Cloud3D):
     Class of an isotropic thin expanding bubble."""
     spectral_axis: velunit = np.arange(-20, 20, 10) * velunit
     expansion_velocity: velunit = 20 * velunit
-    max_brightness: fluxunit = 1e-15 * fluxunit
+    max_brightness: brtunit = 1e-15 * brtunit  # Maximal surf. brightness in Ha. Ignored if total_flux is present
+    total_flux: fluxunit = 0 * fluxunit  # Total flux in Halpha line
     max_extinction: u.mag = 0 * u.mag
     thickness: float = 0.2
 
@@ -1151,10 +1164,10 @@ class Bubble3D(Cloud3D):
     def _d_spectrum_cartesian(self, velocity: velunit):
         """Returns local spectrum, per pc**3 of area"""
         return (self._brightness_3d_cartesian[:, :, :, None] * (
-                fluxunit / u.pc ** 3) * self._turbulent_lsf(velocity)).to(fluxunit / velunit / u.pc ** 3)
+                brtunit / u.pc ** 3) * self._turbulent_lsf(velocity)).to(brtunit / velunit / u.pc ** 3)
 
     @cached_property
-    def line_profile(self) -> (fluxunit / velunit):
+    def line_profile(self) -> (brtunit / velunit):
         """
         Produces the distribution of the observed line profiles in each pixels of the sky plane
         """
@@ -1283,7 +1296,7 @@ class ISM:
                             add_counter=False):
         self.content.append(fits.ImageHDU(np.atleast_1d(value), name=name))
         self.content[-1].header['Nebtype'] = (type(obj_to_add).__name__, "Type of the nebula")
-        is_dark = ((obj_to_add.max_brightness <= 0) and (obj_to_add.max_extinction > 0))
+        is_dark = (obj_to_add.max_brightness <= 0) and (obj_to_add.total_flux <= 0) and (obj_to_add.max_extinction > 0)
         self.content[-1].header['Dark'] = (is_dark, " Emitting or absorbing nebula?")
         self.content[-1].header['X0'] = (obj_to_add.x0, "Position in the field of view")
         self.content[-1].header['Y0'] = (obj_to_add.y0, "Position in the field of view")
@@ -1325,8 +1338,10 @@ class ISM:
             self.content[-1].header['Radius'] = (obj_to_add.radius.to_value(u.kpc), 'Radius (major axis), pc')
         if type(obj_to_add) in [Ellipse, Galaxy]:
             self.content[-1].header['AxRat'] = (obj_to_add.ax_ratio, "Axis ratio")
-        if (obj_to_add.max_brightness <= 0) and (obj_to_add.max_extinction > 0):
+        if (obj_to_add.max_brightness <= 0) and (obj_to_add.total_flux <= 0) and (obj_to_add.max_extinction > 0):
             self.content[-1].header['MaxExt'] = (obj_to_add.max_extinction.value, "Max extinction, mag/pix")
+        elif obj_to_add.total_flux > 0:
+            self.content[-1].header['TotFlx'] = (obj_to_add.total_flux.value, "Total flux, erg/s/cm^2")
         elif obj_to_add.max_brightness > 0:
             self.content[-1].header['MaxBrt'] = (obj_to_add.max_brightness.value, "Max brightness, erg/s/cm^2/arcsec^2")
         if type(obj_to_add) == Bubble:
@@ -1354,14 +1369,15 @@ class ISM:
             log.warning('Skip nebula of wrong type ({0})'.format(type(obj_to_add)))
             return
 
-        if (obj_to_add.max_brightness <= 0) and (obj_to_add.max_extinction <= 0) and (continuum is None):
+        if (obj_to_add.max_brightness <= 0) and (obj_to_add.total_flux <= 0) and \
+                (obj_to_add.max_extinction <= 0) and (continuum is None):
             log.warning('Skip nebula with zero extinction and brightness')
             return
         if type(obj_to_add) == CustomNebula:
             brt = obj_to_add.brt_map
             brt_4d = obj_to_add.lines_maps
         else:
-            if obj_to_add.max_brightness > 0:
+            if (obj_to_add.max_brightness > 0) or (obj_to_add.total_flux > 0):
                 brt = obj_to_add.brightness_skyplane.value
                 if obj_to_add.spectrum_id is not None and not obj_to_add.linerat_constant:
                     brt_4d = obj_to_add.brightness_skyplane_lines.value
@@ -1376,7 +1392,7 @@ class ISM:
 
         self._add_fits_extension(name="Comp_{0}_Brightness".format(obj_id), value=brt,
                                  obj_to_add=obj_to_add, zorder=zorder, add_fits_kw=add_fits_kw, add_counter=True)
-        if obj_to_add.max_brightness > 0:
+        if (obj_to_add.max_brightness > 0) or (obj_to_add.total_flux > 0):
             if brt_4d is not None:
                 if type(obj_to_add) == CustomNebula:
                     wl_list = obj_to_add.lines_wl
@@ -1450,7 +1466,8 @@ class ISM:
                          (calculated in 'generate' method based on provided offsets)
             yc: int -- pixel Y coordinate of the center of the nebula in FOV
                          (calculated in 'generate' method based on provided offsets)
-            model_index: int or None -- ID of cloudy models to use if maps in different lines are not present
+            model_index: int or None -- ID of cloudy/mappings models to use if maps in different lines are not present
+            model_type: type of the model grid to be used in simulations, cloudy or mappings
         Returns:
              CustomNebula object, or None if something went wrong
         """
@@ -1604,7 +1621,7 @@ class ISM:
             kin_pa_default = 0
             if 'PA' in cur_obj:
                 kin_pa_default = cur_obj['PA']
-            for k, v, unit in zip(['max_brightness', 'max_extinction', 'thickness',
+            for k, v, unit in zip(['max_brightness', 'total_flux', 'max_extinction', 'thickness',
                                    'expansion_velocity', 'sys_velocity',
                                    'turbulent_sigma', 'perturb_degree',
                                    'perturb_amplitude', 'perturb_scale', 'radius', 'distance',
@@ -1612,11 +1629,11 @@ class ISM:
                                    'continuum_wl', 'ext_law', 'ext_rv', 'vel_gradient', 'vel_rot', 'vel_pa',
                                    'n_brightest_lines', 'offset_RA', 'offset_DEC', 'RA', 'DEC',
                                    'pxsize'],
-                                  [0, 0, 1., 0, self.sys_velocity, self.turbulent_sigma, 0, 0.1, 0, 0, self.distance,
+                                  [0, 0, 0., 1., 0, self.sys_velocity, self.turbulent_sigma, 0, 0.1, 0, 0, self.distance,
                                    None, None, 0, None, 5500., self.ext_law, self.R_V, 0, 0, kin_pa_default, None,
                                    None, None, None, None, self.pxscale],
-                                  [fluxunit, u.mag, None, velunit, velunit, velunit, None, None,
-                                   u.pc, u.pc, u.kpc, None, None, fluxunit/u.AA, u.mag / u.arcsec ** 2, u.Angstrom,
+                                  [brtunit, fluxunit, u.mag, None, velunit, velunit, velunit, None, None,
+                                   u.pc, u.pc, u.kpc, None, None, brtunit/u.AA, u.mag / u.arcsec ** 2, u.Angstrom,
                                    None, None, velunit / u.pc, velunit, u.degree, None, u.arcsec, u.arcsec,
                                    u.degree, u.degree, None]):
                 set_default_dict_values(cur_obj, k, v, unit=unit)
@@ -1629,7 +1646,7 @@ class ISM:
                 log.warning("the expected velocities are larger than 'vel_amplitude', "
                             "there might be some problems with the outputs.")
 
-            for k in ['max_brightness', 'max_extinction', 'radius', 'continuum_flux']:
+            for k in ['max_brightness', 'total_flux', 'max_extinction', 'radius', 'continuum_flux']:
                 if cur_obj[k] < 0:
                     cur_obj[k] = 0
 
@@ -1638,8 +1655,10 @@ class ISM:
                     log.warning("Wrong set of parameters for the nebula #{0}: skip this one".format(ind_obj))
                     continue
                 cur_obj['max_brightness'] = 1.
+                cur_obj['total_flux'] = 0.
 
-            if (cur_obj['max_brightness'] == 0) and (cur_obj['max_extinction'] == 0) and \
+            if (cur_obj['max_brightness'] == 0) and (cur_obj['total_flux'] == 0) and \
+                    (cur_obj['max_extinction'] == 0) and \
                     (((cur_obj['continuum_mag'] is None) and (cur_obj['continuum_flux'] == 0)) or
                      (cur_obj['continuum_data'] is None) or (cur_obj['continuum_type'] is None)):
                 log.warning("Wrong set of parameters for the nebula #{0}: skip this one".format(ind_obj))
@@ -1675,7 +1694,7 @@ class ISM:
                 raise ValueError(f'{model_type} models are not supported')
 
             # if no emission is wanted, do not set any model
-            if cur_obj['max_brightness'] <= 0:
+            if (cur_obj['max_brightness'] <= 0) and (cur_obj['total_flux'] <= 0):
                 model_index = None
                 model_id = None
                 # if no model is selected, go for the standard one
@@ -1685,15 +1704,14 @@ class ISM:
                         isinstance(cur_obj.get('brightness_lines'), dict)):
 
                     log.warning("No model ids or model parameters are set for the nebula #{0}: "
-                        "use default {1} 'model_id={2}'".format(ind_obj, model_type, id_def))
+                                "use default {1} 'model_id={2}'".format(ind_obj, model_type, id_def))
 
                 cur_obj['model_id'] = id_def
 
                 model_index, model_id = find_model_id(file=model_file,
-                                                        check_id=cur_obj.get('model_id'),
-                                                        params=cur_obj.get('model_params'),
-                                                        defaults=id_def)
-
+                                                      check_id=cur_obj.get('model_id'),
+                                                      params=cur_obj.get('model_params'),
+                                                      defaults=id_def)
 
             elif cur_obj.get('model_id') is None and (type(cur_obj.get('model_params')) is dict):
                 for p in param_def:
@@ -1703,15 +1721,15 @@ class ISM:
                         cur_obj['model_params'][p] = param_def[p]
 
                 model_index, model_id = find_model_id(file=model_file,
-                                                        check_id=cur_obj.get('model_id'),
-                                                        params=cur_obj.get('model_params'),
-                                                        defaults=param_def['id'])
+                                                      check_id=cur_obj.get('model_id'),
+                                                      params=cur_obj.get('model_params'),
+                                                      defaults=param_def['id'])
             elif cur_obj.get('model_id'):
 
                 model_index, model_id = find_model_id(file=model_file,
-                                                        check_id=cur_obj.get('model_id'),
-                                                        params=cur_obj.get('model_params'),
-                                                        defaults=param_def['id'])
+                                                      check_id=cur_obj.get('model_id'),
+                                                      params=cur_obj.get('model_params'),
+                                                      defaults=param_def['id'])
 
             # if lvmdatasimulator.CLOUDY_MODELS is None or (cur_obj['max_brightness'] <= 0):
             #     cloudy_model_index = None
@@ -1757,6 +1775,7 @@ class ISM:
                 if cur_obj['perturb_scale'] < 0:
                     cur_obj['perturb_scale'] = 0
                 generated_object = DIG(max_brightness=cur_obj.get('max_brightness'),
+                                       total_flux=0,
                                        turbulent_sigma=cur_obj['turbulent_sigma'],
                                        sys_velocity=cur_obj['sys_velocity'],
                                        vel_gradient=cur_obj['vel_gradient'],
@@ -1828,7 +1847,7 @@ class ISM:
                                 " Use non-expanding cloud instead".format(ind_obj))
                     cur_obj['type'] = "Cloud"
 
-                if cur_obj['type'] in ["Bubble", "Cloud"]:
+                if cur_obj['type'] in ["Bubble3D", "Cloud3D"]:
                     if cur_obj['perturb_degree'] < 0:
                         cur_obj['perturb_degree'] = 0
 
@@ -1840,6 +1859,7 @@ class ISM:
                 if cur_obj['type'] == "Bubble":
                     generated_object = Bubble(xc=x, yc=y,
                                               max_brightness=cur_obj.get('max_brightness'),
+                                              total_flux=cur_obj.get('total_flux'),
                                               max_extinction=cur_obj.get('max_extinction'),
                                               spectral_axis=self.vel_grid,
                                               expansion_velocity=cur_obj.get('expansion_velocity'),
@@ -1847,8 +1867,9 @@ class ISM:
                                               radius=cur_obj['radius'],
                                               pxscale=self.pxscale * (cur_obj['distance'].to(u.pc) /
                                                                       self.distance.to(u.pc)),
-                                              perturb_degree=cur_obj['perturb_degree'],
-                                              perturb_amplitude=cur_obj['perturb_amplitude'],
+                                              angscale=self.pxscale,
+                                              # perturb_degree=cur_obj['perturb_degree'],
+                                              # perturb_amplitude=cur_obj['perturb_amplitude'],
                                               turbulent_sigma=cur_obj['turbulent_sigma'],
                                               sys_velocity=cur_obj['sys_velocity'],
                                               spectrum_id=model_index,
@@ -1859,13 +1880,15 @@ class ISM:
                 elif cur_obj['type'] == "Cloud":
                     generated_object = Cloud(xc=x, yc=y,
                                              max_brightness=cur_obj.get('max_brightness'),
+                                             total_flux=cur_obj.get('total_flux'),
                                              max_extinction=cur_obj.get('max_extinction'),
                                              thickness=cur_obj['thickness'],
                                              radius=cur_obj['radius'],
                                              pxscale=self.pxscale * (cur_obj['distance'].to(u.pc) /
                                                                      self.distance.to(u.pc)),
-                                             perturb_degree=cur_obj['perturb_degree'],
-                                             perturb_amplitude=cur_obj['perturb_amplitude'],
+                                             angscale=self.pxscale,
+                                             # perturb_degree=cur_obj['perturb_degree'],
+                                             # perturb_amplitude=cur_obj['perturb_amplitude'],
                                              spectrum_id=model_index,
                                              spectrum_type=model_type,
                                              n_brightest_lines=cur_obj['n_brightest_lines'],
@@ -1879,6 +1902,7 @@ class ISM:
                 elif cur_obj['type'] == "Filament":
                     generated_object = Filament(xc=x, yc=y,
                                                 max_brightness=cur_obj.get('max_brightness'),
+                                                total_flux=cur_obj.get('total_flux'),
                                                 max_extinction=cur_obj.get('max_extinction'),
                                                 width=cur_obj['width'],
                                                 length=cur_obj['length'],
@@ -1892,11 +1916,13 @@ class ISM:
                                                 sys_velocity=cur_obj['sys_velocity'],
                                                 pxscale=self.pxscale * (cur_obj['distance'].to(u.pc) /
                                                                         self.distance.to(u.pc)),
+                                                angscale=self.pxscale,
                                                 )
 
                 elif cur_obj['type'] == "Galaxy":
                     generated_object = Galaxy(xc=x, yc=y,
                                               max_brightness=cur_obj.get('max_brightness'),
+                                              total_flux=cur_obj.get('total_flux'),
                                               max_extinction=cur_obj.get('max_extinction'),
                                               r_eff=cur_obj['r_eff'],
                                               rad_lim=cur_obj['rad_lim'],
@@ -1912,10 +1938,12 @@ class ISM:
                                               sys_velocity=cur_obj['sys_velocity'],
                                               pxscale=self.pxscale * (cur_obj['distance'].to(u.pc) /
                                                                       self.distance.to(u.pc)),
+                                              angscale=self.pxscale,
                                               )
                 elif cur_obj['type'] == "Ellipse":
                     generated_object = Ellipse(xc=x, yc=y,
                                                max_brightness=cur_obj.get('max_brightness'),
+                                               total_flux=cur_obj.get('total_flux'),
                                                max_extinction=cur_obj.get('max_extinction'),
                                                radius=cur_obj['radius'],
                                                ax_ratio=cur_obj['ax_ratio'],
@@ -1931,10 +1959,12 @@ class ISM:
                                                                        self.distance.to(u.pc)),
                                                perturb_scale=cur_obj['perturb_scale'],
                                                perturb_amplitude=cur_obj['perturb_amplitude'],
+                                               angscale=self.pxscale,
                                                )
                 elif cur_obj['type'] == "Circle":
                     generated_object = Circle(xc=x, yc=y,
                                               max_brightness=cur_obj.get('max_brightness'),
+                                              total_flux=cur_obj.get('total_flux'),
                                               max_extinction=cur_obj.get('max_extinction'),
                                               radius=cur_obj['radius'],
                                               spectrum_id=model_index,
@@ -1948,11 +1978,13 @@ class ISM:
                                                                       self.distance.to(u.pc)),
                                               perturb_scale=cur_obj['perturb_scale'],
                                               perturb_amplitude=cur_obj['perturb_amplitude'],
+                                              angscale=self.pxscale,
                                               )
                 elif cur_obj['type'] == "Rectangle" or (cur_obj['type'] == "Nebula"):
                     generated_object = Rectangle(xc=x, yc=y,
                                                  width=cur_obj.get('width'), height=cur_obj.get('height'),
                                                  max_brightness=cur_obj.get('max_brightness'),
+                                                 total_flux=cur_obj.get('total_flux'),
                                                  max_extinction=cur_obj.get('max_extinction'),
                                                  spectrum_id=model_index,
                                                  spectrum_type=model_type,
@@ -1965,6 +1997,7 @@ class ISM:
                                                                          self.distance.to(u.pc)),
                                                  perturb_scale=cur_obj['perturb_scale'],
                                                  perturb_amplitude=cur_obj['perturb_amplitude'],
+                                                 angscale=self.pxscale,
                                                  )
                 elif cur_obj['type'] == "CustomNebula":
                     generated_object = self.process_custom_nebula(cur_obj, xc=x, yc=y,
@@ -2260,7 +2293,7 @@ class ISM:
             map_is_empty = False
         return map_2d * (proj_plane_pixel_scales(self.wcs)[0] * 3600) ** 2
 
-    def get_spectrum(self, wl_grid=None, aperture_mask=None, fibers_coords=None, pix_size=1):
+    def get_spectrum(self, wl_grid=None, aperture_mask=None, fibers_coords=None):
         if aperture_mask is None or (np.sum(aperture_mask) == 0) or (self.content[0].header['Nobj'] == 0):
             log.warning("No overlapping detected between the ISM component and the fibers => no spectra extraction")
             return None
@@ -2273,9 +2306,10 @@ class ISM:
         all_extensions_brt = all_extensions_brt[np.argsort([self.content[cur_ext].header.get('ZORDER')
                                                             for cur_ext in all_extensions_brt])]
 
+        pix_size = proj_plane_pixel_scales(self.wcs)[0] * 3600
         wl_logscale = np.log(wl_grid.value)
-        wl_logscale_highres = np.arange(np.round((wl_logscale[-1] - wl_logscale[0]) * 1e6).astype(int)) \
-                                * 1e-6 + np.round(wl_logscale[0], 6)
+        wl_logscale_highres = np.arange(np.round((wl_logscale[-1] - wl_logscale[0]) * 1e6).astype(int)
+                                        ) * 1e-6 + np.round(wl_logscale[0], 6)
         delta_lr = np.roll(wl_logscale, -1) - wl_logscale
         delta_lr[-1] = delta_lr[-2]
 
@@ -2374,7 +2408,7 @@ class ISM:
 
             my_comp = "_".join(cur_ext.split("_")[:2])
 
-            if self.content[cur_ext].header.get('MAXBRT'):
+            if self.content[cur_ext].header.get('MAXBRT') or self.content[cur_ext].header.get('TOTFLX'):
                 if self.content[cur_ext].header.get("LINERAT") == 'Variable':
                     all_wavelength = np.array([extname.split("_")[-1] for extname in all_extensions
                                                if extname is not None and (my_comp + "_FLUX_" in extname)])
@@ -2500,6 +2534,8 @@ class ISM:
 
             if my_comp + "_CONTINUUM" in self.content:
                 brt_max = self.content[cur_ext].header.get('MAXBRT')
+                if not brt_max and self.content[cur_ext].header.get('TOTFLX'):
+                    brt_max = np.nanmax(self.content[cur_ext].data)
                 if not brt_max:
                     brt_max = self.content[cur_ext].header.get('MAXEXT')
                 if not brt_max:
@@ -2525,4 +2561,4 @@ class ISM:
                                                                1))
                 spectrum[selected_apertures, :] += continuum[None, :] * data_in_apertures
 
-        return spectrum * (proj_plane_pixel_scales(self.wcs)[0] * 3600) ** 2 * fluxunit * u.arcsec ** 2
+        return spectrum * pix_size ** 2 * fluxunit
