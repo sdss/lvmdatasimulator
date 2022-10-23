@@ -118,7 +118,7 @@ def xyz_to_sphere(x, y, z, pxscale=1. * u.pc):
 
 def find_model_id(file=lvmdatasimulator.CLOUDY_MODELS,
                   check_id=None, params=lvmdatasimulator.CLOUDY_SPEC_DEFAULTS['id'],
-                  defaults=lvmdatasimulator.CLOUDY_SPEC_DEFAULTS['id']):
+                  defaults=lvmdatasimulator.CLOUDY_SPEC_DEFAULTS):
     """
     Checks the input parameters of the pre-computed Cloudy model and return corresponding index in the grid
     """
@@ -129,8 +129,15 @@ def find_model_id(file=lvmdatasimulator.CLOUDY_MODELS,
     with fits.open(file) as hdu:
         if check_id is None:
             if params is None:
-                check_id = defaults
-                log.warning(f'Default Cloudy model will be used (id = {check_id})')
+                check_id = defaults['id']
+                if defaults is not None:
+                    out_params = 'Its parameters: '
+                    for key in defaults.keys():
+                        if key == 'id':
+                            continue
+                        else:
+                            out_params += f'{key} = {defaults[key]}; '
+                log.warning(f'Default Cloudy model will be used (id = {check_id}). {out_params}')
             else:
                 summary_table = Table(hdu['Summary'].data)
                 indexes = np.arange(len(summary_table)).astype(int)
@@ -155,9 +162,16 @@ def find_model_id(file=lvmdatasimulator.CLOUDY_MODELS,
                     if len(indexes) == 0:
                         break
                 if len(indexes) == 0 or len(indexes) == len(summary_table):
-                    check_id = defaults
-                    log.warning('Input parameters do not correspond to any pre-computed model.'
-                                'Default model will be used (id = {0})'.format(check_id))
+                    check_id = defaults['id']
+                    if defaults is not None:
+                        out_params = 'Its parameters: '
+                        for key in defaults.keys():
+                            if key == 'id':
+                                continue
+                            else:
+                                out_params += f'{key} = {defaults[key]}; '
+                    log.warning(f'Input parameters do not correspond to any pre-computed model.'
+                                f'Default model will be used (id = {check_id}). {out_params}')
                 elif len(indexes) == 1:
                     check_id = summary_table['Model_ID'][indexes[0]]
                     for p in params:
@@ -166,11 +180,25 @@ def find_model_id(file=lvmdatasimulator.CLOUDY_MODELS,
                                   isinstance(params[p], int)) and ~np.isfinite(params[p])):
                             continue
                         if params[p] != summary_table[p][indexes[0]]:
-                            log.warning(f'Use the closest pre-computed model with id = {check_id}')
+                            out_params = 'Its parameters: '
+                            for key in summary_table.colnames:
+                                if key in ['Model_ID', 'Nlines', 'Distance', 'Flux_Ha', 'Source_model', 'Nzones',
+                                           'Rin', 'Rout']:
+                                    continue
+                                else:
+                                    out_params += f'{key} = {summary_table[key][indexes[0]]}; '
+                            log.warning(f'Use the closest pre-computed model with id = {check_id}. {out_params}')
                             break
                 else:
                     check_id = summary_table['Model_ID'][indexes[0]]
-                    log.warning(f'Select one of the closest pre-computed model with id = {check_id}')
+                    out_params = 'Its parameters: '
+                    for key in summary_table.colnames:
+                        if key in ['Model_ID', 'Nlines', 'Distance', 'Flux_Ha', 'Source_model', 'Nzones',
+                                   'Rin', 'Rout']:
+                            continue
+                        else:
+                            out_params += f'{key} = {summary_table[key][indexes[0]]}; '
+                    log.warning(f'Select one of the closest pre-computed model with id = {check_id}. {out_params}')
                 #
                 # for cur_ext in range(len(hdu)):
                 #     if cur_ext == 0:
@@ -1673,7 +1701,6 @@ class ISM:
                 cur_obj['model_id'] = cur_obj.get('cloudy_id')
                 cur_obj['model_type'] = 'cloudy'
 
-
             if cur_obj.get('cloudy_params', None) is not None:
                 log.warning('The "cloudy_params" parameter will be removed in future versions of the code.'
                             'Please use "model_params" and "model_type: cloudy" instead.')
@@ -1703,15 +1730,25 @@ class ISM:
                 if not (cur_obj['type'] == 'CustomNebula' and
                         isinstance(cur_obj.get('brightness_lines'), dict)):
 
-                    log.warning("No model ids or model parameters are set for the nebula #{0}: "
-                                "use default {1} 'model_id={2}'".format(ind_obj, model_type, id_def))
+                    if param_def is not None:
+                        out_params = 'Its parameters: '
+                        for key in param_def.keys():
+                            if key == 'id':
+                                continue
+                            else:
+                                out_params += f'{key} = {param_def[key]}; '
+                    else:
+                        out_params = ''
+
+                    log.warning(f"No model ids or model parameters are set for the nebula #{ind_obj}: "
+                                f"use default {model_type} 'model_id={id_def}'. {out_params}")
 
                 cur_obj['model_id'] = id_def
 
                 model_index, model_id = find_model_id(file=model_file,
                                                       check_id=cur_obj.get('model_id'),
                                                       params=cur_obj.get('model_params'),
-                                                      defaults=id_def)
+                                                      defaults=param_def)
 
             elif cur_obj.get('model_id') is None and (type(cur_obj.get('model_params')) is dict):
                 for p in param_def:
@@ -1723,13 +1760,13 @@ class ISM:
                 model_index, model_id = find_model_id(file=model_file,
                                                       check_id=cur_obj.get('model_id'),
                                                       params=cur_obj.get('model_params'),
-                                                      defaults=param_def['id'])
+                                                      defaults=param_def)
             elif cur_obj.get('model_id'):
 
                 model_index, model_id = find_model_id(file=model_file,
                                                       check_id=cur_obj.get('model_id'),
                                                       params=cur_obj.get('model_params'),
-                                                      defaults=param_def['id'])
+                                                      defaults=param_def)
 
             # if lvmdatasimulator.CLOUDY_MODELS is None or (cur_obj['max_brightness'] <= 0):
             #     cloudy_model_index = None
