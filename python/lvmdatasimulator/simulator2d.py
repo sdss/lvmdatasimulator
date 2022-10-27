@@ -221,8 +221,8 @@ class Simulator2D:
         self.index = index
         self.target_spectra = spectra
 
-    def extract_std_spectra(self, nstd=24, tmin=5500, tmax=8000, dt=500,
-                            gmin=8, gmax=12, dg=0.1):
+    def extract_std_spectra(self, nstd=24, tmin=5500, tmax=7000, dt=250,
+                            gmin=5, gmax=9, dg=0.1):
 
         log.info('Generating standard stars')
         # selecting the temperature of the stars
