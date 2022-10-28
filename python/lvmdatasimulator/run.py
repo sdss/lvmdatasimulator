@@ -251,7 +251,7 @@ def run_simulator_1d(params):
     log.info('Done. Elapsed time: {:0.1f}'.format(time.time()-start))
 
 
-def run_lvm_etc(params, check_lines=None, desired_snr=None, continuum=False, delete=True):
+def run_lvm_etc(params, check_lines=None, desired_snr=None, continuum=False, delete=True, w_lam=1):
     """
         Simple run the simulations in the mode of exposure time calculator.
 
@@ -329,18 +329,34 @@ def run_lvm_etc(params, check_lines=None, desired_snr=None, continuum=False, del
                            name=name)
 
     if nebula is not None:
-        my_lvmfield.add_nebulae([{"type": 'DIG',
-                                  'perturb_scale': 0, 'perturb_amplitude': 0,
-                                  'max_brightness': nebula.get('max_brightness'),
-                                  'model_id': nebula.get('model_id'),
-                                  'model_params': nebula.get('model_params'),
-                                  'model_type': nebula.get('model_type', 'cloudy'),
-                                  'continuum_type': nebula.get('continuum_type'),
-                                  'continuum_data': nebula.get('continuum_data'),
-                                  'continuum_mag': nebula.get('continuum_mag'),
-                                  'continuum_flux': nebula.get('continuum_flux', 0),
-                                  'continuum_wl': nebula.get('continuum_wl', 5500.),
-                                  'offset_X': 0, 'offset_Y': 0}])
+        inp_nebulae = [{"type": 'DIG',
+                        'perturb_scale': 0, 'perturb_amplitude': 0,
+                        'max_brightness': nebula.get('max_brightness'),
+                        'model_id': nebula.get('model_id'),
+                        'model_params': nebula.get('model_params'),
+                        'model_type': nebula.get('model_type', 'cloudy'),
+                        'continuum_type': nebula.get('continuum_type'),
+                        'continuum_data': nebula.get('continuum_data'),
+                        'continuum_mag': nebula.get('continuum_mag'),
+                        'continuum_flux': nebula.get('continuum_flux', 0),
+                        'continuum_wl': nebula.get('continuum_wl', 5500.),
+                        'offset_X': 0, 'offset_Y': 0}]
+
+        if params.get('Av', None) is not None or params.get('ebv', None) is not None:
+            if params.get('ebv', None) is not None:
+                av = params.get('ebv', None) * 3.1 * u.mag
+            else:
+                av = params.get('Av', None) * u.mag
+
+            log.info(f'Adding extinction: A(V) = {av:0.2f}')
+
+            inp_nebulae.append({'type': 'Circle',
+                                'distance': 1 * u.kpc,
+                                'radius': 0.4 * u.pc,
+                                'max_extinction': av,
+                                'zorder': 4, 'offset_X': 0, 'offset_Y': 0})
+        my_lvmfield.add_nebulae(inp_nebulae, save_nebulae='test.fits')
+
     if star is not None:
         my_lvmfield.generate_single_stars(parameters=star)
 
@@ -354,12 +370,13 @@ def run_lvm_etc(params, check_lines=None, desired_snr=None, continuum=False, del
                       exptimes=exptimes,
                       airmass=params.get('airmass', 1.5),
                       days_moon=params.get('days_moon', 0),
-                      sky_template=params.get('sky_template', None))
+                      sky_template=params.get('sky_template', None),
+                      geocoronal=params.get('geocoronal', None))
 
     tel = LVM160()
     spec = LinearSpectrograph()
     bundle = FiberBundle(bundle_name='central')
-    sim = Simulator(my_lvmfield, obs, spec, bundle, tel, fast=True)
+    sim = Simulator(my_lvmfield, obs, spec, bundle, tel, fast=True, aperture=10*u.pix)
 
     if spectrum_name is not None:
         data = ascii.read(spectrum_name)
@@ -379,29 +396,25 @@ def run_lvm_etc(params, check_lines=None, desired_snr=None, continuum=False, del
     outdir = os.path.join(WORK_DIR, params['name'], 'outputs')
 
     snr_output = np.zeros(shape=(len(check_lines), len(exptimes)))
-    w_lam = 2.
     for exp_id, exptime in enumerate(exptimes):
-        outname = os.path.join(outdir, f'{name}_linear_central_{exptime}_flux.fits')
+        outname = os.path.join(outdir, f'{name}_linear_central_{exptime}_no_noise.fits')
         with fits.open(outname) as hdu:
             for l_id, line in enumerate(check_lines):
+                rec_wl = (hdu['WAVE'].data > (line - w_lam)) & (hdu['WAVE'].data < (line + w_lam))
                 if continuum:
-                    snr_output[l_id, exp_id] = np.nanmax(hdu['SNR'].data[0,
-                                                                         (hdu['WAVE'].data > (line - w_lam)) &
-                                                                         (hdu['WAVE'].data < (line + w_lam))])
+                    flux = np.nanmean(hdu['TARGET'].data[0, rec_wl])
                 else:
-                    rec_wl = (hdu['WAVE'].data > (line - w_lam)) & (hdu['WAVE'].data < (line + w_lam))
                     rec_wl_cnt = (hdu['WAVE'].data > (line - w_lam*30)) & (hdu['WAVE'].data < (line + w_lam*30))
                     flux = np.nansum(hdu['TARGET'].data[0, rec_wl] - np.nanmedian(hdu['TARGET'].data[0, rec_wl_cnt]))
                     if flux < 0:
                         flux = 0
-                    snr_output[l_id, exp_id] = flux/np.sqrt(np.nansum(hdu['ERR'].data[0, rec_wl]**2))
-                    # snr_output[l_id, exp_id] = np.nanmax(hdu['SNR'].data[0,
-                    #                                                      (hdu['WAVE'].data > (line - w_lam)) &
-                    #                                                      (hdu['WAVE'].data < (line + w_lam))])
+
+                snr_output[l_id, exp_id] = flux/np.sqrt(np.nansum(hdu['ERR'].data[0, rec_wl]**2))
+
         if delete:
             os.remove(outname)  # remove temporary files
-            os.remove(outname.replace('flux', 'realization'))
-            os.remove(outname.replace('flux', 'no_noise'))
+            os.remove(outname.replace('no_noise', 'realization'))
+            os.remove(outname.replace('no_noise', 'flux'))
 
     if delete:
         os.remove(os.path.join(outdir, f'{name}_linear_central_input.fits'))
@@ -414,28 +427,36 @@ def run_lvm_etc(params, check_lines=None, desired_snr=None, continuum=False, del
     else:
         desired_exptimes = None
 
-    fig, ax = plt.subplots()
-    for l_id, line in enumerate(check_lines):
+    if params.get('exptimes', None) is None:
+        fig, ax = plt.subplots()
+        for l_id, line in enumerate(check_lines):
 
-        ax.scatter(exptimes, snr_output[l_id, :], label=str(line))
+            ax.scatter(exptimes, snr_output[l_id, :], label=str(line))
 
-        res = np.polyfit(np.log10(snr_output[l_id, :]), np.log10(exptimes), 3)
-        p = np.poly1d(res)
-        ax.plot(10**p(np.log10(snr_output[l_id, :])), snr_output[l_id, :])
+            res = np.polyfit(np.log10(snr_output[l_id, :]), np.log10(exptimes), 3)
+            p = np.poly1d(res)
+            ax.plot(10**p(np.log10(snr_output[l_id, :])), snr_output[l_id, :])
 
-        if desired_snr is not None and (len(desired_snr) == len(check_lines)):
+            if desired_snr is not None and (len(desired_snr) == len(check_lines)):
 
-            desired_exptimes.append(np.round(10**p(np.log10(desired_snr[l_id]))).astype(int))
-            print(f'To reach S/N={desired_snr[l_id]} in line = {line}±{w_lam}A we need '
-                  f'{desired_exptimes[-1]}s of single exposure')
+                desired_exptimes.append(np.round(10**p(np.log10(desired_snr[l_id]))).astype(int))
+                print(f'To reach S/N={desired_snr[l_id]} in line = {line}±{w_lam}A we need '
+                    f'{desired_exptimes[-1]}s of single exposure')
 
-    ax.set_xscale('log')
-    ax.set_yscale('log')
+        ax.set_xscale('log')
+        ax.set_yscale('log')
 
-    ax.legend(loc='best')
+        ax.legend(loc='best')
 
-    ax.set_xlabel("Exposure time, s")
-    ax.set_ylabel("Expected S/N ratio")
+        ax.set_xlabel("Exposure time, s")
+        ax.set_ylabel("Expected S/N ratio")
+    else:
+        for exp_id, exptime in enumerate(exptimes):
+            for l_id, line in enumerate(check_lines):
+                print(f'The S/N reached in a {exptime}s exposure in line = {line}±{w_lam}A is '+\
+                      f'{snr_output[l_id, exp_id]:0.2f}')
+
+
 
     plt.show()
     print('\nElapsed time: {:0.1f}s' .format(time.time() - start))
