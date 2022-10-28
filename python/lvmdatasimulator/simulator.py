@@ -1247,6 +1247,75 @@ class Simulator:
 
         self._print_fibers_to_ds9_regions()
 
+    # def save_output_cube(self, wavelength_range, unit_range=u.AA):
+    #     """
+    #     Save 3D cube of the observed field the provided wavelength range.
+    #
+    #     Args:
+    #         wavelength_range (list):
+    #             Wavelength ranges to extract the cube from the simulated data (i.e. [wave0, wave1]).
+    #         unit_range (astropy.unit, optional):
+    #             wavelength units used to define the wavelength ranges. All ranges should be
+    #             defined using the same units. Defaults to u.AA.
+    #     """
+    #
+    #     log.info('Saving the data cube output')
+    #
+    #     # applying the units of measurement and converting to angstrom
+    #
+    #     for branch in self.spectrograph.branches:
+    #         if branch.wavecoord.start < wavelength_range[0] * unit_range and \
+    #                 branch.wavecoord.end > wavelength_range[1] * unit_range:
+    #             for exptime in self.observation.exptimes:
+    #                 ids, target, total, _, _, _ = self._reorganize_to_rss(branch, self.output_calib[exptime])
+    #                 target_out = np.zeros((self.source.npixels, self.source.npixels), dtype=np.float32)
+    #                 total_out = np.zeros((self.source.npixels, self.source.npixels), dtype=np.float32)
+    #
+    #                 wcs = self.source.wcs
+    #                 head = wcs.to_header()
+    #
+    #                 head['MIN_WAVE'] = wavelength_range[0]
+    #                 head['MAX_WAVE'] = wavelength_range[1]
+    #
+    #                 # I'm not interpolating to the exact wavelength
+    #
+    #                 mask1 = branch.wavecoord.wave > wavelength_range[0] * unit_range
+    #                 mask2 = branch.wavecoord.wave < wavelength_range[1] * unit_range
+    #                 mask = np.all([mask1, mask2], axis=0)
+    #
+    #                 dl = branch.wavecoord.step.value
+    #
+    #                 target_val = target[:, mask]
+    #                 total_val = total[:, mask]
+    #
+    #                 # Just the target
+    #                 target_out = self._populate_map(target_out, target_val, ids, wcs)
+    #
+    #                 filename = os.path.join(self.outdir, f"{self.source.name}_{branch.name}_{self.bundle.bundle_name}"\
+    #                         + f"_{int(wavelength_range[0])}_{int(wavelength_range[1])}"
+    #                         + f"_{exptime}s_target_map.fits")
+    #
+    #                 hdu = fits.PrimaryHDU(data=target_out.astype(np.float32), header=head)
+    #
+    #                 hdu.writeto(filename, overwrite=True)
+    #                 log.info(f' Saving {filename}...')
+    #
+    #                 # full spectrum
+    #                 total_out = self._populate_map(total_out, total_val, ids, wcs)
+    #
+    #                 filename = os.path.join(self.outdir,
+    #                     f"{self.source.name}_{branch.name}_{self.bundle.bundle_name}"
+    #                     + f"_{int(wavelength_range[0])}_{int(wavelength_range[1])}"
+    #                     + f"_{exptime}s_total_map.fits")
+    #                 hdu = fits.PrimaryHDU(data=total_out.astype(np.float32), header=head)
+    #
+    #                 hdu.writeto(filename, overwrite=True)
+    #                 log.info(f' Saving {filename}...')
+    #
+    #         else:
+    #             log.warning(f'Selected range out of {branch.name} range.')
+    #
+
     def _print_fibers_to_ds9_regions(self):
 
         outname = os.path.join(self.outdir, f'{self.source.name}_fibers.reg')
