@@ -1,4 +1,5 @@
 import numpy as np
+import astropy.units as u
 
 from lvmdatasimulator.field import LVMField
 from lvmdatasimulator.observation import Observation
@@ -9,11 +10,11 @@ from lvmdatasimulator.fibers import FiberBundle
 from lvmdatasimulator import log, WORK_DIR
 from astropy.io.misc import yaml
 from astropy.io import ascii
-
-import astropy.units as u
-import time
 from astropy.io import fits
 from matplotlib import pyplot as plt
+
+import shutil
+import time
 import os
 
 
@@ -415,17 +416,6 @@ def run_lvm_etc(params, check_lines=None, desired_snr=None, continuum=False, del
 
                 snr_output[l_id, exp_id] = flux/np.sqrt(np.nansum(hdu['ERR'].data[0, rec_wl]**2))
 
-        if delete:
-            os.remove(outname)  # remove temporary files
-            os.remove(outname.replace('no_noise', 'realization'))
-            os.remove(outname.replace('no_noise', 'flux'))
-
-    if delete:
-        os.remove(os.path.join(outdir, f'{name}_linear_central_input.fits'))
-        # remove output directory if empty
-        if len(os.listdir(outdir)) == 0:
-            os.rmdir(outdir)
-
     if desired_snr is not None and (len(desired_snr) == len(check_lines)):
         desired_exptimes = []
     else:
@@ -462,6 +452,12 @@ def run_lvm_etc(params, check_lines=None, desired_snr=None, continuum=False, del
                 print(f'The S/N reached in a {exptime}s exposure in line = {line}±{dlam}A is '+\
                       f'{snr_output[l_id, exp_id]:0.2f}')
 
+
+    if delete:
+        log.info('Deleting output directory')
+        # not sure about what is the best solution
+        # shutil.rmtree(os.path.join(WORK_DIR, params['name']), ignore_errors=True)
+        shutil.rmtree(outdir, ignore_errors=True)
 
     print('\nElapsed time: {:0.1f}s' .format(time.time() - start))
     return desired_exptimes
