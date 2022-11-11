@@ -361,8 +361,7 @@ def run_lvm_etc(params, check_lines=None, desired_snr=None, continuum=False, del
     if star is not None:
         if not continuum:
             log.warning('A star is included in the simulation. The S/N estimate might not be reliable \n'
-                        'if the considered lines sit on top of an absorption lines. \n'
-                        'For a more reliable estimate, but without removing the continuum emission, set "continuum=True".')
+                        'or the ETC could crash if the considered lines sit on top of an absorption lines.')
         my_lvmfield.generate_single_stars(parameters=star)
 
     default_exptimes = list(np.round(np.logspace(np.log10(10), np.log10(90000), 15)).astype(int))
@@ -407,14 +406,16 @@ def run_lvm_etc(params, check_lines=None, desired_snr=None, continuum=False, del
             for l_id, line in enumerate(check_lines):
                 rec_wl = (hdu['WAVE'].data > (line - dlam)) & (hdu['WAVE'].data < (line + dlam))
                 if continuum:
-                    flux = np.nanmean(hdu['TARGET'].data[0, rec_wl])
+                    snr_output[l_id, exp_id] = np.nanmean(hdu['SNR'].data[0,
+                                                            (hdu['WAVE'].data > (line - dlam)) &
+                                                            (hdu['WAVE'].data < (line + dlam))])
                 else:
                     rec_wl_cnt = (hdu['WAVE'].data > (line - dlam*30)) & (hdu['WAVE'].data < (line + dlam*30))
                     flux = np.nansum(hdu['TARGET'].data[0, rec_wl] - np.nanmedian(hdu['TARGET'].data[0, rec_wl_cnt]))
                     if flux < 0:
                         flux = 0
 
-                snr_output[l_id, exp_id] = flux/np.sqrt(np.nansum(hdu['ERR'].data[0, rec_wl]**2))
+                    snr_output[l_id, exp_id] = flux/np.sqrt(np.nansum(hdu['ERR'].data[0, rec_wl]**2))
 
     if desired_snr is not None and (len(desired_snr) == len(check_lines)):
         desired_exptimes = []
@@ -446,6 +447,8 @@ def run_lvm_etc(params, check_lines=None, desired_snr=None, continuum=False, del
 
         ax.set_xlabel("Exposure time, s")
         ax.set_ylabel("Expected S/N ratio")
+
+        plt.show()
     else:
         for exp_id, exptime in enumerate(exptimes):
             for l_id, line in enumerate(check_lines):
