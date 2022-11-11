@@ -355,6 +355,7 @@ def run_lvm_etc(params, check_lines=None, desired_snr=None, continuum=False, del
                                 'distance': 1 * u.kpc,
                                 'radius': 0.4 * u.pc,
                                 'max_extinction': av,
+                                'ext_law': 'CCM89',
                                 'zorder': 4, 'offset_X': 0, 'offset_Y': 0})
         my_lvmfield.add_nebulae(inp_nebulae, save_nebulae='test.fits')
 
@@ -469,6 +470,7 @@ def run_lvm_etc(params, check_lines=None, desired_snr=None, continuum=False, del
             ax[1].axhline(np.log10(3), ls='--', c='orange', label='S/N=3')
 
             ax[0].legend(loc='best')
+            ax[1].legend(loc='best')
 
             ax[0].set_ylabel('Flux (e/pix)')
             ax[1].set_ylabel('S/N')
