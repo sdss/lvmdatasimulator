@@ -452,6 +452,27 @@ def run_lvm_etc(params, check_lines=None, desired_snr=None, continuum=False, del
                 print(f'The S/N reached in a {exptime}s exposure in line = {line}±{dlam}A is '+\
                       f'{snr_output[l_id, exp_id]:0.2f}')
 
+            outname = os.path.join(outdir, f'{name}_linear_central_{exptime}_no_noise.fits')
+            with fits.open(outname) as hdu:
+                wave = hdu['WAVE'].data
+                flux = hdu['TARGET'].data[0]
+                err = hdu['ERR'].data[0]
+                snr = hdu['SNR'].data[0]
+
+            fig, ax = plt.subplots(2, 1, figsize=(12, 6), sharex=True)
+            ax[0].plot(wave, np.log10(flux), c='k', label='Flux')
+            ax[0].plot(wave, np.log10(err), c='r', label='Error')
+            ax[1].plot(wave, np.log10(snr), c='b')
+            ax[1].axhline(np.log10(3), ls='--', c='orange', label='S/N=3')
+
+            ax[0].legend(loc='best')
+
+            ax[0].set_ylabel('Flux (e/pix)')
+            ax[1].set_ylabel('S/N')
+            ax[1].set_xlabel('Wavelength ($\\AA$)')
+            plt.subplots_adjust(hspace=0)
+            plt.show()
+
 
     if delete:
         log.info('Deleting output directory')
