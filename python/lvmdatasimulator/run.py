@@ -251,7 +251,7 @@ def run_simulator_1d(params):
     log.info('Done. Elapsed time: {:0.1f}'.format(time.time()-start))
 
 
-def run_lvm_etc(params, check_lines=None, desired_snr=None, continuum=False, delete=True, w_lam=1):
+def run_lvm_etc(params, check_lines=None, desired_snr=None, continuum=False, delete=True, dlam=1):
     """
         Simple run the simulations in the mode of exposure time calculator.
 
@@ -358,9 +358,13 @@ def run_lvm_etc(params, check_lines=None, desired_snr=None, continuum=False, del
         my_lvmfield.add_nebulae(inp_nebulae, save_nebulae='test.fits')
 
     if star is not None:
+        if not continuum:
+            log.warning('A star is included in the simulation. The S/N estimate might not be reliable \n'
+                        'if the considered lines sit on top of an absorption lines. \n'
+                        'For a more reliable estimate, but without removing the continuum emission, set "continuum=True".')
         my_lvmfield.generate_single_stars(parameters=star)
 
-    default_exptimes = list(np.round(np.logspace(np.log10(300), np.log10(90000), 15)).astype(int))
+    default_exptimes = list(np.round(np.logspace(np.log10(10), np.log10(90000), 15)).astype(int))
     exptimes = params.get('exptimes', default_exptimes)
     obs = Observation(name=name,
                       ra=10,
@@ -400,11 +404,11 @@ def run_lvm_etc(params, check_lines=None, desired_snr=None, continuum=False, del
         outname = os.path.join(outdir, f'{name}_linear_central_{exptime}_no_noise.fits')
         with fits.open(outname) as hdu:
             for l_id, line in enumerate(check_lines):
-                rec_wl = (hdu['WAVE'].data > (line - w_lam)) & (hdu['WAVE'].data < (line + w_lam))
+                rec_wl = (hdu['WAVE'].data > (line - dlam)) & (hdu['WAVE'].data < (line + dlam))
                 if continuum:
                     flux = np.nanmean(hdu['TARGET'].data[0, rec_wl])
                 else:
-                    rec_wl_cnt = (hdu['WAVE'].data > (line - w_lam*30)) & (hdu['WAVE'].data < (line + w_lam*30))
+                    rec_wl_cnt = (hdu['WAVE'].data > (line - dlam*30)) & (hdu['WAVE'].data < (line + dlam*30))
                     flux = np.nansum(hdu['TARGET'].data[0, rec_wl] - np.nanmedian(hdu['TARGET'].data[0, rec_wl_cnt]))
                     if flux < 0:
                         flux = 0
@@ -440,8 +444,10 @@ def run_lvm_etc(params, check_lines=None, desired_snr=None, continuum=False, del
             if desired_snr is not None and (len(desired_snr) == len(check_lines)):
 
                 desired_exptimes.append(np.round(10**p(np.log10(desired_snr[l_id]))).astype(int))
-                print(f'To reach S/N={desired_snr[l_id]} in line = {line}±{w_lam}A we need '
+                print(f'To reach S/N={desired_snr[l_id]} in line = {line}±{dlam}A we need '
                     f'{desired_exptimes[-1]}s of single exposure')
+                ax.scatter(desired_exptimes[-1], desired_snr[l_id], c='r', marker='*',
+                           s=200, zorder=100)
 
         ax.set_xscale('log')
         ax.set_yscale('log')
@@ -453,11 +459,9 @@ def run_lvm_etc(params, check_lines=None, desired_snr=None, continuum=False, del
     else:
         for exp_id, exptime in enumerate(exptimes):
             for l_id, line in enumerate(check_lines):
-                print(f'The S/N reached in a {exptime}s exposure in line = {line}±{w_lam}A is '+\
+                print(f'The S/N reached in a {exptime}s exposure in line = {line}±{dlam}A is '+\
                       f'{snr_output[l_id, exp_id]:0.2f}')
 
 
-
-    plt.show()
     print('\nElapsed time: {:0.1f}s' .format(time.time() - start))
     return desired_exptimes
