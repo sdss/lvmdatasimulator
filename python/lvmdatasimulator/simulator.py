@@ -1084,6 +1084,8 @@ class Simulator:
         primary.header["DAY-MOON"] = (self.observation.days_moon,
                                       "Days from new moon")
 
+        primary.header['SIMUL'] = ('1D', 'Simulator version (1D or 2D)')
+
         return primary
 
     def _flux_calibration(self, fiber_id, exposure, exptime):
