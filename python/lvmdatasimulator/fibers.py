@@ -39,6 +39,8 @@ class Fiber:
             Diameter of the fiber on the sky. Defaults to 35.3 * u.arcsec
         dispersion (astropy.quantity, optional):
             Dispersion caused by the fiber in the spatial direction. Defaults to 3 * u.pix
+        type (str, optional):
+            type of fiber (std, science, sky). Defaults to science.
 
     """
     id: int = 0
@@ -48,6 +50,7 @@ class Fiber:
     y: u.arcsec = 0 * u.arcsec
     diameter: u.arcsec = 35.3 * u.arcsec
     dispersion: u.pix = 3 * u.pix
+    type: str = 'science'
 
     def __post_init__(self):
         self.coords = (self.x, self.y)
@@ -130,11 +133,11 @@ class FiberBundle:
 
         self.angle = angle
 
-        self.fibers, self.fibers_table = self.build_bundle()
+        self.build_bundles()
 
-        self.nfibers = len(self.fibers)
+        self.nfibers = len(self.fibers_science)
 
-    def build_bundle(self):
+    def build_bundles(self):
         """
         Read the database containing the informations on the fibers and setup the bundle to be
         used for the observations.
@@ -144,7 +147,9 @@ class FiberBundle:
                 list of fibers to be simulated.
         """
 
-        fiber_table = self._read_fiber_file()
+        #### create science fiber bundle
+
+        fiber_table = self._read_fiber_file(name='science_array.dat')
         if self.custom_fibers is not None:
             log.info('Using custom list of fibers.')
             selected = [row for row in fiber_table
@@ -188,23 +193,36 @@ class FiberBundle:
             log.info(f'Rotating the bundle to PA = {self.angle} deg.')
             selected = self._rotates(selected)
 
-        fibers = []
+        fibers_science = self._generate_fibers(selected)
 
-        for i, row in enumerate(selected):
-            fibers.append(Fiber(i,
-                                row['ring_id'],
-                                row['fiber_id'],
-                                row['x'] * u.arcsec,
-                                row['y'] * u.arcsec,
-                                row['d'] * u.arcsec,
-                                row['disp'] * u.pix))
+        self.fibers_science = fibers_science
+        self.fibers_table_science = selected
 
-        fibers_table = selected['ring_id', 'fiber_id', 'type'].copy()
+        ### sky fiber bundles
+        fibers_table_sky1 = self._read_fiber_file(name='sky1_array.dat')
+        fibers_table_sky2 = self._read_fiber_file(name='sky2_array.dat')
 
-        return fibers, fibers_table
+        fibers_sky1 = self._generate_fibers(fibers_table_sky1)
+        fibers_sky2 = self._generate_fibers(fibers_table_sky2)
+
+        self.fibers_sky1 = fibers_sky1
+        self.fibers_table_sky1 = fibers_table_sky1
+
+        self.fibers_sky2 = fibers_sky2
+        self.fibers_table_sky2 = fibers_table_sky2
+
+        ### standard fiber bundle
+
+        fibers_table_std = self._read_fiber_file(name='std_array.dat')
+
+        fibers_std = self._generate_fibers(fibers_table_std)
+
+        self.fibers_std = fibers_std
+        self.fibers_table_std = fibers_table_std
+
 
     @staticmethod
-    def _read_fiber_file():
+    def _read_fiber_file(name='science_array.dat'):
         """
         Reads the file containing the information on each fiber and it returns it as an astropy
         table
@@ -214,7 +232,7 @@ class FiberBundle:
                 table containing the informations about each fiber.
         """
 
-        filename = os.path.join(DATA_DIR, 'instrument', 'full_array.dat')
+        filename = os.path.join(DATA_DIR, 'instrument', name)
         table = Table.read(filename, format='ascii.csv')
 
         return table
@@ -245,3 +263,18 @@ class FiberBundle:
         table['y'] = newy
 
         return table
+
+    @staticmethod
+    def _generate_fibers(table):
+
+        out = []
+        for i, row in enumerate(table):
+            out.append(Fiber(i,
+                                row['ring_id'],
+                                row['fiber_id'],
+                                row['x'] * u.arcsec,
+                                row['y'] * u.arcsec,
+                                row['d'] * u.arcsec,
+                                row['disp'] * u.pix,
+                                row['type']))
+        return out

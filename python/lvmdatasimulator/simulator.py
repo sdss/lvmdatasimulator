@@ -215,7 +215,7 @@ class Simulator:
             ha = self.observation.geocoronal
             brightness = set_geocoronal_ha(wave, brightness, ha)
 
-        area_fiber = np.pi * (self.bundle.fibers[0].diameter / 2) ** 2  # all fibers same diam.
+        area_fiber = np.pi * (self.bundle.fibers_science[0].diameter / 2) ** 2  # all fibers same diam.
         flux = brightness * area_fiber.value  # converting to Fluxes from SBrightness
 
         log.info('Resample sky emission to instrument wavelength solution.')
@@ -247,11 +247,11 @@ class Simulator:
 
         if self.fast:
             results = [self._resample_and_convolve_loop((fiber, disp0, resampled_v0, tmp_lam, unit))
-                       for fiber in self.bundle.fibers]
+                       for fiber in self.bundle.fibers_science]
         else:
             with Pool(lvmdatasimulator.n_process) as pool:
                 results = pool.map(self._resample_and_convolve_loop, [(fiber, disp0, resampled_v0,
-                tmp_lam, unit) for fiber in self.bundle.fibers])
+                tmp_lam, unit) for fiber in self.bundle.fibers_science])
 
         out_spec = OrderedDict(results)
 
@@ -286,18 +286,18 @@ class Simulator:
         wl_grid = np.arange(3500, 9910.01, 0.06) * u.AA
 
         log.info(f"Recovering target spectra for {self.bundle.nfibers} fibers.")
-        index, spectra = self.source.extract_spectra(self.bundle.fibers, wl_grid,
+        index, spectra = self.source.extract_spectra(self.bundle.fibers_science, wl_grid,
                                                      obs_coords=self.observation.target_coords)
 
         log.info('Resampling spectra to the instrument wavelength solution.')
 
         if self.fast:
             results = [self._extract_target_spectra((fiber, spectra, index, wl_grid))
-                       for fiber in self.bundle.fibers]
+                       for fiber in self.bundle.fibers_science]
         else:
             with Pool(lvmdatasimulator.n_process) as pool:
                 results = pool.map(self._extract_target_spectra, [(fiber, spectra, index, wl_grid)
-                for fiber in self.bundle.fibers])
+                for fiber in self.bundle.fibers_science])
 
         obj_spec = OrderedDict(results)
 
@@ -390,13 +390,13 @@ class Simulator:
             if self.fast:
                 results = [self._simulate_observations_single_fiber((fiber, self.target_spectra,
                                                                      exptime_unit))
-                        for fiber in self.bundle.fibers]
+                        for fiber in self.bundle.fibers_science]
             else:
                 with Pool(lvmdatasimulator.n_process) as pool:
                     results = pool.map(self._simulate_observations_single_fiber, [(fiber,
                                                                                    self.target_spectra,
                                                                                    exptime_unit)
-                    for fiber in self.bundle.fibers])
+                    for fiber in self.bundle.fibers_science])
 
             # reorganize outputs
             ids = []  # fiber ids
@@ -457,7 +457,7 @@ class Simulator:
 
         out_spectrum = OrderedDict()
 
-        for fiber in self.bundle.fibers:
+        for fiber in self.bundle.fibers_science:
 
             branch_spec = OrderedDict()
             for branch in self.spectrograph.branches:
@@ -493,13 +493,13 @@ class Simulator:
             if self.fast:
                 results = [self._simulate_observations_single_fiber((fiber, self.target_spectra,
                                                                      exptime_unit))
-                        for fiber in self.bundle.fibers]
+                        for fiber in self.bundle.fibers_science]
             else:
                 with Pool(lvmdatasimulator.n_process) as pool:
                     results = pool.map(self._simulate_observations_single_fiber, [(fiber,
                                                                                    self.target_spectra,
                                                                                    exptime_unit)
-                    for fiber in self.bundle.fibers])
+                    for fiber in self.bundle.fibers_science])
 
             # reorganize outputs
             ids = []
@@ -1004,7 +1004,7 @@ class Simulator:
         signal = np.zeros((nfibers, branch.wavecoord.npix), dtype=np.float32)
         sky = np.zeros((nfibers, branch.wavecoord.npix), dtype=np.float32)
 
-        for i, fiber in enumerate(self.bundle.fibers):
+        for i, fiber in enumerate(self.bundle.fibers_science):
             fib_id.append(fiber.to_table())
 
             signal[i, :] = self.target_spectra[fiber.id][branch.name]
@@ -1052,7 +1052,7 @@ class Simulator:
         snr = np.zeros((nfibers, branch.wavecoord.npix), dtype=np.float32)
 
         for i, spectra in enumerate(exposures.values()):
-            fib_id.append(self.bundle.fibers[i].to_table())
+            fib_id.append(self.bundle.fibers_science[i].to_table())
             target[i, :] = spectra["target"][branch.name]
             total[i, :] = spectra["signal"][branch.name]
             noise[i, :] = spectra["noise"][branch.name]
@@ -1227,7 +1227,7 @@ class Simulator:
                   file=f)
             print('image', file=f)
 
-            for fiber in self.bundle.fibers:
+            for fiber in self.bundle.fibers_science:
                 # converting to pixels
                 coord = self.observation.target_coords.spherical_offsets_by(fiber.x, fiber.y)
                 x, y = self.source.wcs.all_world2pix(coord.ra, coord.dec, 1)
@@ -1240,7 +1240,7 @@ class Simulator:
 
         # I'm assuming that all fibers will have the same diameter on the sky
         # For now this is fine, but it might not be ok anymore with the real instrument
-        diameter = np.ceil(self.bundle.fibers[0].diameter / self.source.pxsize).value
+        diameter = np.ceil(self.bundle.fibers_science[0].diameter / self.source.pxsize).value
         if diameter % 2 == 0:
             size = int(diameter) + 3
         else:
@@ -1253,7 +1253,7 @@ class Simulator:
         radius = np.sqrt((xx - center)**2 + (yy - center)**2)
         kernel[radius < diameter / 2] = 1
 
-        for fiber in self.bundle.fibers:
+        for fiber in self.bundle.fibers_science:
             flux = values[ids['id'] == fiber.id]
             fiber_coord = self.source.coord.spherical_offsets_by(fiber.x, fiber.y)
 
