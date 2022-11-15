@@ -259,9 +259,9 @@ class StarsList:
 
         if append and self.spectra is not None:
             log.info('Appending new spectra to existing ones')
-            self._append_spectra(library, shift=False)
+            self._append_spectra(library, shift=shift)
         else:
-            self._associate_spectra(library, shift=False)
+            self._associate_spectra(library, shift=shift)
 
     def _associate_spectra(self, library, shift=False):
         """
