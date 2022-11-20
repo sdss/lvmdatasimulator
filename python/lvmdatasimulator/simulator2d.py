@@ -1,3 +1,10 @@
+# encoding: utf-8
+# @Author: Oleg Egorov, Enrico Congiu
+# @Date: Oct 28, 2022
+# @Filename: simulator2d.py
+# @License: BSD 3-Clause
+# @Copyright: Oleg Egorov, Enrico Congiu
+
 import numpy as np
 import matplotlib.pyplot as plt
 import astropy.units as u
@@ -45,6 +52,7 @@ def reduce_size(spectrum, wave, wave_min, wave_max):
 
 
 def expand_to_full_fiber(input_array, nfibers):
+    """"""
 
     if len(input_array.shape) > 2:
         raise ValueError(f'input_array should be a 1d or 2d array, but it is {len(input_array.shape)}')
@@ -122,10 +130,11 @@ class Simulator2D:
         self.arc = None
 
         # auxiliary definitions
-        self._disp = 0.06 * u.AA/ u.pix
+        self._disp = 0.06 * u.AA / u.pix
         self._wl_grid = np.arange(3500, 9910.01, self._disp.value) * u.AA
         self._area_fiber = np.pi * (self.bundle.fibers[0].diameter / 2) ** 2
         self._fibers_per_spec = int(self.bundle.max_fibers / 3)
+        # TODO: Why /3? This is not necessarily exact (because of the central fiber)
 
 
     def create_flat(self, nexpo=1):
@@ -391,24 +400,25 @@ class Simulator2D:
         n_cr = int(branch.cosmic_rates.value * exptime)
 
         if camera == 'blue':
-            expn='00002998'
-            cam='b1'
+            expn = '00002998'
+            cam = 'b1'
         elif camera == 'red':
-            expn='00001563'
-            cam='r1'
+            expn = '00001563'
+            cam = 'r1'
         elif camera == 'ir':
-            expn='00001563'
-            cam='z1'
+            expn = '00001563'
+            cam = 'z1'
 
-        cube_file = cube_file=f'{DATA_DIR}/lab/sdR-s-{cam}-{expn}.disp.fits'
+        cube_file = f'{DATA_DIR}/lab/sdR-s-{cam}-{expn}.disp.fits'
         wave2d, _ = fits.getdata(cube_file, 0, header=True)
-        wave_s=np.nanmean(wave2d,axis=0)
+        wave_ccd = np.nanmean(wave2d,axis=0)
 
         # this is a good point for parallelization but we need to modify run_2d
         for cam in range(3):
-            twodlvm.run_2d(spectra, fibid=fibid, fibtype=fibtype, ring=ringid,
-                            position=pos, wave_s=wave_s, wave=wave,
-                            nfib=self._fibers_per_spec, type=camera,
+            # TODO I removed fibid as it is always equal to np.arange(spectra.shape[0])
+            twodlvm.run_2d(spectra, fibtype=fibtype, ring=ringid,
+                            position=pos, wave_ccd=wave_ccd, wave=wave,
+                            nfib=self._fibers_per_spec, channel_type=camera,
                             cam=cam+1, n_cr=n_cr, expN=exp_name,
                             expt=self.observation.narcs, ra=0, dec=0, mjd=str(self.observation.mjd),
                             flb=exp_type, base_name='sdR', dir1=self.outdir)

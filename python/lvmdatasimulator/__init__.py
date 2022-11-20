@@ -86,6 +86,9 @@ elif config.get('work_dir').startswith("/") or config.get('work_dir').startswith
 else:
     WORK_DIR = os.path.join(ROOT_DIR, config.get('work_dir'))
 
+# default properties of 2D simulator
+COMMON_SETUP_2D = config.get('sim2d_params')
+
 warnings.filterwarnings('ignore', r'divide by zero encountered in')
 warnings.filterwarnings('ignore', r'invalid value encountered in ')
 

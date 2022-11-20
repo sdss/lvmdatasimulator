@@ -116,6 +116,7 @@ ENV/
 
 # huge data directory
 data/*.fits
+data/instrument/*.fits.gz
 !data/LVM_continuum_models.fits
 !data/LVM_mappings_models.fits
 run/*
