@@ -1005,9 +1005,11 @@ class Bubble(Cloud):
 
 @dataclass
 class Cloud3D(Nebula):
-    """PLACEHOLDER FOR NOW - do not use!
+    """
     Class of an isotropic spherical gas cloud without any ionization source.
-    Defined by its position, radius, density, maximal optical depth"""
+    Defined by its position, radius, density, maximal optical depth.
+    In contrast with the Cloud, this one is much slower, but can take into account the density inhomogeneities
+    """
     radius: u.pc = 1.0 * u.pc
     max_brightness: brtunit = 0 * brtunit  # Maximal surf. brightness in Ha. Ignored if total_flux is present
     total_flux: fluxunit = 0 * fluxunit  # Total flux in Halpha line
@@ -1149,8 +1151,10 @@ class Cloud3D(Nebula):
 
 @dataclass
 class Bubble3D(Cloud3D):
-    """PLACEHOLDER FOR NOW - do not use!
-    Class of an isotropic thin expanding bubble."""
+    """
+    Class of an isotropic thin expanding bubble.
+    In contrast with the Bubble, this one is much slower, but can take into account the density inhomogeneities.
+    """
     spectral_axis: velunit = np.arange(-20, 20, 10) * velunit
     expansion_velocity: velunit = 20 * velunit
     max_brightness: brtunit = 1e-15 * brtunit  # Maximal surf. brightness in Ha. Ignored if total_flux is present
@@ -1260,6 +1264,7 @@ class ISM:
         self.content[0].header['VelRes'] = (self.vel_resolution.value, "Velocity resolution, km/s/px")
         self.content[0].header['TurbSig'] = (self.turbulent_sigma.value, "Default turbulent velocity dispersion, km/s")
         self.content[0].header['Nobj'] = (0, "Number of generated nebulae")
+        self.nebulae_objects = []
 
     @cached_property
     def vel_resolution(self):
@@ -1393,7 +1398,7 @@ class ISM:
         Method to add the particular nebula to the ISM object and to the output multi-extensions fits file
         """
         if type(obj_to_add) not in [Nebula, Bubble, Filament, DIG, Cloud, Galaxy, Ellipse, Circle,
-                                    Rectangle, CustomNebula]:
+                                    Rectangle, CustomNebula,  Bubble3D, Cloud3D]:
             log.warning('Skip nebula of wrong type ({0})'.format(type(obj_to_add)))
             return
 
@@ -1639,7 +1644,7 @@ class ISM:
         all_objects = [cobj for cobj in all_objects if cobj.get('type') in ['Nebula', 'Bubble', 'Galaxy',
                                                                             'Filament', 'DIG', 'Cloud',
                                                                             'Rectangle', 'Circle', 'Ellipse',
-                                                                            'CustomNebula']]
+                                                                            'CustomNebula', 'Bubble3D', 'Cloud3D']]
         n_objects = len(all_objects)
         log.info("Start generating {} nebulae".format(n_objects))
         obj_id = self.content[0].header['Nobj']
@@ -1792,7 +1797,7 @@ class ISM:
             #                                                         params=cur_obj.get('cloudy_params'))
 
             if cur_obj.get('linerat_constant') is None:
-                if cur_obj['type'] in ['Bubble', 'Cloud']:
+                if cur_obj['type'] in ['Bubble', 'Cloud', 'Bubble3D', 'Cloud3D']:
                     cur_obj['linerat_constant'] = False
                 else:
                     cur_obj['linerat_constant'] = True
@@ -1838,10 +1843,11 @@ class ISM:
                 if cur_obj['type'] in ['Rectangle', 'Nebula'] and not (('width' in cur_obj) and ('height' in cur_obj)):
                     log.warning("Wrong set of parameters for the nebula #{0}: skip this one".format(ind_obj))
                     continue
-                if cur_obj['type'] in ["Bubble", "Cloud"] and (model_type == 'mappings'):
+                if cur_obj['type'] in ["Bubble", "Cloud", 'Bubble3D', 'Cloud3D'] and (model_type == 'mappings'):
                     log.warning("Mappings models are not spatially resolved. Setting linerat_constant = True")
                     cur_obj['linerat_constant'] = True
-                if (cur_obj['type'] in ["Bubble", "Cloud", "Ellipse", 'Circle']) and (cur_obj['radius'] == 0):
+                if (cur_obj['type'] in ["Bubble", "Cloud", "Bubble3D", "Cloud3D",
+                                        "Ellipse", 'Circle']) and (cur_obj['radius'] == 0):
                     log.warning("Wrong set of parameters for the nebula #{0}: skip this one".format(ind_obj))
                     continue
                 if cur_obj['type'] == 'Filament' and not (('length' in cur_obj) and ('PA' in cur_obj)):
@@ -1879,10 +1885,10 @@ class ISM:
                     log.warning("Wrong value of thickness of the nebula #{0}: set it to 1.".format(ind_obj))
                     cur_obj['thickness'] = 1.
 
-                if cur_obj['type'] == "Bubble" and cur_obj.get('expansion_velocity') <= 0:
+                if cur_obj['type'] in ["Bubble", "Bubble3D"] and cur_obj.get('expansion_velocity') <= 0:
                     log.warning("Contracting bubbles are not supported (nebula #{0})."
                                 " Use non-expanding cloud instead".format(ind_obj))
-                    cur_obj['type'] = "Cloud"
+                    cur_obj['type'] = cur_obj['type'].replace('Bubble', "Cloud")
 
                 if cur_obj['type'] in ["Bubble3D", "Cloud3D"]:
                     if cur_obj['perturb_degree'] < 0:
@@ -1934,6 +1940,49 @@ class ISM:
                                              linerat_constant=cur_obj['linerat_constant'],
                                              vel_gradient=cur_obj['vel_gradient'],
                                              vel_pa=cur_obj['vel_pa'],
+                                             )
+
+                elif cur_obj['type'] == "Bubble3D":
+                    generated_object = Bubble3D(xc=x, yc=y,
+                                                max_brightness=cur_obj.get('max_brightness'),
+                                                total_flux=cur_obj.get('total_flux'),
+                                                max_extinction=cur_obj.get('max_extinction'),
+                                                spectral_axis=self.vel_grid,
+                                                expansion_velocity=cur_obj.get('expansion_velocity'),
+                                                thickness=cur_obj['thickness'],
+                                                radius=cur_obj['radius'],
+                                                pxscale=self.pxscale * (cur_obj['distance'].to(u.pc) /
+                                                                          self.distance.to(u.pc)),
+                                                angscale=self.pxscale,
+                                                perturb_degree=cur_obj['perturb_degree'],
+                                                perturb_amplitude=cur_obj['perturb_amplitude'],
+                                                turbulent_sigma=cur_obj['turbulent_sigma'],
+                                                sys_velocity=cur_obj['sys_velocity'],
+                                                spectrum_id=model_index,
+                                                spectrum_type=model_type,
+                                                n_brightest_lines=cur_obj['n_brightest_lines'],
+                                                linerat_constant=cur_obj['linerat_constant'],
+                                                )
+                elif cur_obj['type'] == "Cloud3D":
+                    generated_object = Cloud3D(xc=x, yc=y,
+                                               max_brightness=cur_obj.get('max_brightness'),
+                                               total_flux=cur_obj.get('total_flux'),
+                                               max_extinction=cur_obj.get('max_extinction'),
+                                               thickness=cur_obj['thickness'],
+                                               radius=cur_obj['radius'],
+                                               pxscale=self.pxscale * (cur_obj['distance'].to(u.pc) /
+                                                                     self.distance.to(u.pc)),
+                                               angscale=self.pxscale,
+                                               perturb_degree=cur_obj['perturb_degree'],
+                                               perturb_amplitude=cur_obj['perturb_amplitude'],
+                                               spectrum_id=model_index,
+                                               spectrum_type=model_type,
+                                               n_brightest_lines=cur_obj['n_brightest_lines'],
+                                               turbulent_sigma=cur_obj['turbulent_sigma'],
+                                               sys_velocity=cur_obj['sys_velocity'],
+                                               linerat_constant=cur_obj['linerat_constant'],
+                                               vel_gradient=cur_obj['vel_gradient'],
+                                               vel_pa=cur_obj['vel_pa'],
                                              )
 
                 elif cur_obj['type'] == "Filament":
@@ -2109,6 +2158,7 @@ class ISM:
 
             self.add_nebula(generated_object, obj_id=obj_id, zorder=cur_obj.get('zorder'), add_fits_kw=add_fits_kw,
                             continuum=continuum)
+            self.nebulae_objects.append(generated_object)
             obj_id += 1
 
         if (obj_id - obj_id_ini) == 0:
