@@ -32,153 +32,6 @@ from astropy.convolution.kernels import Gaussian2DKernel
 #     exp_time: u.s = 900 * u.s  # Exposure time
 
 
-def id_str(id, n_z=2):
-    id = int(np.float_(id))
-    if n_z < 2 or n_z > 11:
-        n_z = 2
-    if n_z == 2:
-        if id < 10:
-            idt = '0' + str(id)
-        else:
-            idt = str(id)
-    elif n_z == 3:
-        if id < 10:
-            idt = '00' + str(id)
-        elif id < 100:
-            idt = '0' + str(id)
-        else:
-            idt = str(id)
-    elif n_z == 4:
-        if id < 10:
-            idt = '000' + str(id)
-        elif id < 100:
-            idt = '00' + str(id)
-        elif id < 1000:
-            idt = '0' + str(id)
-        else:
-            idt = str(id)
-    elif n_z == 5:
-        if id < 10:
-            idt = '0000' + str(id)
-        elif id < 100:
-            idt = '000' + str(id)
-        elif id < 1000:
-            idt = '00' + str(id)
-        elif id < 10000:
-            idt = '0' + str(id)
-        else:
-            idt = str(id)
-    elif n_z == 6:
-        if id < 10:
-            idt = '00000' + str(id)
-        elif id < 100:
-            idt = '0000' + str(id)
-        elif id < 1000:
-            idt = '000' + str(id)
-        elif id < 10000:
-            idt = '00' + str(id)
-        elif id < 100000:
-            idt = '0' + str(id)
-        else:
-            idt = str(id)
-    elif n_z == 7:
-        if id < 10:
-            idt = '000000' + str(id)
-        elif id < 100:
-            idt = '00000' + str(id)
-        elif id < 1000:
-            idt = '0000' + str(id)
-        elif id < 10000:
-            idt = '000' + str(id)
-        elif id < 100000:
-            idt = '00' + str(id)
-        elif id < 1000000:
-            idt = '0' + str(id)
-        else:
-            idt = str(id)
-    elif n_z == 8:
-        if id < 10:
-            idt = '0000000' + str(id)
-        elif id < 100:
-            idt = '000000' + str(id)
-        elif id < 1000:
-            idt = '00000' + str(id)
-        elif id < 10000:
-            idt = '0000' + str(id)
-        elif id < 100000:
-            idt = '000' + str(id)
-        elif id < 1000000:
-            idt = '00' + str(id)
-        elif id < 10000000:
-            idt = '0' + str(id)
-        else:
-            idt = str(id)
-    elif n_z == 9:
-        if id < 10:
-            idt = '00000000' + str(id)
-        elif id < 100:
-            idt = '0000000' + str(id)
-        elif id < 1000:
-            idt = '000000' + str(id)
-        elif id < 10000:
-            idt = '00000' + str(id)
-        elif id < 100000:
-            idt = '0000' + str(id)
-        elif id < 1000000:
-            idt = '000' + str(id)
-        elif id < 10000000:
-            idt = '00' + str(id)
-        elif id < 100000000:
-            idt = '0' + str(id)
-        else:
-            idt = str(id)
-    elif n_z == 10:
-        if id < 10:
-            idt = '000000000' + str(id)
-        elif id < 100:
-            idt = '00000000' + str(id)
-        elif id < 1000:
-            idt = '0000000' + str(id)
-        elif id < 10000:
-            idt = '000000' + str(id)
-        elif id < 100000:
-            idt = '00000' + str(id)
-        elif id < 1000000:
-            idt = '0000' + str(id)
-        elif id < 10000000:
-            idt = '000' + str(id)
-        elif id < 100000000:
-            idt = '00' + str(id)
-        elif id < 1000000000:
-            idt = '0' + str(id)
-        else:
-            idt = str(id)
-    elif n_z == 11:
-        if id < 10:
-            idt = '0000000000' + str(id)
-        elif id < 100:
-            idt = '000000000' + str(id)
-        elif id < 1000:
-            idt = '00000000' + str(id)
-        elif id < 10000:
-            idt = '0000000' + str(id)
-        elif id < 100000:
-            idt = '000000' + str(id)
-        elif id < 1000000:
-            idt = '00000' + str(id)
-        elif id < 10000000:
-            idt = '0000' + str(id)
-        elif id < 100000000:
-            idt = '000' + str(id)
-        elif id < 1000000000:
-            idt = '00' + str(id)
-        elif id < 10000000000:
-            idt = '0' + str(id)
-        else:
-            idt = str(id)
-    return idt
-
-
 def cosmic_rays(ccdimage, n_cr=100, std_cr=5, deep=10.0, cr_intensity=1e5):
     """
     Add traces by cosmic rays hits to CCD image
@@ -240,10 +93,9 @@ def read_op_fib(cart, cam):
             data1 = dat[0].split(' ')
             data1 = list(filter(None, data1))
             if len(data1) > 2:
-                car = np.floor(data1[1]).astype(int)
+                car = int(data1[1])
                 lap = data1[2]
-
-                if (car != cart) or (cam != lap):
+                if (car == cart) or (cam == lap):
                     data2 = dat[1].replace('}', '').split(' ')
                     data2 = filter(None, data2)
                     space = np.array([np.float(val) for val in data2])
@@ -255,23 +107,23 @@ def read_op_fib(cart, cam):
     return space, bspa
 
 
-def raw_data_header(h, plate, mjd, exp, typ, flb='science', ra=0.0, dec=0.0, azim=180.0, alt=90.0, expt=900.0,
-                    expof=0.0, bzero=32768):
+def raw_data_header(h, field_name, mjd, exp_name, typ, flb='science', ra=0.0, dec=0.0, azim=180.0, alt=90.0,
+                    exp_time=900.0, expof=0.0, bzero=32768):
     if flb == 'science':
         flab = 'science '
     elif flb == 'arc':
         flab = 'arc     '
-        expt = 4.0
+        # expt = 4.0
     elif flb == 'flat':
         flab = 'flat    '
-        expt = 25.0
+        # expt = 25.0
     elif flb == 'bias':
         flab = 'bias    '
         expt = 0
     h["TELESCOP"] = 'SDSS 2-5m'
-    h["FILENAME"] = 'sdR-' + typ + '-' + id_str(exp, n_z=8) + '.fit'
+    h["FILENAME"] = 'sdR-' + typ + '-' + f"{exp_name:08}" + '.fits'
     h["CAMERAS"] = typ + '      '
-    h["EXPOSURE"] = exp
+    h["EXPOSURE"] = exp_name
     h["V_BOSS"] = ('v4_0    ', 'Active version of the BOSS ICC')
     h["CAMDAQ"] = '1.5.0:37'
     h["SUBFRAME"] = ('', 'the subframe readout command')
@@ -288,8 +140,8 @@ def raw_data_header(h, plate, mjd, exp, typ, flb='science', ra=0.0, dec=0.0, azi
     h["DATE-OBS"] = ('2012-03-20T06:00:00', 'TAI date at start of integration')
     h["V_GUIDER"] = ('v3_4    ', 'version of the current guiderActor')
     h["V_SOP"] = ('v3_8_1  ', 'version of the current sopActor')
-    h["NAME"] = (plate + '-' + mjd + '-01', 'The name of the currently loaded plate')
-    h["CONFIID"] = (plate, 'The currently FPS configuration')
+    h["NAME"] = (field_name + '-' + mjd + '-01', 'The name of the currently loaded plate')
+    h["CONFIID"] = (field_name, 'The currently FPS configuration')
     h["CARTID"] = (16, 'The currently loaded cartridge')
     h["MAPID"] = (1, 'The mapping version of the loaded plate')
     h["POINTING"] = ('A       ', 'The currently specified pointing')
@@ -388,11 +240,11 @@ def raw_data_header(h, plate, mjd, exp, typ, flb='science', ra=0.0, dec=0.0, azi
         h["MC2TRCT"] = (6.9, 'sp1 mech Red Cam Top Temp, C')
         h["MC2TBCB"] = (7.1, 'sp1 mech Blue Cam Bottom Temp, C')
         h["MC2TBCT"] = (7.2, 'sp1 mech Blue Cam Top Temp, C')
-    h["REQTIME"] = (expt, 'requested exposure time')
-    h["EXPTIME"] = (expt + 0.14, 'measured exposure time, s')
+    h["REQTIME"] = (exp_time, 'requested exposure time')
+    h["EXPTIME"] = (exp_time + 0.14, 'measured exposure time, s')
     h["SHOPETIM"] = (0.6899999999999999, 'open shutter transit time, s')
     h["SHCLOTIM"] = (0.63, 'close shutter transit time, s')
-    h["DARKTIME"] = (expt + 9.4519929885864, 'time between flush end and readout start')
+    h["DARKTIME"] = (exp_time + 9.4519929885864, 'time between flush end and readout start')
     h["LN2TEMP"] = 81.64100000000001
     h["CCDTEMP"] = -133.984
     h["IONPUMP"] = -6.17
@@ -403,34 +255,36 @@ def raw_data_header(h, plate, mjd, exp, typ, flb='science', ra=0.0, dec=0.0, azi
     return h
 
 
-def cre_raw_exp(spec, fibtype, ring, position, base_name, wave_ccd, wave, fc=[1.0, 1.0],
-                n_cr=130, d_cr=5, channel_type="blue", cam=1, dir1='./', nfib=600, mjd='00000', plate='0000',
-                exp=0, flb='s', expt=900.0, ra0=0.0, dec0=0.0, expof=0.0, add_cr_hits=True):
+def cre_raw_exp(input_spectrum, fibtype, ring, position, wave_ccd, wave, nfib=600, flb='s',
+                channel_type="blue", cam=1, ccd_noise_factor=1.0, n_cr=130, std_cr=5,
+                mjd='45223', field_name='00000', exp_name='0', exp_time=900.0, ra=0.0,
+                dec=0.0, expof=0.0, add_cr_hits=True):
+
     """
     Creates the Raw 2D LVM exposure from the provided spectrum
     Args:
-        spec: Oversampled 2D spectrum, where each row corresponds to the spectra in one fiber
-        fibtype:
-        ring:
-        position:
-        base_name:
+        input_spectrum: Oversampled 2D spectrum, where each row corresponds to the spectra in one fiber
+        fibtype: Array containing the information about type (science/standard/sky)
+                of each fiber presented in input_spectrum
+        ring: Array containing the information about the ring number for each fiber presented in input_spectrum
+        position: Array containing the information about the number
+                of each fiber in corresponding ring presented in input_spectrum
         wave_ccd: Wavelength grid for the output spectrum on CCD
         wave: Wavelength grid for the simulated oversampled spectrum
-        fc:
-        n_cr:
-        d_cr:
-        channel_type:
-        cam:
-        dir1:
-        nfib: Number of fibers projected onto CCD
-        mjd:
-        plate:
-        exp:
-        flb:
-        expt:
-        ra0:
-        dec0:
-        expof:
+        ccd_noise_factor: Coefficient to be used for modification of the default CCD noise
+        n_cr: Approximate number of CR hits for current exposure
+        std_cr: Dispersion for n_cr to randomize it
+        channel_type: Type of the current channel of spectrograph (blue, red or ir)
+        cam: ID of the camera
+        nfib: Number of fibers projected for current camera CCD
+        flb: types of the exposures (???)
+        mjd: Date of the observation (???)
+        field_name: Name of the observed field (plate) (???)
+        exp_name: Name of exposure (???)
+        exp_time: exposure time
+        ra: RA of the pointing
+        dec: DEC of the pointing
+        expof: ???
         add_cr_hits: add or not CR hits
 
     Returns: Tuple of 2 HDUs containing projected spectrum+header and associated bias+header
@@ -438,19 +292,19 @@ def cre_raw_exp(spec, fibtype, ring, position, base_name, wave_ccd, wave, fc=[1.
     """
     if channel_type not in ['blue', 'red', 'ir']:
         log.error(f"Unrecognized type of the spectral channel: {channel_type}")
-        return
+        return None
 
     try:
-        ccd_props = ascii.read(os.path.join(DATA_DIR, 'instrument', 'fibers', f"{config_2d['ccd_properties']}"))
+        ccd_props = ascii.read(os.path.join(DATA_DIR, 'instrument', f"{config_2d['ccd_properties']}"))
     except FileNotFoundError:
         log.error(f"File defining the CCD properties is not found! 2D simulations cannot be performed further")
-        return
-    ccd_props = ccd_props[ccd_props['channel'] == channel_type]
+        return None
+    ccd_props = ccd_props[ccd_props['channel'] == channel_type][0]
     channel_index = {'blue': 'b', 'red': 'r', 'ir': 'z'}
     ccd_size = [ccd_props['nx'], ccd_props['ny']]
     cam = str(int(cam))
-    output_data = np.zeros([ccd_size[1], ccd_size[0]])
-    output_bias = np.zeros([ccd_size[1], ccd_size[0]])
+    output_data = np.zeros(shape=(ccd_size[1], ccd_size[0]))
+    output_bias = np.zeros(shape=(ccd_size[1], ccd_size[0]))
 
     # TODO: what is let? What is in the opFiber.par file? Relative sizes and offsets for fibers in each bundle?
     let = 800
@@ -487,18 +341,18 @@ def cre_raw_exp(spec, fibtype, ring, position, base_name, wave_ccd, wave, fc=[1.
     # TODO: what to do with the differences of lambda along the y axis?
     pix_grid_input_on_ccd = interp1d(wave_ccd, np.arange(len(wave_ccd)), bounds_error=False, fill_value=-10)(wave)
 
-    dt = config_2d['null_fiber_offset'].astype(float) + bunds1[0]
+    dt = float(config_2d['null_fiber_offset']) + bunds1[0]
     for cur_fiber_num in range(nfib):
-        # TODO: obviously, this define the curvature of the spectra. But how this is parametrized?
+        # TODO: obviously, this define the curvature of the spectra. But how is this parametrized?
         #  What do the values mean?
         r = let * 2.7
         then = np.arcsin((cur_fiber_num - (nfib / 2.)) / r)
         dr = np.cos(then) * r - let * 2.3
         dx = np.round(dr).astype(int)  # TODO we should get rid of int values here!
         if fib_id_in_ring[cur_fiber_num] >= 0:
-            spec_cur_fiber = spec[fib_id_in_ring[cur_fiber_num], :]
+            spec_cur_fiber = input_spectrum[fib_id_in_ring[cur_fiber_num], :]
         else:
-            spec_cur_fiber = np.zeros_like(spec[0, :])
+            spec_cur_fiber = np.zeros_like(input_spectrum[0, :])
         nx = len(spec_cur_fiber)
         ind_in_block = cur_fiber_num % config_2d['nfib_per_block']
         id_of_block = np.floor(cur_fiber_num / config_2d['nfib_per_block']).astype(int)
@@ -556,7 +410,7 @@ def cre_raw_exp(spec, fibtype, ring, position, base_name, wave_ccd, wave, fc=[1.
                                                                   dx + x1 - dtt:dx + x2 + dtt]
         # TODO: x and y used to be swapped
 
-    sig = fc[0] * ccd_props['noise']
+    sig = ccd_noise_factor * ccd_props['noise']
     sector_map = {'1': ['x0', 'x1', 'y0', 'y1'],
                   '2': ['x2', 'x3', 'y0', 'y1'],
                   '3': ['x0', 'x1', 'y2', 'y3'],
@@ -580,33 +434,33 @@ def cre_raw_exp(spec, fibtype, ring, position, base_name, wave_ccd, wave, fc=[1.
     # output_bias=output_bias.T
 
     if add_cr_hits:
-        output_data = cosmic_rays(output_data, n_cr=n_cr)
+        output_data = cosmic_rays(output_data, n_cr=n_cr, std_cr=std_cr)
 
-    output_hdus = (ccdspec_to_hdu(output_data, plate, mjd, exp, channel_index[channel_type],
-                                  flb=flb, expt=expt, ra0=ra0, dec0=dec0, expof=expof,
+    output_hdus = (ccdspec_to_hdu(output_data, field_name, mjd, exp_name, channel_index[channel_type],
+                                  flb=flb, exp_time=exp_time, ra=ra, dec=dec, expof=expof,
                                   bzero=ccd_props['saturation'] + 1),
-                   ccdspec_to_hdu(output_bias, plate, mjd, exp, channel_index[channel_type],
-                                  flb='bias', expt=expt, expof=expof,
+                   ccdspec_to_hdu(output_bias, field_name, mjd, exp_name, channel_index[channel_type],
+                                  flb='bias', exp_time=0, expof=expof,
                                   bzero=ccd_props['saturation'] + 1),
                    )
 
     return output_hdus
 
 
-def ccdspec_to_hdu(data, plate, mjd, exp, channel=None, flb='science', expt=0., ra0=None, dec0=None,
+def ccdspec_to_hdu(data, field_name, mjd, exp_name, channel=None, flb='science', exp_time=0., ra=None, dec=None,
                    expof=None, bzero=32768):
     """
     Saturate the output array and convert it to the fits format with a proper fits header
     Args:
         data: numpy array containing the reprojected spectrum (or bias)
-        plate:
-        mjd:
-        exp:
+        field_name: Name of the observed field (plate)
+        mjd: Date of the observations (???)
+        exp_name: name of exposure (???)
         channel: index corresponding to the channel of spectrograph (b, r, or z)
         flb: type of exposure
-        expt:
-        ra0:
-        dec0:
+        exp_time: Exposure time
+        ra: RA of the pointing
+        dec: Dec of the pointing
         expof:
         bzero: bzero level in fits file (corresponds to saturation level + 1)
 
@@ -620,17 +474,9 @@ def ccdspec_to_hdu(data, plate, mjd, exp, channel=None, flb='science', expt=0., 
     hdu.header["NAXIS"] = 2
     hdu.header["NAXIS1"] = data.shape[1]
     hdu.header["NAXIS2"] = data.shape[0]
-    hdu.header = raw_data_header(hdu.header, plate, mjd, exp, channel, flb=flb,
-                                 expt=expt, ra=ra0, dec=dec0, expof=expof, bzero=bzero)
+    hdu.header = raw_data_header(hdu.header, field_name, mjd, exp_name, channel, flb=flb,
+                                 exp_time=exp_time, ra=ra, dec=dec, expof=expof, bzero=bzero)
     hlist = fits.HDUList([hdu])
     hlist.update_extend()
     return hlist
 
-
-def run_2d(blu_sp1, fibid, fibtype, ring, position, wave_s, wave, base_name='test', dir1='', nfib=648,
-           flb='s', channel_type="blue", n_cr=150, cam=1, exp_num=0, expt=900, ra=0, dec=0,
-           mjd='45223', field_name='00000'):
-    expof = 0
-    cre_raw_exp(blu_sp1, fibid, fibtype, ring, position, base_name, wave_s, wave, fc=[0.88, 0.94],
-                cam=cam, nfib=nfib, channel_type=channel_type, flb=flb, dir1=dir1, n_cr=n_cr, mjd=mjd, plate=field_name,
-                exp=exp_num, expt=expt, ra0=ra, dec0=dec, expof=expof, add_cr_hits=n_cr > 0)

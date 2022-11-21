@@ -32,9 +32,7 @@ from lvmdatasimulator.utils import round_up_to_odd, set_geocoronal_ha, open_sky_
 from joblib import Parallel, delayed
 
 import os
-import sys
-import imp
-twodlvm = imp.load_source('2d_LVM', f'{DATA_DIR}/../../LVM_2D/2d_projection.py')
+from lvmdatasimulator.projection2d import cre_raw_exp
 
 
 def reduce_size(spectrum, wave, wave_min, wave_max):
@@ -242,7 +240,6 @@ class Simulator2D:
         g_aval = np.arange(gmin, gmax+dg, dg)
         g_sel = np.random.choice(g_aval, nstd)
 
-
         # generate the star list
         stars = StarsList()
         for T, g in zip(T_sel, g_sel):
@@ -270,7 +267,7 @@ class Simulator2D:
         atmosphere = self.observation.airmass * extinction
         spectra *= 10 ** (-0.4 * (atmosphere))
 
-        #simulating sky
+        # simulating sky
         self.extract_sky()
         sky_e = flam2epp(self._wl_grid, self.sky, self._disp) * u.electron
         sky_fiber = sky_e * self.telescope.aperture_area
@@ -297,13 +294,12 @@ class Simulator2D:
         standards *= self.telescope.aperture_area
         extinction = expand_to_full_fiber(self.extinction, len(standards))
         atmosphere = self.observation.airmass * extinction
-        standards *= 10 ** (-0.4 * (atmosphere))
+        standards *= 10 ** (-0.4 * atmosphere)
 
         sky_std = expand_to_full_fiber(sky_fiber, len(standards))
 
         standards += sky_std
         self._project_2d(self.total_spectra, sky_projection, standards)
-
 
     def _project_2d(self, science, sky, std):
 
@@ -347,7 +343,7 @@ class Simulator2D:
 
                     spectra_final = np.vstack([sci_corr, sky_corr, std_corr])
 
-                    self._to_camera(spectra=spectra_final, wave=new_wave[name], fibid=fibid,
+                    self._to_camera(spectra=spectra_final, wave=new_wave[name],
                                     fibtype=fibtype, ringid=ringid, pos=pos, exptime=time,
                                     camera=name, exp_type='science', branch=branch,
                                     exp_name=expname)
@@ -359,7 +355,7 @@ class Simulator2D:
         # per telescope area
         calib = data * self._area_fiber.value
 
-        # for now the calibrations are independent from the position of the fibers in the field
+        # for now the calibrations are independent of the position of the fibers in the field
         # THIS WILL CHANGE IN THE FUTURE.
 
         ringid, pos, fibtype, fibid = get_fibers_table(science=None)
@@ -380,6 +376,9 @@ class Simulator2D:
                     exp_name = str(10000+(i*j)+j+1)
                 elif calib_name == 'flat':
                     exp_name = str(1000+(i*j)+j+1)
+                else:
+                    log.error(f"Unrecognized calibration name is detected: {calib_name}")
+                    return
 
                 log.info(f'Saving {calib_name} exposures with exptime {time}s')
                 for branch in self.spectrograph.branches:
@@ -389,12 +388,12 @@ class Simulator2D:
                     calib_final = expand_to_full_fiber(calib, self.bundle.max_fibers)
                     # calib_final = calib_final.T
 
-                    self._to_camera(spectra=calib_final, wave=new_wave[name], fibid=fibid,
+                    self._to_camera(spectra=calib_final, wave=new_wave[name],
                                     fibtype=fibtype, ringid=ringid, pos=pos, exptime=time,
                                     camera=name, exp_type=calib_name, branch=branch,
                                     exp_name=exp_name)
 
-    def _to_camera(self, spectra, wave, fibid, fibtype, ringid, pos, exptime, camera, exp_type,
+    def _to_camera(self, spectra, wave, fibtype, ringid, pos, exptime, camera, exp_type,
                    branch, exp_name):
 
         n_cr = int(branch.cosmic_rates.value * exptime)
@@ -408,18 +407,31 @@ class Simulator2D:
         elif camera == 'ir':
             expn = '00001563'
             cam = 'z1'
-
-        cube_file = f'{DATA_DIR}/lab/sdR-s-{cam}-{expn}.disp.fits'
+        else:
+            log.error(f"Unrecognized spectrograph branch: {camera}")
+            return
+        cube_file = f'{DATA_DIR}/instrument/sdR-s-{cam}-{expn}.disp.fits'
         wave2d, _ = fits.getdata(cube_file, 0, header=True)
-        wave_ccd = np.nanmean(wave2d,axis=0)
+        wave_ccd = np.nanmean(wave2d, axis=0)
 
         # this is a good point for parallelization but we need to modify run_2d
+        channel_index = {'blue': 'b', 'red': 'r', 'ir': 'z'}
         for cam in range(3):
-            # TODO I removed fibid as it is always equal to np.arange(spectra.shape[0])
-            twodlvm.run_2d(spectra, fibtype=fibtype, ring=ringid,
-                            position=pos, wave_ccd=wave_ccd, wave=wave,
-                            nfib=self._fibers_per_spec, channel_type=camera,
-                            cam=cam+1, n_cr=n_cr, expN=exp_name,
-                            expt=self.observation.narcs, ra=0, dec=0, mjd=str(self.observation.mjd),
-                            flb=exp_type, base_name='sdR', dir1=self.outdir)
+            projected_spectra = cre_raw_exp(spectra, fibtype=fibtype, ring=ringid,
+                                            position=pos, wave_ccd=wave_ccd, wave=wave,
+                                            nfib=self._fibers_per_spec, channel_type=camera,
+                                            cam=cam+1, n_cr=n_cr, exp_name=exp_name,
+                                            exp_time=exptime,  # self.observation.narcs,
+                                            ra=self.observation.ra, dec=self.observation.dec,
+                                            mjd=str(self.observation.mjd),
+                                            flb=exp_type, add_cr_hits=n_cr > 0)
+            if projected_spectra is not None:
+                fileout_data = os.path.join(self.outdir, 'sdR-' + channel_index[camera] + '-' + f"{exp_name:08}" + '.fits')
+                fileout_bias = os.path.join(self.outdir,
+                                            'sdR-' + channel_index[camera] + '-' + f"{exp_name:08}" + '_bias.fits')
+                projected_spectra[0].writeto(fileout_data, overwrite=True)
+                projected_spectra[1].writeto(fileout_bias, overwrite=True)
+                log.info(f"Done for camera #{cam+1} and {camera} branch")
+            else:
+                log.error(f"Something went wrong for #{cam + 1} and {camera} branch")
 
