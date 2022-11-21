@@ -306,8 +306,7 @@ def cre_raw_exp(input_spectrum, fibtype, ring, position, wave_ccd, wave, nfib=60
     output_data = np.zeros(shape=(ccd_size[1], ccd_size[0]))
     output_bias = np.zeros(shape=(ccd_size[1], ccd_size[0]))
 
-    # TODO: what is let? What is in the opFiber.par file? Relative sizes and offsets for fibers in each bundle?
-    let = 800
+    # TODO: What is in the opFiber.par file? Relative sizes and offsets for fibers in each bundle?
     fibs1, bunds1 = read_op_fib(1, channel_index[channel_type] + cam)
     try:
         focus = fits.getdata(os.path.join(DATA_DIR, 'instrument',
@@ -345,6 +344,7 @@ def cre_raw_exp(input_spectrum, fibtype, ring, position, wave_ccd, wave, nfib=60
     for cur_fiber_num in range(nfib):
         # TODO: obviously, this define the curvature of the spectra. But how is this parametrized?
         #  What do the values mean?
+        let = 800
         r = let * 2.7
         then = np.arcsin((cur_fiber_num - (nfib / 2.)) / r)
         dr = np.cos(then) * r - let * 2.3
@@ -364,7 +364,7 @@ def cre_raw_exp(input_spectrum, fibtype, ring, position, wave_ccd, wave, nfib=60
 
         dy = int(dt)  # TODO we should get rid of int values here?
         off = dy - dt
-        dc = 10.0  # TODO What is this? Offset (overscan)?
+        dc = 10.0  # TODO What is this? Half size of the fiber along the spatial axis?
         dtt = int(dc)
         nxt = int(dc * 2 + 1)
         nyt = int(dc * 2 + 1)
@@ -387,7 +387,6 @@ def cre_raw_exp(input_spectrum, fibtype, ring, position, wave_ccd, wave, nfib=60
                 ds_y = np.array([np.ones(nyt) * focus[1, xo, yo]] * nxt).T
                 rho = np.array([np.ones(nyt) * focus[2, xo, yo]] * nxt).T
                 Att = np.array([np.ones(nyt) * spec_cur_fiber[j]] * nxt).T
-                # TODO: I don't understand all this. Is spec_ttt a kind of kernel?
                 spec_ttt = np.exp(-0.5 / (1 - rho ** 2) * (
                             (x_t / ds_x) ** 2.0 + (y_t / ds_y) ** 2.0 - 2 * rho * (y_t / ds_y) * (x_t / ds_x))) / (
                                    2 * np.pi * ds_x * ds_y * np.sqrt(1 - rho ** 2)) * Att
