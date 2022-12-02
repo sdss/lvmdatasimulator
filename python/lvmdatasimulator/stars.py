@@ -121,7 +121,7 @@ class StarsList:
     def __len__(self):
         return len(self.stars_table)
 
-    def add_star(self, ra, dec, gmag, teff, ag, v, check=True):
+    def add_star(self, ra, dec, gmag, teff, ag, v, standard=False):
         """
         Manually add a single star to the list.
 
@@ -149,7 +149,7 @@ class StarsList:
 
         # check if the star is within the simulated FOV
 
-        if check:
+        if not standard:
             self._check_inside(ra, dec)
 
         new_row = {'star_id': len(self.stars_table) + 1,
@@ -162,10 +162,14 @@ class StarsList:
                    'gaia': False,
                    'source_id': 0,
                    }
-
-        log.info('star {} with Teff {}, Gmag {} and velocity {} added at position ({} , {})'
-                 .format(new_row['star_id'], new_row['teff_val'], new_row['phot_g_mean_mag'],
-                         new_row['radial_velocity'], new_row['ra'], new_row['dec']))
+        if standard:
+            log.info('Standard star {} with Teff {}, Gmag {:0.2f} added.'
+                    .format(new_row['star_id'], new_row['teff_val'], new_row['phot_g_mean_mag'],
+                            new_row['radial_velocity'], new_row['ra'], new_row['dec']))
+        else:
+            log.info('star {} with Teff {}, Gmag {:0.2f} and velocity {} added at position ({} , {})'
+                    .format(new_row['star_id'], new_row['teff_val'], new_row['phot_g_mean_mag'],
+                            new_row['radial_velocity'], new_row['ra'], new_row['dec']))
 
         self.stars_table.add_row(new_row)
 
