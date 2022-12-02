@@ -21,7 +21,9 @@ from shapely.geometry import Point, Polygon, box
 from pyneb import RedCorr
 from lvmdatasimulator import log
 from sympy import divisors
-from scipy.interpolate import RectBivariateSpline
+from scipy.interpolate import RectBivariateSpline, interp1d
+from spectres import spectres
+from astropy.convolution import Gaussian1DKernel, convolve
 
 
 # unit conversions
@@ -517,7 +519,100 @@ def open_sky_file(filename=None, days_moon=None, telescope_name='LVM160'):
     return wave, flux
 
 
+@dataclass(frozen=True)
+class Constants:
+    h: u.erg * u.s = 6.6260755e-27 * u.erg * u.s  # Planck's constant in [erg*s]
+    c: u.AA * u.s = 2.99792458e18 * u.AA / u.s  # Speed of light in [A/s]
 
+
+def flam2epp(lam, flam, ddisp):
+    """
+    Convert flux density [erg/s/cm2/A] to photons per pixel [photons/s/cm2/pixel]
+
+    Args:
+        lam (array-like):
+            wavelength array associated to the spectrum
+        flam (array-like):
+            spectrum in units of erg/s/cm2/A
+        ddisp (float):
+            the pixel scale in A/pixel
+
+    Returns:
+        array-like:
+            spectrum converted to photons/s/cm2/pixel
+    """
+
+    return flam * lam * ddisp / (Constants.h * Constants.c)
+
+
+def epp2flam(lam, fe, ddisp):
+    """
+    Convert photons per pixel [photons/s/cm2/pixel] to flux density [erg/s/cm2/A]
+
+    Args:
+        lam (array):
+            wavelenght axis
+        fe (array):
+            spectrum in photons/s/cm2/pixel
+        ddisp (float):
+            dispersion in A/pix
+
+
+    Returns:
+        array:
+            spectrum in erg/s/cm2/A
+    """
+
+    return fe * Constants.h * Constants.c / (lam * ddisp)
+
+
+def resample_spectrum(new_wave, old_wave, flux, fast=True):
+    """
+    Resample spectrum to a new wavelength grid using the spectres package.
+
+    Args:
+        new_wave (array-like):
+            new wavelength axis.
+        old_wave (array-like):
+            original wavelength axis
+        flux (array-like):
+            original spectrum
+
+    Returns:
+        array-like:
+            spectrum resampled onto the new_wave axis
+    """
+    if fast:
+        f = interp1d(old_wave, flux, fill_value='extrapolate')
+        resampled = f(new_wave)
+    else:
+        resampled = spectres(new_wave, old_wave, flux)
+
+    return resampled
+
+
+def convolve_for_gaussian(spectrum, fwhm, boundary):
+    """
+    Convolve a spectrum for a Gaussian kernel.
+
+    Args:
+        spectrum (array):
+            spectrum to be convolved.
+        fwhm (float):
+            FWHM of the gaussian kernel.
+        boundary (str):
+            flag indicating how to handle boundaries.
+
+    Returns:
+        array:
+            convolved spectrum
+    """
+
+    stddev = fwhm / 2.355  # from fwhm to sigma
+    size = round_up_to_odd(stddev)  # size of the kernel
+
+    kernel = Gaussian1DKernel(stddev=stddev.value, x_size=size.value)  # gaussian kernel
+    return convolve(spectrum, kernel, boundary=boundary)
 
 
 
