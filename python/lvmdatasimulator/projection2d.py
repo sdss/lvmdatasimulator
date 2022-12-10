@@ -8,13 +8,14 @@
 import os.path
 import numpy as np
 from lvmdatasimulator import COMMON_SETUP_2D as config_2d
-from lvmdatasimulator import DATA_DIR
+from lvmdatasimulator import DATA_DIR, n_process
 from astropy.io import fits, ascii
 from lvmdatasimulator import log
 from scipy.interpolate import interp1d
 from astropy.convolution import convolve
 from astropy.convolution.kernels import Gaussian2DKernel
-
+from multiprocessing import Pool
+from tqdm import tqdm
 
 # from dataclasses import dataclass
 # from astropy import units as u
@@ -30,6 +31,67 @@ from astropy.convolution.kernels import Gaussian2DKernel
 #     ccd_props: dict = None  # Dictionary defining the CCD properties; if not provided, then will be initialized later
 #     exp_type: str = 'obj'  # Type of the exposure: obj, bias, dark, flat, arc, sky
 #     exp_time: u.s = 900 * u.s  # Exposure time
+
+
+def spec_2d_projection_parallel(params):
+    spec_cur_fiber, pix_grid_input_on_ccd, cur_fiber_num, nfib, bunds1, fibs1, focus, \
+        ccd_size, ccd_gap_size, ccd_gap_left = params
+
+    let = 800
+    r = let * 2.7
+    then = np.arcsin((cur_fiber_num - (nfib / 2.)) / r)
+    dr = np.cos(then) * r - let * 2.3
+    dx = int(dr)  # TODO we should get rid of int values here (?)
+    nx = len(spec_cur_fiber)
+    ind_in_block = cur_fiber_num % config_2d['nfib_per_block']
+    id_of_block = np.floor(cur_fiber_num / config_2d['nfib_per_block']).astype(int)
+
+    # Cross-disp. position of the center of the fiber
+    dt = float(config_2d['null_fiber_offset']
+               ) + np.sum([bunds1[tmp_id] for tmp_id in range(id_of_block + 1)]) + fibs1[id_of_block] * ind_in_block
+    if id_of_block > 0:
+        dt += np.sum([fibs1[tmp_id] * config_2d['nfib_per_block'] for tmp_id in range(id_of_block)])
+
+    dy = int(dt)  # TODO we should get rid of int values here?
+    off = dy - dt
+    dc = 10.0  # Half size of the window for convolution
+    dtt = int(dc)
+    nxt = int(dc * 2 + 1)
+    nyt = int(dc * 2 + 1)
+    spec_res = np.zeros(shape=(int(ccd_size[0] - ccd_gap_size - dx + dtt), int(dc * 2 + 1)), dtype=float)
+
+    x_t = np.arange(nxt) * 1.0 - dc + off
+    y_t = np.arange(nyt) * 1.0 - dc
+    x_t = np.array([x_t] * nyt)
+    y_t = np.array([y_t] * nxt).T
+    spec_t = np.zeros([int(nx + 2 * dc), nyt])
+    for j in range(nx):
+        xo = dx + np.round(pix_grid_input_on_ccd[j]).astype(int)  # TODO: get rid of ints?
+        yo = dy + int(dc)  # TODO: get rid of ints?
+        if xo >= (ccd_size[0] - ccd_gap_size):
+            xo = (ccd_size[0] - ccd_gap_size) - 1
+        ds_x = np.array([np.ones(nyt) * focus[0, xo, yo]] * nxt).T
+        ds_y = np.array([np.ones(nyt) * focus[1, xo, yo]] * nxt).T
+        rho = np.array([np.ones(nyt) * focus[2, xo, yo]] * nxt).T
+        Att = np.array([np.ones(nyt) * spec_cur_fiber[j]] * nxt).T
+        spec_ttt = np.exp(-0.5 / (1 - rho ** 2) * (
+                    (x_t / ds_x) ** 2.0 + (y_t / ds_y) ** 2.0 - 2 * rho * (y_t / ds_y) * (x_t / ds_x))) / (
+                               2 * np.pi * ds_x * ds_y * np.sqrt(1 - rho ** 2)) * Att
+        spec_t[j:j + int(2 * dc + 1), :int(2 * dc + 1)] += spec_ttt
+
+    for j in range(int(ccd_size[0] - ccd_gap_size - dx + dtt)):
+        n1 = np.flatnonzero((pix_grid_input_on_ccd >= j) & (pix_grid_input_on_ccd < (j + 1)))
+        if len(n1) > 0:
+            val = np.nansum(spec_t[n1, :], axis=0)
+        else:
+            val = 0
+        spec_res[j, :] = val
+    spec_res_projection = np.zeros(shape=(spec_res.shape[1], ccd_size[0]), dtype=float)
+    spec_res_projection[:, dx - dtt: ccd_gap_left + 1] = spec_res.T[:, : ccd_gap_left - dx + dtt + 1]
+    spec_res_projection[:, ccd_gap_left + ccd_gap_size + 1:] = \
+        spec_res.T[:, ccd_gap_left - dx + dtt + 1:]
+
+    return spec_res_projection, (dy, dy + nyt)
 
 
 def cosmic_rays(ccdimage, n_cr=100, std_cr=5, deep=10.0, cr_intensity=1e5):
@@ -148,10 +210,12 @@ def raw_data_header(h, field_name, mjd, exp_name, typ, flb='science', ra=0.0, de
     h["CONFTYP"] = ('BOSS    ', 'Type of plate (e.g. BOSS, APOGEE, BA')
     h["SRVYMODE"] = ('None    ', 'Survey leading this observation and its mode')
     h["OBJSYS"] = ('ICRS    ', 'The TCC objSys')
-    h["RA"] = (ra, 'RA of telescope boresight (deg)')
-    h["DEC"] = (dec, 'Dec of telescope boresight (deg)')
-    h["RADEG"] = (ra + 0.704, 'RA of telescope pointing(deg)')
-    h["DECDEG"] = (dec + 0.083, 'Dec of telescope pointing (deg)')
+    if ra is not None:
+        h["RA"] = (ra, 'RA of telescope boresight (deg)')
+        h["RADEG"] = (ra + 0.704, 'RA of telescope pointing(deg)')
+    if dec is not None:
+        h["DEC"] = (dec, 'Dec of telescope boresight (deg)')
+        h["DECDEG"] = (dec + 0.083, 'Dec of telescope pointing (deg)')
     h["SPA"] = (-158.0698343797722, 'TCC SpiderInstAng')
     h["ROTTYPE"] = ('Obj     ', 'Rotator request type')
     h["ROTPOS"] = (0.0, 'Rotator request position (deg)')
@@ -165,8 +229,10 @@ def raw_data_header(h, field_name, mjd, exp_name, typ, flb='science', ra=0.0, de
     h["GUIDOFFX"] = (0.0, 'TCC GuideOff, deg')
     h["GUIDOFFY"] = (0.0, 'TCC GuideOff, deg')
     h["GUIDOFFR"] = (0.052684, 'TCC GuideOff, deg')
-    h["AZ"] = (azim, 'Azimuth axis pos. (approx, deg)')
-    h["ALT"] = (alt, 'Altitude axis pos. (approx, deg)')
+    if azim is not None:
+        h["AZ"] = (azim, 'Azimuth axis pos. (approx, deg)')
+    if alt is not None:
+        h["ALT"] = (alt, 'Altitude axis pos. (approx, deg)')
     h["IPA"] = (21.60392, 'Rotator axis pos. (approx, deg)')
     h["FOCUS"] = (10.7512, 'User-specified focus offset (um)')
     h["M2PISTON"] = (357.36, 'TCC SecOrient')
@@ -276,7 +342,7 @@ def cre_raw_exp(input_spectrum, fibtype, ring, position, wave_ccd, wave, nfib=60
         std_cr: Dispersion for n_cr to randomize it
         channel_type: Type of the current channel of spectrograph (blue, red or ir)
         cam: ID of the camera
-        nfib: Number of fibers projected for current camera CCD
+        nfib: Total number of fibers for current camera CCD
         flb: types of the exposures (???)
         mjd: Date of the observation (???)
         field_name: Name of the observed field (plate) (???)
@@ -302,18 +368,21 @@ def cre_raw_exp(input_spectrum, fibtype, ring, position, wave_ccd, wave, nfib=60
     ccd_props = ccd_props[ccd_props['channel'] == channel_type][0]
     channel_index = {'blue': 'b', 'red': 'r', 'ir': 'z'}
     ccd_size = [ccd_props['nx'], ccd_props['ny']]
+    ccd_gap_size = ccd_props['x2'] - ccd_props['x1'] - 1
+    ccd_middle_x_pos = int((ccd_props['x1'] + ccd_props['x2']) / 2.)
     cam = str(int(cam))
     output_data = np.zeros(shape=(ccd_size[1], ccd_size[0]))
     output_bias = np.zeros(shape=(ccd_size[1], ccd_size[0]))
 
-    # TODO: What is in the opFiber.par file? Relative sizes and offsets for fibers in each bundle?
     fibs1, bunds1 = read_op_fib(1, channel_index[channel_type] + cam)
     try:
+        # TODO: at the moment, these files are of 4120x4080 size. Perhaps they should either take into account the
+        #  gap, or be of 4080x4080 size. For now, I cut the excess
         focus = fits.getdata(os.path.join(DATA_DIR, 'instrument',
                                           f"{config_2d['psf_rootname']}_{channel_type}{cam}.fits.gz"),
-                             0, header=False).T
+                             0, header=False).T[:, :ccd_size[0]-ccd_gap_size, :]
     except FileNotFoundError:
-        focus = np.ones([3, ccd_size[1], ccd_size[0]], dtype=float)
+        focus = np.ones([3, ccd_size[0]-ccd_gap_size, ccd_size[1]], dtype=float)
         focus[1, :, :] = 0.9
         focus[2, :, :] = 0.0
         log.warning(f'PSF data for {channel_type} channel is not found. Using default PSF = 1 pixel')
@@ -324,10 +393,12 @@ def cre_raw_exp(input_spectrum, fibtype, ring, position, wave_ccd, wave, nfib=60
     fibers_mapping = ascii.read(os.path.join(DATA_DIR, 'instrument', 'fibers', f"{config_2d['fibers_ccd_map_name']}"))
     fib_id_on_slit = np.zeros(len(ring), dtype=int) - 1
     for i in range(len(ring)):
-        nt2 = np.flatnonzero((fibers_mapping['ring_id'] == ring[i]) & (fibers_mapping['type'] == fibtype[i]) &
-                             (fibers_mapping['slit'] == 'slit' + cam) & (fibers_mapping['fiber_id'] == position[i]))
-        if len(nt2) > 0:
-            fib_id_on_slit[i] = np.atleast_1d(fibers_mapping['id'][nt2])[0]
+        cur_fiber_num_in_mapping = np.flatnonzero((fibers_mapping['ring_id'] == ring[i]) &
+                                                  (fibers_mapping['type'] == fibtype[i]) &
+                                                  (fibers_mapping['slit'] == 'slit' + cam) &
+                                                  (fibers_mapping['fiber_id'] == position[i]))
+        if len(cur_fiber_num_in_mapping) > 0:
+            fib_id_on_slit[i] = np.atleast_1d(fibers_mapping['id'][cur_fiber_num_in_mapping])[0]
 
     fib_id_in_ring = np.zeros(nfib, dtype=int) - 1
     # This array have the IDs = -1 for those fibers that are not used in the simulations
@@ -337,110 +408,61 @@ def cre_raw_exp(input_spectrum, fibtype, ring, position, wave_ccd, wave, nfib=60
             fib_id_in_ring[cur_fiber_num] = np.atleast_1d(nt)[0]
 
     # Wavelength solution
-    # TODO: what to do with the differences of lambda along the y axis?
+    # TODO: This should be defined for each fiber to account for the differences in wavelength solution between them
     pix_grid_input_on_ccd = interp1d(wave_ccd, np.arange(len(wave_ccd)), bounds_error=False, fill_value=-10)(wave)
 
-    dt = float(config_2d['null_fiber_offset']) + bunds1[0]
-    for cur_fiber_num in range(nfib):
-        # TODO: obviously, this define the curvature of the spectra. But how is this parametrized?
-        #  What do the values mean?
-        let = 800
-        r = let * 2.7
-        then = np.arcsin((cur_fiber_num - (nfib / 2.)) / r)
-        dr = np.cos(then) * r - let * 2.3
-        dx = np.round(dr).astype(int)  # TODO we should get rid of int values here!
-        if fib_id_in_ring[cur_fiber_num] >= 0:
-            spec_cur_fiber = input_spectrum[fib_id_in_ring[cur_fiber_num], :]
-        else:
-            spec_cur_fiber = np.zeros_like(input_spectrum[0, :])
-        nx = len(spec_cur_fiber)
-        ind_in_block = cur_fiber_num % config_2d['nfib_per_block']
-        id_of_block = np.floor(cur_fiber_num / config_2d['nfib_per_block']).astype(int)
+    log.info(f"Project the spectra of camera #{cam} and {channel_type} channel onto CCD")
+    # results = []
+    # for cur_fiber_num in range(nfib):
+    #     if fib_id_in_ring[cur_fiber_num]<0:
+    #         continue
+    #     results.append(spec_2d_projection_parallel((input_spectrum[fib_id_in_ring[cur_fiber_num], :],
+    #                                    pix_grid_input_on_ccd, cur_fiber_num, nfib, bunds1,
+    #                                    fibs1, focus,
+    #                                    ccd_size, ccd_gap_size, ccd_props['x1'])))
 
-        if cur_fiber_num > 0:
-            dt += fibs1[id_of_block]
-            if ind_in_block == 0:
-                dt += bunds1[id_of_block]
-
-        dy = int(dt)  # TODO we should get rid of int values here?
-        off = dy - dt
-        dc = 10.0  # TODO What is this? Half size of the fiber along the spatial axis?
-        dtt = int(dc)
-        nxt = int(dc * 2 + 1)
-        nyt = int(dc * 2 + 1)
-        spec_res = np.zeros([np.floor(ccd_size[0] - dx + dtt).astype(int),  # TODO: Here used to be ny instead of nx
-                             np.floor(dc * 2 + 1).astype(int)])
-
-        if fib_id_in_ring[cur_fiber_num] >= 0:
-            x_t = np.arange(nxt) * 1.0 - dc + off
-            y_t = np.arange(nyt) * 1.0 - dc
-            x_t = np.array([x_t] * nyt)
-            y_t = np.array([y_t] * nxt).T
-            nsy = nxt
-            spec_t = np.zeros([int(nx + 2 * dc), nsy])
-            for j in range(nx):
-                xo = dx + np.round(pix_grid_input_on_ccd[j]).astype(int)  # TODO: get rid of ints?
-                yo = dy + int(dc)  # TODO: get rid of ints?
-                if xo >= ccd_size[0]:
-                    xo = ccd_size[0] - 1
-                ds_x = np.array([np.ones(nyt) * focus[0, xo, yo]] * nxt).T
-                ds_y = np.array([np.ones(nyt) * focus[1, xo, yo]] * nxt).T
-                rho = np.array([np.ones(nyt) * focus[2, xo, yo]] * nxt).T
-                Att = np.array([np.ones(nyt) * spec_cur_fiber[j]] * nxt).T
-                spec_ttt = np.exp(-0.5 / (1 - rho ** 2) * (
-                            (x_t / ds_x) ** 2.0 + (y_t / ds_y) ** 2.0 - 2 * rho * (y_t / ds_y) * (x_t / ds_x))) / (
-                                   2 * np.pi * ds_x * ds_y * np.sqrt(1 - rho ** 2)) * Att
-                spec_t[j:j + int(2 * dc + 1), :int(2 * dc + 1)] += spec_ttt
-
-            for j in range(int(ccd_size[0] - dx + dtt)):  # TODO: Here used to be ny instead of nx
-                n1 = np.flatnonzero((pix_grid_input_on_ccd >= j) & (pix_grid_input_on_ccd < (j + 1)))
-                if len(n1) > 0:
-                    val = np.nansum(spec_t[n1, :], axis=0)
-                else:
-                    val = 0
-                spec_res[j, :] = val
-
-        y1 = 0
-        y2 = nxt
-        x1 = 0
-        x2 = ccd_size[0] - dx - dtt  # TODO: Here used to be ny instead of nx
-        output_data[dy + y1: dy + y2, dx + x1 - dtt:
-                                      dx + x2 + dtt] = spec_res + output_data[dy + y1:dy + y2,
-                                                                  dx + x1 - dtt:dx + x2 + dtt]
-        # TODO: x and y used to be swapped
+    with Pool(n_process) as p:
+        results = list(tqdm(p.imap(spec_2d_projection_parallel, [(input_spectrum[fib_id_in_ring[cur_fiber_num], :],
+                                                                  pix_grid_input_on_ccd, cur_fiber_num, nfib, bunds1,
+                                                                  fibs1, focus,
+                                                                  ccd_size, ccd_gap_size, ccd_props['x1'])
+                                                                 for cur_fiber_num in range(nfib)
+                                                                 if fib_id_in_ring[cur_fiber_num] >= 0]),
+                            total=np.sum(fib_id_in_ring >= 0)))
+    for res_element in results:
+        output_data[res_element[1][0]: res_element[1][1], :] += res_element[0]
 
     sig = ccd_noise_factor * ccd_props['noise']
     sector_map = {'1': ['x0', 'x1', 'y0', 'y1'],
                   '2': ['x2', 'x3', 'y0', 'y1'],
                   '3': ['x0', 'x1', 'y2', 'y3'],
                   '4': ['x2', 'x3', 'y2', 'y3']}
+
     for key in sector_map.keys():
-        output_data[ccd_props[sector_map[key][2]]:ccd_props[sector_map[key][3]] + 1,
-        ccd_props[sector_map[key][0]]:ccd_props[sector_map[key][1]] + 1] = \
-            output_data[ccd_props[sector_map[key][2]]:ccd_props[sector_map[key][3]] + 1,
-            ccd_props[sector_map[key][0]]:ccd_props[sector_map[key][1]] + 1] / ccd_props[f'gain_{key}'] + \
-            np.random.randn(ccd_props[sector_map[key][3]] - ccd_props[sector_map[key][2]] + 1,
-                            ccd_props[sector_map[key][1]] - ccd_props[sector_map[key][0]] + 1) * sig + \
+        y0 = ccd_props[sector_map[key][2]]
+        y1 = ccd_props[sector_map[key][3]] + 1
+        x0 = np.min([ccd_props[sector_map[key][0]], ccd_middle_x_pos])
+        x1 = np.max([ccd_props[sector_map[key][1]] + 1, ccd_middle_x_pos])
+
+        # TODO: Question to DRP team - should we save exactly the same bias as is in the science frame, or not?
+        output_bias[y0: y1, x0: x1] = \
+            np.random.randn(y1 - y0, x1 - x0) * sig / ccd_props[f'gain_{key}'] + \
             ccd_props['bias'] + ccd_props[f'bias_add_{key}']
 
-        output_bias[ccd_props[sector_map[key][2]]:ccd_props[sector_map[key][3]] + 1,
-        ccd_props[sector_map[key][0]]:ccd_props[sector_map[key][1]] + 1] = \
-            np.random.randn(ccd_props[sector_map[key][3]] - ccd_props[sector_map[key][2]] + 1,
-                            ccd_props[sector_map[key][1]] - ccd_props[sector_map[key][0]] + 1) * sig + \
+        output_data[y0: y1, x0: x1] = \
+            output_data[y0: y1, x0: x1] / ccd_props[f'gain_{key}'] + \
+            np.random.randn(y1 - y0, x1 - x0) * sig / ccd_props[f'gain_{key}'] + \
             ccd_props['bias'] + ccd_props[f'bias_add_{key}']
-    #
-    # output_data=output_data.T
-    # output_bias=output_bias.T
 
     if add_cr_hits:
         output_data = cosmic_rays(output_data, n_cr=n_cr, std_cr=std_cr)
 
     output_hdus = (ccdspec_to_hdu(output_data, field_name, mjd, exp_name, channel_index[channel_type],
-                                  flb=flb, exp_time=exp_time, ra=ra, dec=dec, expof=expof,
-                                  bzero=ccd_props['saturation'] + 1),
+                                  flb=flb, exp_time=exp_time, ra=ra.value, dec=dec.value, expof=expof,
+                                  bzero=32768),
                    ccdspec_to_hdu(output_bias, field_name, mjd, exp_name, channel_index[channel_type],
                                   flb='bias', exp_time=0, expof=expof,
-                                  bzero=ccd_props['saturation'] + 1),
+                                  bzero=32768),
                    )
 
     return output_hdus

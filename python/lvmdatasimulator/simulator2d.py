@@ -132,8 +132,6 @@ class Simulator2D:
         self._wl_grid = np.arange(3500, 9910.01, self._disp.value) * u.AA
         self._area_fiber = np.pi * (self.bundle.fibers[0].diameter / 2) ** 2
         self._fibers_per_spec = int(self.bundle.max_fibers / 3)
-        # TODO: Why /3? This is not necessarily exact (because of the central fiber)
-
 
     def create_flat(self, nexpo=1):
 
@@ -145,7 +143,6 @@ class Simulator2D:
         flat = resample_spectrum(self._wl_grid, data['wave'], data['flux'], fast=self.fast)
 
         self._project_2d_calibs(flat, 'flat', self.observation.flat_exptimes, nexpo)
-
 
     def create_arc(self, hg=False, ne=False, ar=False, xe=False, nexpo=1):
 
