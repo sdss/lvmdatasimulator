@@ -37,7 +37,7 @@ def spec_2d_projection_parallel(params):
     spec_cur_fiber, pix_grid_input_on_ccd, cur_fiber_num, nfib, bunds1, fibs1, focus, \
         ccd_size, ccd_gap_size, ccd_gap_left = params
 
-    let = 800
+    let = 800  # TODO Should decide how to parameterize all these in a single config file
     r = let * 2.7
     then = np.arcsin((cur_fiber_num - (nfib / 2.)) / r)
     dr = np.cos(then) * r - let * 2.3

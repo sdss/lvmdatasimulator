@@ -387,7 +387,7 @@ class Simulator2D:
                     return
 
                 log.info(f'Saving {calib_name} exposures with exptime {time}s')
-                for branch in self.spectrograph.branches:
+                for branch in self.spectrograph.branches[0]:
                     name = branch.name
                     if calib_name == 'bias':
                         calib_final = None
