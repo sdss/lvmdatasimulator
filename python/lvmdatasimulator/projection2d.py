@@ -182,6 +182,7 @@ def raw_data_header(h, field_name, mjd, exp_name, typ, flb='science', ra=0.0, de
     elif flb == 'bias':
         flab = 'bias    '
         expt = 0
+
     h["TELESCOP"] = 'SDSS 2-5m'
     h["FILENAME"] = 'sdR-' + typ + '-' + f"{exp_name:08}" + '.fits'
     h["CAMERAS"] = typ + '      '
@@ -371,66 +372,67 @@ def cre_raw_exp(input_spectrum, fibtype, ring, position, wave_ccd, wave, nfib=60
     ccd_gap_size = ccd_props['x2'] - ccd_props['x1'] - 1
     ccd_middle_x_pos = int((ccd_props['x1'] + ccd_props['x2']) / 2.)
     cam = str(int(cam))
-    output_data = np.zeros(shape=(ccd_size[1], ccd_size[0]))
-    output_bias = np.zeros(shape=(ccd_size[1], ccd_size[0]))
+    output = np.zeros(shape=(ccd_size[1], ccd_size[0]))
 
-    fibs1, bunds1 = read_op_fib(1, channel_index[channel_type] + cam)
-    try:
-        # TODO: at the moment, these files are of 4120x4080 size. Perhaps they should either take into account the
-        #  gap, or be of 4080x4080 size. For now, I cut the excess
-        focus = fits.getdata(os.path.join(DATA_DIR, 'instrument',
-                                          f"{config_2d['psf_rootname']}_{channel_type}{cam}.fits.gz"),
-                             0, header=False).T[:, :ccd_size[0]-ccd_gap_size, :]
-    except FileNotFoundError:
-        focus = np.ones([3, ccd_size[0]-ccd_gap_size, ccd_size[1]], dtype=float)
-        focus[1, :, :] = 0.9
-        focus[2, :, :] = 0.0
-        log.warning(f'PSF data for {channel_type} channel is not found. Using default PSF = 1 pixel')
+    if flb != 'bias':
 
-    # Fiber mapping
-    # TODO: perhaps this is unnecessary - parameters ring, fibtype, position,... were derived from full_array.dat, ...,
-    #  and these are very similar to plugmap.dat. Maybe these two files should be merged into a single file?
-    fibers_mapping = ascii.read(os.path.join(DATA_DIR, 'instrument', 'fibers', f"{config_2d['fibers_ccd_map_name']}"))
-    fib_id_on_slit = np.zeros(len(ring), dtype=int) - 1
-    for i in range(len(ring)):
-        cur_fiber_num_in_mapping = np.flatnonzero((fibers_mapping['ring_id'] == ring[i]) &
-                                                  (fibers_mapping['type'] == fibtype[i]) &
-                                                  (fibers_mapping['slit'] == 'slit' + cam) &
-                                                  (fibers_mapping['fiber_id'] == position[i]))
-        if len(cur_fiber_num_in_mapping) > 0:
-            fib_id_on_slit[i] = np.atleast_1d(fibers_mapping['id'][cur_fiber_num_in_mapping])[0]
+        fibs1, bunds1 = read_op_fib(1, channel_index[channel_type] + cam)
+        try:
+            # TODO: at the moment, these files are of 4120x4080 size. Perhaps they should either take into account the
+            #  gap, or be of 4080x4080 size. For now, I cut the excess
+            focus = fits.getdata(os.path.join(DATA_DIR, 'instrument',
+                                            f"{config_2d['psf_rootname']}_{channel_type}{cam}.fits.gz"),
+                                0, header=False).T[:, :ccd_size[0]-ccd_gap_size, :]
+        except FileNotFoundError:
+            focus = np.ones([3, ccd_size[0]-ccd_gap_size, ccd_size[1]], dtype=float)
+            focus[1, :, :] = 0.9
+            focus[2, :, :] = 0.0
+            log.warning(f'PSF data for {channel_type} channel is not found. Using default PSF = 1 pixel')
 
-    fib_id_in_ring = np.zeros(nfib, dtype=int) - 1
-    # This array have the IDs = -1 for those fibers that are not used in the simulations
-    for cur_fiber_num in range(nfib):
-        nt = np.flatnonzero(fib_id_on_slit == (cur_fiber_num + 1))
-        if len(nt) > 0:
-            fib_id_in_ring[cur_fiber_num] = np.atleast_1d(nt)[0]
+        # Fiber mapping
+        # TODO: perhaps this is unnecessary - parameters ring, fibtype, position,... were derived from full_array.dat, ...,
+        #  and these are very similar to plugmap.dat. Maybe these two files should be merged into a single file?
+        fibers_mapping = ascii.read(os.path.join(DATA_DIR, 'instrument', 'fibers', f"{config_2d['fibers_ccd_map_name']}"))
+        fib_id_on_slit = np.zeros(len(ring), dtype=int) - 1
+        for i in range(len(ring)):
+            cur_fiber_num_in_mapping = np.flatnonzero((fibers_mapping['ring_id'] == ring[i]) &
+                                                    (fibers_mapping['type'] == fibtype[i]) &
+                                                    (fibers_mapping['slit'] == 'slit' + cam) &
+                                                    (fibers_mapping['fiber_id'] == position[i]))
+            if len(cur_fiber_num_in_mapping) > 0:
+                fib_id_on_slit[i] = np.atleast_1d(fibers_mapping['id'][cur_fiber_num_in_mapping])[0]
 
-    # Wavelength solution
-    # TODO: This should be defined for each fiber to account for the differences in wavelength solution between them
-    pix_grid_input_on_ccd = interp1d(wave_ccd, np.arange(len(wave_ccd)), bounds_error=False, fill_value=-10)(wave)
+        fib_id_in_ring = np.zeros(nfib, dtype=int) - 1
+        # This array have the IDs = -1 for those fibers that are not used in the simulations
+        for cur_fiber_num in range(nfib):
+            nt = np.flatnonzero(fib_id_on_slit == (cur_fiber_num + 1))
+            if len(nt) > 0:
+                fib_id_in_ring[cur_fiber_num] = np.atleast_1d(nt)[0]
 
-    log.info(f"Project the spectra of camera #{cam} and {channel_type} channel onto CCD")
-    # results = []
-    # for cur_fiber_num in range(nfib):
-    #     if fib_id_in_ring[cur_fiber_num]<0:
-    #         continue
-    #     results.append(spec_2d_projection_parallel((input_spectrum[fib_id_in_ring[cur_fiber_num], :],
-    #                                    pix_grid_input_on_ccd, cur_fiber_num, nfib, bunds1,
-    #                                    fibs1, focus,
-    #                                    ccd_size, ccd_gap_size, ccd_props['x1'])))
+        # Wavelength solution
+        # TODO: This should be defined for each fiber to account for the differences in wavelength solution between them
+        pix_grid_input_on_ccd = interp1d(wave_ccd, np.arange(len(wave_ccd)), bounds_error=False, fill_value=-10)(wave)
 
-    with Pool(n_process) as p:
-        results = list(tqdm(p.imap(spec_2d_projection_parallel, [(input_spectrum[fib_id_in_ring[cur_fiber_num], :],
-                                                                  pix_grid_input_on_ccd, cur_fiber_num, nfib, bunds1,
-                                                                  fibs1, focus,
-                                                                  ccd_size, ccd_gap_size, ccd_props['x1'])
-                                                                 for cur_fiber_num in range(nfib)
-                                                                 if fib_id_in_ring[cur_fiber_num] >= 0]),
-                            total=np.sum(fib_id_in_ring >= 0)))
-    for res_element in results:
-        output_data[res_element[1][0]: res_element[1][1], :] += res_element[0]
+        log.info(f"Project the spectra of camera #{cam} and {channel_type} channel onto CCD")
+        # results = []
+        # for cur_fiber_num in range(nfib):
+        #     if fib_id_in_ring[cur_fiber_num]<0:
+        #         continue
+        #     results.append(spec_2d_projection_parallel((input_spectrum[fib_id_in_ring[cur_fiber_num], :],
+        #                                    pix_grid_input_on_ccd, cur_fiber_num, nfib, bunds1,
+        #                                    fibs1, focus,
+        #                                    ccd_size, ccd_gap_size, ccd_props['x1'])))
+
+        with Pool(n_process) as p:
+            results = list(tqdm(p.imap(spec_2d_projection_parallel, [(input_spectrum[fib_id_in_ring[cur_fiber_num], :],
+                                                                    pix_grid_input_on_ccd, cur_fiber_num, nfib, bunds1,
+                                                                    fibs1, focus,
+                                                                    ccd_size, ccd_gap_size, ccd_props['x1'])
+                                                                    for cur_fiber_num in range(nfib)
+                                                                    if fib_id_in_ring[cur_fiber_num] >= 0]),
+                                total=np.sum(fib_id_in_ring >= 0)))
+        for res_element in results:
+            output[res_element[1][0]: res_element[1][1], :] += res_element[0]
 
     sig = ccd_noise_factor * ccd_props['noise']
     sector_map = {'1': ['x0', 'x1', 'y0', 'y1'],
@@ -445,25 +447,18 @@ def cre_raw_exp(input_spectrum, fibtype, ring, position, wave_ccd, wave, nfib=60
         x1 = np.max([ccd_props[sector_map[key][1]] + 1, ccd_middle_x_pos])
 
         # TODO: Question to DRP team - should we save exactly the same bias as is in the science frame, or not?
-        output_bias[y0: y1, x0: x1] = \
-            np.random.randn(y1 - y0, x1 - x0) * sig / ccd_props[f'gain_{key}'] + \
-            ccd_props['bias'] + ccd_props[f'bias_add_{key}']
 
-        output_data[y0: y1, x0: x1] = \
-            output_data[y0: y1, x0: x1] / ccd_props[f'gain_{key}'] + \
+        output[y0: y1, x0: x1] = \
+            output[y0: y1, x0: x1] / ccd_props[f'gain_{key}'] + \
             np.random.randn(y1 - y0, x1 - x0) * sig / ccd_props[f'gain_{key}'] + \
             ccd_props['bias'] + ccd_props[f'bias_add_{key}']
 
     if add_cr_hits:
-        output_data = cosmic_rays(output_data, n_cr=n_cr, std_cr=std_cr)
+        output = cosmic_rays(output, n_cr=n_cr, std_cr=std_cr)
 
-    output_hdus = (ccdspec_to_hdu(output_data, field_name, mjd, exp_name, channel_index[channel_type],
+    output_hdus = (ccdspec_to_hdu(output, field_name, mjd, exp_name, channel_index[channel_type],
                                   flb=flb, exp_time=exp_time, ra=ra.value, dec=dec.value, expof=expof,
-                                  bzero=32768),
-                   ccdspec_to_hdu(output_bias, field_name, mjd, exp_name, channel_index[channel_type],
-                                  flb='bias', exp_time=0, expof=expof,
-                                  bzero=32768),
-                   )
+                                  bzero=32768))
 
     return output_hdus
 

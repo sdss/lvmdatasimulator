@@ -87,6 +87,7 @@ class Simulator2D:
         root: str = WORK_DIR,
         overwrite: bool = True,
         fast: bool = True,
+        compress: bool = True,
     ):
 
         self.source = source
@@ -98,6 +99,7 @@ class Simulator2D:
         self.root = root
         self.overwrite = overwrite
         self.fast = fast
+        self.compress = compress
 
         # creating empty storage
         self.output = None
@@ -127,7 +129,7 @@ class Simulator2D:
         self._area_fiber = np.pi * (self.bundle.fibers_science[0].diameter / 2) ** 2
         self._fibers_per_spec = int(self.bundle.max_fibers / 3)
 
-    def create_flat(self, nexpo=1):
+    def create_flat(self):
 
         log.info('Creating flat fields...')
 
@@ -136,9 +138,9 @@ class Simulator2D:
 
         flat = util.resample_spectrum(self._wl_grid, data['wave'], data['flux'], fast=self.fast)
 
-        self._project_2d_calibs(flat, 'flat', self.observation.flat_exptimes, nexpo)
+        self._project_2d_calibs(flat, 'flat', self.observation.flat_exptimes, self.observation.nflats)
 
-    def create_arc(self, hg=False, ne=False, ar=False, xe=False, nexpo=1):
+    def create_arc(self, hg=False, ne=False, ar=False, xe=False):
 
         if not np.any([hg, ne, ar, xe]):
             raise ValueError('At least one lamp should be selected')
@@ -186,7 +188,11 @@ class Simulator2D:
         arcs = arcs.sum(axis=0)
 
 
-        self._project_2d_calibs(arcs, 'arc', self.observation.arc_exptimes, nexpo)
+        self._project_2d_calibs(arcs, 'arc', self.observation.arc_exptimes, self.observation.narcs)
+
+    def create_bias(self):
+
+        self._project_2d_calibs(None, 'bias', 0, self.observation.nbias)
 
     def extract_extinction(self, extinction_file=os.path.join(DATA_DIR, 'sky',
                                                               'LVM_LVM160_KLAM.dat')):
@@ -344,32 +350,38 @@ class Simulator2D:
 
     def _project_2d_calibs(self, data, calib_name, exptimes, nexpo):
 
+        if not isinstance(exptimes, list):
+            exptimes = [exptimes]
+
         # moving from SB to flux
         # the arc files are already in e/s/pix/arcsec^2 no need to tranform and multiply
         # per telescope area
-        calib = data * self._area_fiber.value
-
-        # for now the calibrations are independent of the position of the fibers in the field
-        # THIS WILL CHANGE IN THE FUTURE.
-
-        ringid, pos, fibtype, fibid = get_fibers_table(science=None)
-
-        # applying the sensitivity function and reducing the size to spare memory
         new_calib = {}
         new_wave = {}
-        for branch in self.spectrograph.branches:
-            tmp = calib * branch.efficiency(self._wl_grid)
-            resized, wave = reduce_size(tmp, self._wl_grid,
-                                        branch.wavecoord.start, branch.wavecoord.end)
-            new_calib[branch.name] = resized
-            new_wave[branch.name] = wave
+        if calib_name != 'bias':
+            calib = data * self._area_fiber.value
+
+            # for now the calibrations are independent of the position of the fibers in the field
+            # THIS WILL CHANGE IN THE FUTURE.
+
+            ringid, pos, fibtype, fibid = get_fibers_table(science=None)
+
+            # applying the sensitivity function and reducing the size to spare memory
+            for branch in self.spectrograph.branches:
+                tmp = calib * branch.efficiency(self._wl_grid)
+                resized, wave = reduce_size(tmp, self._wl_grid,
+                                            branch.wavecoord.start, branch.wavecoord.end)
+                new_calib[branch.name] = resized
+                new_wave[branch.name] = wave
 
         for i, time in enumerate(exptimes):
             for j in range(nexpo):
                 if calib_name == 'arc':
-                    exp_name = str(10000+(i*j)+j+1)
+                    exp_name = 10000+(i*j)+j+1
                 elif calib_name == 'flat':
-                    exp_name = str(1000+(i*j)+j+1)
+                    exp_name = 1000+(i*j)+j+1
+                elif calib_name == 'bias':
+                    exp_name = 100+(i*j)+j+1
                 else:
                     log.error(f"Unrecognized calibration name is detected: {calib_name}")
                     return
@@ -377,9 +389,15 @@ class Simulator2D:
                 log.info(f'Saving {calib_name} exposures with exptime {time}s')
                 for branch in self.spectrograph.branches:
                     name = branch.name
-                    calib = new_calib[name] * time
-
-                    calib_final = expand_to_full_fiber(calib, self.bundle.max_fibers)
+                    if calib_name == 'bias':
+                        calib_final = None
+                        new_wave[name] = None
+                        fibtype = None
+                        ringid = None
+                        pos = None
+                    else:
+                        calib = new_calib[name] * time
+                        calib_final = expand_to_full_fiber(calib, self.bundle.max_fibers)
                     # calib_final = calib_final.T
 
                     self._to_camera(spectra=calib_final, wave=new_wave[name],
@@ -421,10 +439,9 @@ class Simulator2D:
                                             flb=exp_type, add_cr_hits=n_cr > 0)
             if projected_spectra is not None:
                 fileout_data = os.path.join(self.outdir, 'sdR-' + channel_index[camera] + '-' + f"{exp_name:08}" + '.fits')
-                fileout_bias = os.path.join(self.outdir,
-                                            'sdR-' + channel_index[camera] + '-' + f"{exp_name:08}" + '_bias.fits')
+                if self.compress:
+                    fileout_data += '.gz'
                 projected_spectra[0].writeto(fileout_data, overwrite=True)
-                projected_spectra[1].writeto(fileout_bias, overwrite=True)
                 log.info(f"Done for camera #{cam+1} and {camera} branch")
             else:
                 log.error(f"Something went wrong for #{cam + 1} and {camera} branch")

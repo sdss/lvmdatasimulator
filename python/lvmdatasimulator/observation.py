@@ -123,6 +123,8 @@ class Observation:
     sky_template: str = None
     geocoronal: float = None
     narcs: int = 1
+    nflats: int = 3
+    nbias: int = 10
     arc_exptimes: List[int] = field(default_factory=lambda: [10])
     flat_exptimes: List[int] = field(default_factory=lambda: [10])
     std_exptimes: List[int] = field(default_factory=lambda: [10])
