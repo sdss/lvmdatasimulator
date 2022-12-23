@@ -373,6 +373,7 @@ class Nebula:
         else:
             with fits.open(lvmdatasimulator.CLOUDY_MODELS) as hdu:
                 flux_ratios = hdu[self.spectrum_id].data[1:, 1]
+                flux_ratios = flux_ratios[hdu[self.spectrum_id].data[1:, 0] > 0]
                 index_ha = np.flatnonzero(hdu[self.spectrum_id].data[1:, 0] == 6562.81)
                 if self.n_brightest_lines is not None and \
                         (self.n_brightest_lines > 0) and (self.n_brightest_lines < len(flux_ratios)):
@@ -844,6 +845,7 @@ class Cloud(Nebula):
             radius = hdu[self.spectrum_id].data[0, 2:] * (self.thickness * self.radius) + \
                      self.radius * (1 - self.thickness)
             fluxes = hdu[self.spectrum_id].data[1:, 2:]
+            fluxes = fluxes[hdu[self.spectrum_id].data[1:, 0] > 0]
             radius = np.insert(radius, 0, self.radius * (1 - self.thickness))
             fluxes = np.insert(fluxes, 0, fluxes[:, 0], axis=1)
             index_ha = np.flatnonzero(hdu[self.spectrum_id].data[1:, 0] == 6562.81)
@@ -1111,6 +1113,7 @@ class Cloud3D(Nebula):
             radius = hdu[self.spectrum_id].data[0, 2:] * (self.thickness * self.radius) + \
                      self.radius * (1 - self.thickness)
             fluxes = hdu[self.spectrum_id].data[1:, 2:]
+            fluxes = fluxes[hdu[self.spectrum_id].data[1:, 0] > 0]
             radius = np.insert(radius, 0, self.radius * (1 - self.thickness))
             fluxes = np.insert(fluxes, 0, fluxes[:, 0], axis=1)
             index_ha = np.flatnonzero(hdu[self.spectrum_id].data[1:, 0] == 6562.81)
@@ -1439,6 +1442,7 @@ class ISM:
                         filename = lvmdatasimulator.MAPPINGS_MODELS
                     with fits.open(filename) as hdu:
                         wl_list = hdu[obj_to_add.spectrum_id].data[1:, 0]
+                        wl_list = wl_list[wl_list > 0]
                         if obj_to_add.n_brightest_lines is not None and \
                                 (obj_to_add.n_brightest_lines > 0) and (obj_to_add.n_brightest_lines < len(wl_list)):
                             wl_list = wl_list[np.argsort(hdu[obj_to_add.spectrum_id].data[1:, 1]
@@ -1468,6 +1472,19 @@ class ISM:
         if type(obj_to_add) == Bubble:
             self._add_fits_extension(name="Comp_{0}_LineProfile".format(obj_id), value=obj_to_add.line_profile.value,
                                      obj_to_add=obj_to_add, zorder=zorder, add_fits_kw=add_fits_kw)
+        if type(obj_to_add) in [Bubble, Bubble3D, Cloud, Cloud3D] and not obj_to_add.linerat_constant:
+            with fits.open(lvmdatasimulator.CLOUDY_MODELS) as hdu:
+                row_te = np.flatnonzero(hdu[obj_to_add.spectrum_id].data[:, 0] == -1)
+                row_ne = np.flatnonzero(hdu[obj_to_add.spectrum_id].data[:, 0] == -2)
+                if len(row_te) == 1 and len(row_ne) == 1:
+                    phys_params = np.zeros(shape=(3, hdu[obj_to_add.spectrum_id].data.shape[1] - 2), dtype=float)
+                    phys_params[0, :] = obj_to_add.radius.to_value(u.pc) * (
+                            1 + obj_to_add.thickness * (hdu[obj_to_add.spectrum_id].data[0, 2:] - 1))
+                    phys_params[1, :] = hdu[obj_to_add.spectrum_id].data[row_te, 2:]
+                    phys_params[2, :] = hdu[obj_to_add.spectrum_id].data[row_ne, 2:]
+
+                    self._add_fits_extension(name="Comp_{0}_PhysParams".format(obj_id), value=phys_params,
+                                             obj_to_add=obj_to_add, zorder=zorder, add_fits_kw=add_fits_kw)
 
         if obj_to_add.vel_field is not None:
             self._add_fits_extension(name="Comp_{0}_Vel".format(obj_id), value=obj_to_add.vel_field.value,
