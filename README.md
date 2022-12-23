@@ -70,7 +70,7 @@ At the moment, we prepared two tutorials for users on how to use the code.
 <a id="files"></a>
 
 Source field require the pre-calculated Cloudy models for proper work. Default version can be obtained in this way:
-``wget ftp@ftp.das.uchile.cl:/pub/enrico/LVM_cloudy_models.fits``
+``wget ftp@ftp.das.uchile.cl:/pub/enrico/LVM_cloudy_models_phys.fits``
 It should be stored in the ``data`` directory. This file has a specific format that is described below. Users can generate their own model grids.
 
 Another file that is required for running source field is the templates of stellar population. It can be fetched in this way:
@@ -105,6 +105,8 @@ It is an array wit size n_lines x 2 elements, where the first row shows the exac
 - *Comp_{ID}\_Disp* - map of the distribution of velocity dispersion in this particular nebula; if not present, then assumed to be uniform and equal to *TURBVEL*
 - *Comp_{ID}\_LineProfile* - 3D array with the line profile relative to SysVel; **if present - it already includes broadening and variations in velocity field !**
 - *Comp_{ID}\_Continuum* - 2D array containing the information about the wavelength (1 row) and flux (second row) of the continuum
+- *Comp_{ID}\_PhysParams* - 3xN array containing the radial distribution of the physical parameters: Te (2nd row) and Ne (3rd row). First row contains radius from the nebula center in parsecs. Created only if the nebula is Cloud, Bubble, Cloud3D or Bubble3d and corresponding spectrum is from Cloudy grid
+
 
 
 The primary extension contains the following important fields:
