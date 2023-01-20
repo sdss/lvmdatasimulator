@@ -1477,12 +1477,17 @@ class ISM:
                 row_te = np.flatnonzero(hdu[obj_to_add.spectrum_id].data[:, 0] == -1)
                 row_ne = np.flatnonzero(hdu[obj_to_add.spectrum_id].data[:, 0] == -2)
                 if len(row_te) == 1 and len(row_ne) == 1:
-                    phys_params = np.zeros(shape=(3, hdu[obj_to_add.spectrum_id].data.shape[1] - 2), dtype=float)
+                    n_rows_abund = int(abs(np.nanmin(hdu[obj_to_add.spectrum_id].data[:, 0])))-2
+                    phys_params = np.zeros(shape=(3+n_rows_abund, hdu[obj_to_add.spectrum_id].data.shape[1] - 2),
+                                           dtype=float)
                     phys_params[0, :] = obj_to_add.radius.to_value(u.pc) * (
                             1 + obj_to_add.thickness * (hdu[obj_to_add.spectrum_id].data[0, 2:] - 1))
                     phys_params[1, :] = hdu[obj_to_add.spectrum_id].data[row_te, 2:]
                     phys_params[2, :] = hdu[obj_to_add.spectrum_id].data[row_ne, 2:]
-
+                    if n_rows_abund > 0:
+                        for abund_id in range(n_rows_abund):
+                            row_cur_abund = np.flatnonzero(hdu[obj_to_add.spectrum_id].data[:, 0] == -3-abund_id)[0]
+                            phys_params[3+abund_id, :] = hdu[obj_to_add.spectrum_id].data[row_cur_abund, 2:]
                     self._add_fits_extension(name="Comp_{0}_PhysParams".format(obj_id), value=phys_params,
                                              obj_to_add=obj_to_add, zorder=zorder, add_fits_kw=add_fits_kw)
 
