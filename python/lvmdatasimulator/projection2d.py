@@ -403,7 +403,7 @@ def cre_raw_exp(input_spectrum, fibtype, ring, position, wave_ccd, wave, nfib=60
                 fib_id_on_slit[i] = np.atleast_1d(fibers_mapping['id'][cur_fiber_num_in_mapping])[0]
 
         fib_id_in_ring = np.zeros(nfib, dtype=int) - 1
-        # This array have the IDs = -1 for those fibers that are not used in the simulations
+        # This array has the IDs = -1 for those fibers that are not used in the simulations
         for cur_fiber_num in range(nfib):
             nt = np.flatnonzero(fib_id_on_slit == (cur_fiber_num + 1))
             if len(nt) > 0:
@@ -445,8 +445,6 @@ def cre_raw_exp(input_spectrum, fibtype, ring, position, wave_ccd, wave, nfib=60
         y1 = ccd_props[sector_map[key][3]] + 1
         x0 = np.min([ccd_props[sector_map[key][0]], ccd_middle_x_pos])
         x1 = np.max([ccd_props[sector_map[key][1]] + 1, ccd_middle_x_pos])
-
-        # TODO: Question to DRP team - should we save exactly the same bias as is in the science frame, or not?
 
         output[y0: y1, x0: x1] = \
             output[y0: y1, x0: x1] / ccd_props[f'gain_{key}'] + \

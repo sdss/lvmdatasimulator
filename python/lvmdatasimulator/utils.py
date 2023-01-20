@@ -614,6 +614,3 @@ def convolve_for_gaussian(spectrum, fwhm, boundary):
     kernel = Gaussian1DKernel(stddev=stddev.value, x_size=size.value)  # gaussian kernel
     return convolve(spectrum, kernel, boundary=boundary)
 
-
-
-
