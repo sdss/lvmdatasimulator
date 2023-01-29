@@ -33,65 +33,65 @@ from tqdm import tqdm
 #     exp_time: u.s = 900 * u.s  # Exposure time
 
 
+def spec_fragment_convolve_psf(spec_oversampled_cut=None, xpos_oversampled_cut=None, xpos_ccd=None, ypos_ccd=None,
+                               focus=None, convolve_half_window=10):
+    # == Convolve with PSF
+    ny_conv = int(convolve_half_window*2+1)
+    nx_conv = len(spec_oversampled_cut)
+    x_t, y_t = np.meshgrid((xpos_oversampled_cut-xpos_ccd),
+                           np.arange(ny_conv) - convolve_half_window)
+    # TODO check what is in the FOCUS files. What in the 1st and 2nd column? PSF along the slit and disp?
+    #  Or vice-versa? For now - assume that 0 is along dispersion axis (in agreement with the code below),
+    #  although it is cotrary to Hector's example
+    psf_x = np.ones(shape=(ny_conv, nx_conv), dtype=float) * focus[0, int(xpos_ccd), int(ypos_ccd)]  # psf along the dispersion axis
+    psf_y = np.ones(shape=(ny_conv, nx_conv), dtype=float) * focus[1, int(xpos_ccd), int(ypos_ccd)]  # psf along the slit
+    psf_xy = np.ones(shape=(ny_conv, nx_conv), dtype=float) * focus[2, int(xpos_ccd), int(ypos_ccd)]  # psf covariance
+
+    return np.nansum(
+        np.exp(-0.5 / (1 - psf_xy ** 2) * ((x_t / psf_x) ** 2 + (y_t / psf_y) ** 2 -
+                                           2 * psf_xy * (y_t / psf_y) * (x_t / psf_x))) /
+        (2 * np.pi * psf_x * psf_y * np.sqrt(1 - psf_xy ** 2)) * spec_oversampled_cut[None, :],
+        axis=1)
+
+
 def spec_2d_projection_parallel(params):
     spec_cur_fiber, pix_grid_input_on_ccd, cur_fiber_num, nfib, bunds1, fibs1, focus, \
         ccd_size, ccd_gap_size, ccd_gap_left = params
 
-    let = 800  # TODO Should decide how to parameterize all these in a single config file
-    r = let * 2.7
-    then = np.arcsin((cur_fiber_num - (nfib / 2.)) / r)
-    dr = np.cos(then) * r - let * 2.3
-    dx = int(dr)  # TODO we should get rid of int values here (?)
-    nx = len(spec_cur_fiber)
     ind_in_block = cur_fiber_num % config_2d['nfib_per_block']
     id_of_block = np.floor(cur_fiber_num / config_2d['nfib_per_block']).astype(int)
 
     # Cross-disp. position of the center of the fiber
-    dt = float(config_2d['null_fiber_offset']
+    cur_fiber_on_ccd = float(config_2d['null_fiber_offset']
                ) + np.sum([bunds1[tmp_id] for tmp_id in range(id_of_block + 1)]) + fibs1[id_of_block] * ind_in_block
     if id_of_block > 0:
-        dt += np.sum([fibs1[tmp_id] * config_2d['nfib_per_block'] for tmp_id in range(id_of_block)])
+        cur_fiber_on_ccd += np.sum([fibs1[tmp_id] * config_2d['nfib_per_block'] for tmp_id in range(id_of_block)])
 
-    dy = int(dt)  # TODO we should get rid of int values here?
-    off = dy - dt
-    dc = 10.0  # Half size of the window for convolution
-    dtt = int(dc)
-    nxt = int(dc * 2 + 1)
-    nyt = int(dc * 2 + 1)
-    spec_res = np.zeros(shape=(int(ccd_size[0] - ccd_gap_size - dx + dtt), int(dc * 2 + 1)), dtype=float)
+    r = config_2d['lines_curvature'][0]*ccd_size[1]
+    dxc_offset = config_2d['lines_curvature'][1] - r + np.sqrt(r ** 2 - (cur_fiber_on_ccd - (ccd_size[1]*0.5)) ** 2)
+    convolve_half_window = 10  # Half size of the window for convolution
+    spec_res = np.zeros(shape=(int(convolve_half_window * 2 + 1), int(ccd_size[0] - ccd_gap_size)), dtype=float)
 
-    x_t = np.arange(nxt) * 1.0 - dc + off
-    y_t = np.arange(nyt) * 1.0 - dc
-    x_t = np.array([x_t] * nyt)
-    y_t = np.array([y_t] * nxt).T
-    spec_t = np.zeros([int(nx + 2 * dc), nyt])
-    for j in range(nx):
-        xo = dx + np.round(pix_grid_input_on_ccd[j]).astype(int)  # TODO: get rid of ints?
-        yo = dy + int(dc)  # TODO: get rid of ints?
-        if xo >= (ccd_size[0] - ccd_gap_size):
-            xo = (ccd_size[0] - ccd_gap_size) - 1
-        ds_x = np.array([np.ones(nyt) * focus[0, xo, yo]] * nxt).T
-        ds_y = np.array([np.ones(nyt) * focus[1, xo, yo]] * nxt).T
-        rho = np.array([np.ones(nyt) * focus[2, xo, yo]] * nxt).T
-        Att = np.array([np.ones(nyt) * spec_cur_fiber[j]] * nxt).T
-        spec_ttt = np.exp(-0.5 / (1 - rho ** 2) * (
-                    (x_t / ds_x) ** 2.0 + (y_t / ds_y) ** 2.0 - 2 * rho * (y_t / ds_y) * (x_t / ds_x))) / (
-                               2 * np.pi * ds_x * ds_y * np.sqrt(1 - rho ** 2)) * Att
-        spec_t[j:j + int(2 * dc + 1), :int(2 * dc + 1)] += spec_ttt
-
-    for j in range(int(ccd_size[0] - ccd_gap_size - dx + dtt)):
-        n1 = np.flatnonzero((pix_grid_input_on_ccd >= j) & (pix_grid_input_on_ccd < (j + 1)))
-        if len(n1) > 0:
-            val = np.nansum(spec_t[n1, :], axis=0)
+    # for cur_pix in range(int(dxc_offset - convolve_half_window), ccd_size[0] - ccd_gap_size):
+    for cur_pix in range(ccd_size[0] - ccd_gap_size):
+        pix_oversampled = np.flatnonzero((pix_grid_input_on_ccd >= (cur_pix - dxc_offset - convolve_half_window)) &
+                                         (pix_grid_input_on_ccd < (cur_pix - dxc_offset + convolve_half_window + 1)))
+        if len(pix_oversampled) > 0:
+            val = spec_fragment_convolve_psf(spec_oversampled_cut=spec_cur_fiber[pix_oversampled],
+                                             xpos_oversampled_cut=pix_grid_input_on_ccd[pix_oversampled]+dxc_offset,
+                                             xpos_ccd=cur_pix, ypos_ccd=cur_fiber_on_ccd, focus=focus,
+                                             convolve_half_window=convolve_half_window
+                                             )
         else:
             val = 0
-        spec_res[j, :] = val
-    spec_res_projection = np.zeros(shape=(spec_res.shape[1], ccd_size[0]), dtype=float)
-    spec_res_projection[:, dx - dtt: ccd_gap_left + 1] = spec_res.T[:, : ccd_gap_left - dx + dtt + 1]
-    spec_res_projection[:, ccd_gap_left + ccd_gap_size + 1:] = \
-        spec_res.T[:, ccd_gap_left - dx + dtt + 1:]
+        spec_res[:, cur_pix] = val
 
-    return spec_res_projection, (dy, dy + nyt)
+    spec_res_projection = np.zeros(shape=(spec_res.shape[0], ccd_size[0]), dtype=float)
+    spec_res_projection[:, : ccd_gap_left + 1] = spec_res[:, : ccd_gap_left + 1]
+    spec_res_projection[:, ccd_gap_left + ccd_gap_size + 1:] = spec_res[:, ccd_gap_left + 1:]
+
+    return spec_res_projection, (int(cur_fiber_on_ccd - convolve_half_window),
+                                 int(cur_fiber_on_ccd + convolve_half_window))
 
 
 def cosmic_rays(ccdimage, n_cr=100, std_cr=5, deep=10.0, cr_intensity=1e5):
@@ -411,7 +411,8 @@ def cre_raw_exp(input_spectrum, fibtype, ring, position, wave_ccd, wave, nfib=60
 
         # Wavelength solution
         # TODO: This should be defined for each fiber to account for the differences in wavelength solution between them
-        pix_grid_input_on_ccd = interp1d(wave_ccd, np.arange(len(wave_ccd)), bounds_error=False, fill_value=-10)(wave)
+        pix_grid_input_on_ccd = interp1d(wave_ccd, np.arange(len(wave_ccd)), bounds_error=False,
+                                         fill_value='extrapolate')(wave)
 
         log.info(f"Project the spectra of camera #{cam} and {channel_type} channel onto CCD")
         # results = []
@@ -423,16 +424,26 @@ def cre_raw_exp(input_spectrum, fibtype, ring, position, wave_ccd, wave, nfib=60
         #                                    fibs1, focus,
         #                                    ccd_size, ccd_gap_size, ccd_props['x1'])))
 
+
+        # pixtab_wl_solution = apply_wl_solution(pix_grid_input_on_ccd)
+
+        # results = []
+        # for cur_fiber_num in range(nfib):
+        #     if fib_id_in_ring[cur_fiber_num] >= 0:
+        #         results.append(spec_2d_projection_parallel((input_spectrum[fib_id_in_ring[cur_fiber_num], :],
+        #                                                               pix_grid_input_on_ccd, cur_fiber_num, nfib, bunds1,
+        #                  §12]asdf                                             fibs1, focus,
+        #                                                               ccd_size, ccd_gap_size, ccd_props['x1'])))
         with Pool(n_process) as p:
             results = list(tqdm(p.imap(spec_2d_projection_parallel, [(input_spectrum[fib_id_in_ring[cur_fiber_num], :],
-                                                                    pix_grid_input_on_ccd, cur_fiber_num, nfib, bunds1,
-                                                                    fibs1, focus,
-                                                                    ccd_size, ccd_gap_size, ccd_props['x1'])
-                                                                    for cur_fiber_num in range(nfib)
-                                                                    if fib_id_in_ring[cur_fiber_num] >= 0]),
+                                                                      pix_grid_input_on_ccd, cur_fiber_num, nfib, bunds1,
+                                                                      fibs1, focus,
+                                                                      ccd_size, ccd_gap_size, ccd_props['x1'])
+                                                                     for cur_fiber_num in range(nfib)
+                                                                     if fib_id_in_ring[cur_fiber_num] >= 0]),
                                 total=np.sum(fib_id_in_ring >= 0)))
         for res_element in results:
-            output[res_element[1][0]: res_element[1][1], :] += res_element[0]
+            output[res_element[1][0]: res_element[1][1]+1, :] += res_element[0]
 
     sig = ccd_noise_factor * ccd_props['noise']
     sector_map = {'1': ['x0', 'x1', 'y0', 'y1'],

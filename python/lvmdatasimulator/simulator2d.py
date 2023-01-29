@@ -131,39 +131,6 @@ class Simulator2D:
         self._area_fiber = np.pi * (self.bundle.fibers_science[0].diameter / 2) ** 2
         self._fibers_per_spec = int(self.bundle.max_fibers / 3)
 
-    # def create_2d_transformation(self):
-    #     """
-    #     Create files defining all geometry transformations
-    #     based on the lab measurements and config files in the data directory
-    #
-    #     Returns:
-    #         ???
-    #
-    #     """
-    #     log.info("Creating the pixel tab for geometric transform")
-    #     fiber_tab = get_fibers_table(science=True)
-    #     calib_fibers = fiber_tab[fiber_tab['type'] == 'std']
-    #     fibers_mapping = ascii.read(os.path.join(DATA_DIR, 'instrument', 'fibers',
-    #                                              f"{config_2d['fibers_ccd_map_name']}"))
-    #     for branch in self.spectrograph.branches:
-    #         camera = branch.name
-    #         if camera == 'blue':
-    #             expn = '00002998'
-    #         elif camera == 'red':
-    #             expn = '00001563'
-    #         elif camera == 'ir':
-    #             expn = '00001563'
-    #         else:
-    #             log.error(f"Unrecognized spectrograph branch: {camera}")
-    #             return
-    #         for ccdnum in range(1, 4):
-    #             if ccdnum > 1:
-    #                 continue
-    #             lab_wl_file = f'{DATA_DIR}/instrument/sdR-s-{camera}{ccdnum}-{expn}.disp.fits'
-    #             wave2d, _ = fits.getdata(lab_wl_file, 0, header=True)
-    #             wave_input = self._wl_grid[self._wl_grid > branch.wavecoord.start, self._wl_grid < branch.wavecoord.end]
-    #             propagate_wl_solution(wave_oversampled=wave_input)#, fiber_pos=)
-
     def create_flat(self):
 
         log.info('Creating flat fields...')
@@ -197,8 +164,7 @@ class Simulator2D:
 
             log.info('Including Ne lamp...')
 
-            arcs[1] = util.resample_spectrum(self._wl_grid, data['wave'], data['flux'],
-                                             fast=self.fast)
+            arcs[1] = util.resample_spectrum(self._wl_grid, data['wave'], data['flux'], fast=self.fast)
 
         if ar:
             filename = os.path.join(DATA_DIR, 'lamps', 'argon_arc_sb.dat')
@@ -206,8 +172,7 @@ class Simulator2D:
 
             log.info('Including Ar lamp...')
 
-            arcs[2] = util.resample_spectrum(self._wl_grid, data['wave'], data['flux'],
-                                             fast=self.fast)
+            arcs[2] = util.resample_spectrum(self._wl_grid, data['wave'], data['flux'], fast=self.fast)
 
         if xe:
             filename = os.path.join(DATA_DIR, 'lamps', 'xenon_arc_sb.dat')
@@ -218,10 +183,8 @@ class Simulator2D:
             arcs[3] = util.resample_spectrum(self._wl_grid, data['wave'], data['flux'],
                                              fast=self.fast)
 
-
         # collapsing in the single required arc
         arcs = arcs.sum(axis=0)
-
 
         self._project_2d_calibs(arcs, 'arc', self.observation.arc_exptimes, self.observation.narcs)
 
@@ -354,12 +317,12 @@ class Simulator2D:
             tmp_science = science * branch.efficiency(self._wl_grid)
             tmp_std = std * branch.efficiency(self._wl_grid)
 
-            new_sky[branch.name], _ = reduce_size(tmp_sky, self._wl_grid, branch.wavecoord.start,
-                                               branch.wavecoord.end)
-            new_sci[branch.name], _ = reduce_size(tmp_science, self._wl_grid, branch.wavecoord.start,
-                                               branch.wavecoord.end)
-            new_std[branch.name], wave = reduce_size(tmp_std, self._wl_grid, branch.wavecoord.start,
-                                                     branch.wavecoord.end)
+            new_sky[branch.name], _ = reduce_size(tmp_sky, self._wl_grid,
+                                                  branch.wavecoord.start, branch.wavecoord.end)
+            new_sci[branch.name], _ = reduce_size(tmp_science, self._wl_grid,
+                                                  branch.wavecoord.start,branch.wavecoord.end)
+            new_std[branch.name], wave = reduce_size(tmp_std, self._wl_grid,
+                                                     branch.wavecoord.start, branch.wavecoord.end)
             new_wave[branch.name] = wave
 
         for i, time in enumerate(self.observation.exptimes):
@@ -461,7 +424,6 @@ class Simulator2D:
         wave2d, _ = fits.getdata(cube_file, 0, header=True)
         wave_ccd = np.nanmean(wave2d, axis=0)
 
-        # this is a good point for parallelization but we need to modify run_2d
         channel_index = {'blue': 'b', 'red': 'r', 'ir': 'z'}
         for cam in range(3):
             projected_spectra = cre_raw_exp(spectra, fibtype=fibtype, ring=ringid,
