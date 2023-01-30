@@ -430,7 +430,7 @@ class Simulator2D:
                                             position=pos, wave_ccd=wave_ccd, wave=wave,
                                             nfib=self._fibers_per_spec, channel_type=camera,
                                             cam=cam+1, n_cr=n_cr, exp_name=exp_name,
-                                            exp_time=exptime,  # self.observation.narcs,
+                                            exp_time=exptime,
                                             ra=self.observation.ra, dec=self.observation.dec,
                                             mjd=str(self.observation.mjd),
                                             flb=exp_type, add_cr_hits=n_cr > 0)

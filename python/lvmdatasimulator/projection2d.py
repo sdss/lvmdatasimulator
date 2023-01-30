@@ -39,7 +39,12 @@ def spec_fragment_convolve_psf(spec_oversampled_cut=None, xpos_oversampled_cut=N
     ny_conv = int(convolve_half_window*2+1)
     nx_conv = len(spec_oversampled_cut)
     x_t, y_t = np.meshgrid((xpos_oversampled_cut-xpos_ccd),
-                           np.arange(ny_conv) - convolve_half_window)
+                           np.arange(ny_conv).astype(float) - convolve_half_window)
+
+    a0, b0, a2, b2, a1, b1, xc, yc = np.array(config_2d['trace_curvature']).astype(float)
+    dy_offset = (a2*(y_t + ypos_ccd - yc)**2 + a1*(y_t + ypos_ccd - yc) + a0) * (x_t + xpos_ccd - xc) ** 2 + (
+            b2 * (y_t + ypos_ccd - yc) ** 2 + b1 * (y_t + ypos_ccd - yc) + b0) * (x_t + xpos_ccd - xc)
+    y_t -= dy_offset
     # TODO check what is in the FOCUS files. What in the 1st and 2nd column? PSF along the slit and disp?
     #  Or vice-versa? For now - assume that 0 is along dispersion axis (in agreement with the code below),
     #  although it is cotrary to Hector's example
@@ -62,25 +67,26 @@ def spec_2d_projection_parallel(params):
     id_of_block = np.floor(cur_fiber_num / config_2d['nfib_per_block']).astype(int)
 
     # Cross-disp. position of the center of the fiber
-    cur_fiber_on_ccd = float(config_2d['null_fiber_offset']
-               ) + np.sum([bunds1[tmp_id] for tmp_id in range(id_of_block + 1)]) + fibs1[id_of_block] * ind_in_block
+    cur_fiber_on_ccd = float(config_2d['null_fiber_offset']) + np.sum(
+        [bunds1[tmp_id] for tmp_id in range(id_of_block + 1)]) + fibs1[id_of_block] * ind_in_block
     if id_of_block > 0:
         cur_fiber_on_ccd += np.sum([fibs1[tmp_id] * config_2d['nfib_per_block'] for tmp_id in range(id_of_block)])
 
     r = config_2d['lines_curvature'][0]*ccd_size[1]
     dxc_offset = config_2d['lines_curvature'][1] - r + np.sqrt(r ** 2 - (cur_fiber_on_ccd - (ccd_size[1]*0.5)) ** 2)
-    convolve_half_window = 10  # Half size of the window for convolution
-    spec_res = np.zeros(shape=(int(convolve_half_window * 2 + 1), int(ccd_size[0] - ccd_gap_size)), dtype=float)
+    convolve_half_window_x = 8  # Half size of the window for convolution
+    convolve_half_window_y = 15  # Value is higher to get the curvature into account
+    spec_res = np.zeros(shape=(int(convolve_half_window_y * 2 + 1), int(ccd_size[0] - ccd_gap_size)), dtype=float)
 
     # for cur_pix in range(int(dxc_offset - convolve_half_window), ccd_size[0] - ccd_gap_size):
     for cur_pix in range(ccd_size[0] - ccd_gap_size):
-        pix_oversampled = np.flatnonzero((pix_grid_input_on_ccd >= (cur_pix - dxc_offset - convolve_half_window)) &
-                                         (pix_grid_input_on_ccd < (cur_pix - dxc_offset + convolve_half_window + 1)))
+        pix_oversampled = np.flatnonzero((pix_grid_input_on_ccd >= (cur_pix - dxc_offset - convolve_half_window_x)) &
+                                         (pix_grid_input_on_ccd < (cur_pix - dxc_offset + convolve_half_window_x + 1)))
         if len(pix_oversampled) > 0:
             val = spec_fragment_convolve_psf(spec_oversampled_cut=spec_cur_fiber[pix_oversampled],
                                              xpos_oversampled_cut=pix_grid_input_on_ccd[pix_oversampled]+dxc_offset,
                                              xpos_ccd=cur_pix, ypos_ccd=cur_fiber_on_ccd, focus=focus,
-                                             convolve_half_window=convolve_half_window
+                                             convolve_half_window=convolve_half_window_y
                                              )
         else:
             val = 0
@@ -90,8 +96,8 @@ def spec_2d_projection_parallel(params):
     spec_res_projection[:, : ccd_gap_left + 1] = spec_res[:, : ccd_gap_left + 1]
     spec_res_projection[:, ccd_gap_left + ccd_gap_size + 1:] = spec_res[:, ccd_gap_left + 1:]
 
-    return spec_res_projection, (int(cur_fiber_on_ccd - convolve_half_window),
-                                 int(cur_fiber_on_ccd + convolve_half_window))
+    return spec_res_projection, (int(cur_fiber_on_ccd - convolve_half_window_y),
+                                 int(cur_fiber_on_ccd + convolve_half_window_y))
 
 
 def cosmic_rays(ccdimage, n_cr=100, std_cr=5, deep=10.0, cr_intensity=1e5):
@@ -432,7 +438,7 @@ def cre_raw_exp(input_spectrum, fibtype, ring, position, wave_ccd, wave, nfib=60
         #     if fib_id_in_ring[cur_fiber_num] >= 0:
         #         results.append(spec_2d_projection_parallel((input_spectrum[fib_id_in_ring[cur_fiber_num], :],
         #                                                               pix_grid_input_on_ccd, cur_fiber_num, nfib, bunds1,
-        #                  §12]asdf                                             fibs1, focus,
+        #                                                               fibs1, focus,
         #                                                               ccd_size, ccd_gap_size, ccd_props['x1'])))
         with Pool(n_process) as p:
             results = list(tqdm(p.imap(spec_2d_projection_parallel, [(input_spectrum[fib_id_in_ring[cur_fiber_num], :],
