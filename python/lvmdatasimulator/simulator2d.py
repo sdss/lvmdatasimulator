@@ -269,9 +269,9 @@ class Simulator2D:
         # simulating sky
         self.extract_sky()
         sky_e = util.flam2epp(self._wl_grid, self.sky, self._disp) * u.electron
+
         sky_fiber = sky_e * self.telescope.aperture_area
         sky = expand_to_full_fiber(sky_fiber, len(self.index))
-
         assert sky.shape == spectra.shape, 'Something wrong with sky and spectra'
 
         self.total_spectra = sky + spectra   # this is in electron
@@ -385,7 +385,7 @@ class Simulator2D:
                     return
 
                 log.info(f'Saving {calib_name} exposures with exptime {time}s')
-                for branch in self.spectrograph.branches[0]:
+                for branch in self.spectrograph.branches:
                     name = branch.name
                     if calib_name == 'bias':
                         calib_final = None
@@ -435,7 +435,7 @@ class Simulator2D:
                                             mjd=str(self.observation.mjd),
                                             flb=exp_type, add_cr_hits=n_cr > 0)
             if projected_spectra is not None:
-                fileout_data = os.path.join(self.outdir, 'sdR-' + channel_index[camera] + '-' + f"{exp_name:08}" + '.fits')
+                fileout_data = os.path.join(self.outdir, f'sdR-{channel_index[camera]}{cam+1}-{exp_name:08}.fits')
                 if self.compress:
                     fileout_data += '.gz'
                 projected_spectra[0].writeto(fileout_data, overwrite=True)
