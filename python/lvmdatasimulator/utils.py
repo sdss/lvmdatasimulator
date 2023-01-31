@@ -619,6 +619,15 @@ def convolve_for_gaussian(spectrum, fwhm, boundary):
 
 
 def yaml_to_plugmap(yaml_file):
+    """
+    Convert the machine readable fiber file in the format required by the simulator.
+    The output is a plugmap.dat file that i saved directly into data/instrument/fibers
+
+    Args:
+        yaml_file (string):
+            complete name (including path) to the machine readable yaml file with the fiber info
+
+    """
 
     # creating a big table with the current arrays
     name_science = '/home/econgiu/Data/LVM/lvmdatasimulator/data/instrument/science_array.dat'
