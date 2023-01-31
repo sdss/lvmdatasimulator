@@ -386,7 +386,7 @@ def cre_raw_exp(input_spectrum, fibtype, ring, position, wave_ccd, wave, nfib=60
         try:
             # TODO: at the moment, these files are of 4120x4080 size. Perhaps they should either take into account the
             #  gap, or be of 4080x4080 size. For now, I cut the excess
-            focus = fits.getdata(os.path.join(DATA_DIR, 'instrument',
+            focus = fits.getdata(os.path.join(DATA_DIR, 'focus',
                                             f"{config_2d['psf_rootname']}_{channel_type}{cam}.fits.gz"),
                                 0, header=False).T[:, :ccd_size[0]-ccd_gap_size, :]
         except FileNotFoundError:
@@ -394,7 +394,8 @@ def cre_raw_exp(input_spectrum, fibtype, ring, position, wave_ccd, wave, nfib=60
             focus[1, :, :] = 0.9
             focus[2, :, :] = 0.0
             log.warning(f'PSF data for {channel_type} channel is not found. Using default PSF = 1 pixel')
-
+        import sys
+        sys.exit()
         # Fiber mapping
         # TODO: perhaps this is unnecessary - parameters ring, fibtype, position,... were derived from full_array.dat, ...,
         #  and these are very similar to plugmap.dat. Maybe these two files should be merged into a single file?
