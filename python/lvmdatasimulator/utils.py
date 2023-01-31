@@ -24,6 +24,9 @@ from sympy import divisors
 from scipy.interpolate import RectBivariateSpline, interp1d
 from spectres import spectres
 from astropy.convolution import Gaussian1DKernel, convolve
+from astropy.io.misc import yaml
+
+from lvmdatasimulator import DATA_DIR
 
 
 # unit conversions
@@ -614,3 +617,85 @@ def convolve_for_gaussian(spectrum, fwhm, boundary):
     kernel = Gaussian1DKernel(stddev=stddev.value, x_size=size.value)  # gaussian kernel
     return convolve(spectrum, kernel, boundary=boundary)
 
+
+def yaml_to_plugmap(yaml_file):
+
+    # creating a big table with the current arrays
+    name_science = '/home/econgiu/Data/LVM/lvmdatasimulator/data/instrument/science_array.dat'
+
+    table_old = ascii.read(name_science)
+
+    # open the new machine readable file and rearranging it as astropy table
+    with open(yaml_file) as ff:
+        fibers = yaml.load(ff)
+
+    table_new = Table(rows=fibers['fibers'], names=['fiberid', 'spectrographid', 'blockid',
+                                                    'finblock', 'targettype', 'ifulabel',
+                                                    'finifu', 'xpmm', 'ypmxx', 'ringnum',
+                                                    'fibstatus'])
+
+    # convert from mm to arcsec -> yaml offsets are in mm
+    conv = 37/0.33
+
+    table_new['xpmm'] *= conv
+    table_new['ypmxx'] *= conv
+
+    # rotating the science array to match the actual orientation
+    angle_rad = 90 * np.pi / 180  # to radians
+
+    # Angle grows moving from north to east!
+
+    newx = table_old['x'] * np.cos(angle_rad) + table_old['y'] * np.sin(angle_rad)
+    newy = table_old['y'] * np.cos(angle_rad) - table_old['x'] * np.sin(angle_rad)
+
+    table_old['x'] = newx
+    table_old['y'] = newy
+
+
+    # reordering the info that need to go into the plugmap
+    table_new['ring_id'] = np.zeros(len(table_new))
+    table_new['fiber_id'] = np.zeros(len(table_new))
+    stype = []
+    slit = []
+    table_new['id'] = np.zeros(len(table_new))
+
+    for i, row in enumerate(table_new):
+        # matching the fibers in both table
+        dist = np.sqrt((table_old['x'] - table_new['xpmm'][i])**2 +
+                       (table_old['y'] - table_new['ypmxx'][i])**2)
+        id = np.argmin(dist)
+
+        # associating the correct info to each column
+        table_new['ring_id'][i] = table_old['ring_id'][id]
+        table_new['fiber_id'][i] = table_old['fiber_id'][id]
+        if row['targettype'] == 'science':
+            stype.append('science')
+        elif row['targettype'] == 'standard':
+            stype.append('std')
+        elif row['targettype'] == 'SKY' and row['ifulabel'].startswith('A'):
+            stype.append('sky1')
+        else:
+            stype.append('sky2')
+
+        slit.append(f'slit{row["spectrographid"]}')
+
+    table_new['slit'] = slit
+    table_new['type'] = stype
+
+    idx = np.arange(648, dtype=int)
+    mask = table_new['slit'] == 'slit1'
+    table_new['id'][mask] = idx
+
+    mask = table_new['slit'] == 'slit2'
+    table_new['id'][mask] = idx
+
+    mask = table_new['slit'] == 'slit3'
+    table_new['id'][mask] = idx
+
+    # save the final plugmap.dap
+    outtable = table_new['type','ring_id','fiber_id','slit','id'].copy()
+    for col in ['ring_id','fiber_id','id']:
+        outtable[col] = outtable[col].astype(int)
+
+    outname = os.path.join(DATA_DIR, 'instrument/fibers/plugmap.dat')
+    outtable.write(outname, format='csv', overwrite=True)
