@@ -422,7 +422,7 @@ class Simulator2D:
             return
         cube_file = f'{DATA_DIR}/instrument/sdR-s-{cam}-{expn}.disp.fits'
         wave2d, _ = fits.getdata(cube_file, 0, header=True)
-        wave_ccd = np.nanmean(wave2d, axis=0)
+        wave_ccd = wave2d[3]
 
         channel_index = {'blue': 'b', 'red': 'r', 'ir': 'z'}
         for cam in range(3):
