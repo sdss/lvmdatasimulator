@@ -394,8 +394,6 @@ def cre_raw_exp(input_spectrum, fibtype, ring, position, wave_ccd, wave, nfib=60
             focus[1, :, :] = 0.9
             focus[2, :, :] = 0.0
             log.warning(f'PSF data for {channel_type} channel is not found. Using default PSF = 1 pixel')
-        import sys
-        sys.exit()
         # Fiber mapping
         # TODO: perhaps this is unnecessary - parameters ring, fibtype, position,... were derived from full_array.dat, ...,
         #  and these are very similar to plugmap.dat. Maybe these two files should be merged into a single file?
