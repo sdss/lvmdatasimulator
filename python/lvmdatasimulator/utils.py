@@ -744,12 +744,13 @@ def compute_y_position(channel):
     with fits.open(f'{path}/{trc_name}') as hdu:
             trc_data = hdu[0].data
 
-
     fiber_id = [18, 162, 306, 325, 326, 327, 328, 329, 330, 331, 332, 333, 334, 335, 336, 337, 338,
             339, 340, 341, 342, 343, 344, 345, 346, 347, 348, 349, 350, 351, 352, 353, 354, 355,
             356, 357, 358, 359, 360, 486, 630]
 
-    interp = interp1d(fiber_id, trc_data[:, 0], fill_value='extrapolate')
+
+    # I'm using as reference the middle of the trace
+    interp = interp1d(fiber_id, trc_data[:, 2040], fill_value='extrapolate')
 
     new_fib = np.arange(36*18, dtype=int)
 
