@@ -60,20 +60,13 @@ def spec_fragment_convolve_psf(spec_oversampled_cut=None, xpos_oversampled_cut=N
 
 
 def spec_2d_projection_parallel(params):
-    spec_cur_fiber, pix_grid_input_on_ccd, cur_fiber_num, nfib, bunds1, fibs1, focus, \
+    spec_cur_fiber, pix_grid_input_on_ccd, focus, y_pos, \
         ccd_size, ccd_gap_size, ccd_gap_left = params
 
-    ind_in_block = cur_fiber_num % config_2d['nfib_per_block']
-    id_of_block = np.floor(cur_fiber_num / config_2d['nfib_per_block']).astype(int)
-
     # Cross-disp. position of the center of the fiber
-    cur_fiber_on_ccd = float(config_2d['null_fiber_offset']) + np.sum(
-        [bunds1[tmp_id] for tmp_id in range(id_of_block + 1)]) + fibs1[id_of_block] * ind_in_block
-    if id_of_block > 0:
-        cur_fiber_on_ccd += np.sum([fibs1[tmp_id] * config_2d['nfib_per_block'] for tmp_id in range(id_of_block)])
 
     r = config_2d['lines_curvature'][0]*ccd_size[1]
-    dxc_offset = config_2d['lines_curvature'][1] - r + np.sqrt(r ** 2 - (cur_fiber_on_ccd - (ccd_size[1]*0.5)) ** 2)
+    dxc_offset = config_2d['lines_curvature'][1] - r + np.sqrt(r ** 2 - (y_pos - (ccd_size[1]*0.5)) ** 2)
     convolve_half_window_x = 8  # Half size of the window for convolution
     convolve_half_window_y = 15  # Value is higher to get the curvature into account
     spec_res = np.zeros(shape=(int(convolve_half_window_y * 2 + 1), int(ccd_size[0] - ccd_gap_size)), dtype=float)
@@ -85,7 +78,7 @@ def spec_2d_projection_parallel(params):
         if len(pix_oversampled) > 0:
             val = spec_fragment_convolve_psf(spec_oversampled_cut=spec_cur_fiber[pix_oversampled],
                                              xpos_oversampled_cut=pix_grid_input_on_ccd[pix_oversampled]+dxc_offset,
-                                             xpos_ccd=cur_pix, ypos_ccd=cur_fiber_on_ccd, focus=focus,
+                                             xpos_ccd=cur_pix, ypos_ccd=y_pos, focus=focus,
                                              convolve_half_window=convolve_half_window_y
                                              )
         else:
@@ -96,8 +89,8 @@ def spec_2d_projection_parallel(params):
     spec_res_projection[:, : ccd_gap_left + 1] = spec_res[:, : ccd_gap_left + 1]
     spec_res_projection[:, ccd_gap_left + ccd_gap_size + 1:] = spec_res[:, ccd_gap_left + 1:]
 
-    return spec_res_projection, (int(cur_fiber_on_ccd - convolve_half_window_y),
-                                 int(cur_fiber_on_ccd + convolve_half_window_y))
+    return spec_res_projection, (int(y_pos - convolve_half_window_y),
+                                 int(y_pos + convolve_half_window_y))
 
 
 def cosmic_rays(ccdimage, n_cr=100, std_cr=5, deep=10.0, cr_intensity=1e5):
@@ -382,12 +375,12 @@ def cre_raw_exp(input_spectrum, fibtype, ring, position, wave_ccd, wave, nfib=60
 
     if flb != 'bias':
 
-        fibs1, bunds1 = read_op_fib(1, channel_index[channel_type] + cam)
+        # fibs1, bunds1 = read_op_fib(1, channel_index[channel_type] + cam)
         try:
             # TODO: at the moment, these files are of 4120x4080 size. Perhaps they should either take into account the
             #  gap, or be of 4080x4080 size. For now, I cut the excess
             focus = fits.getdata(os.path.join(DATA_DIR, 'focus',
-                                            f"{config_2d['psf_rootname']}_{channel_type}{cam}.fits.gz"),
+                                            f"{config_2d['psf_rootname']}_{channel_type}1.fits.gz"),
                                 0, header=False).T[:, :ccd_size[0]-ccd_gap_size, :]
         except FileNotFoundError:
             focus = np.ones([3, ccd_size[0]-ccd_gap_size, ccd_size[1]], dtype=float)
@@ -399,6 +392,7 @@ def cre_raw_exp(input_spectrum, fibtype, ring, position, wave_ccd, wave, nfib=60
         #  and these are very similar to plugmap.dat. Maybe these two files should be merged into a single file?
         fibers_mapping = ascii.read(os.path.join(DATA_DIR, 'instrument', 'fibers', f"{config_2d['fibers_ccd_map_name']}"))
         fib_id_on_slit = np.zeros(len(ring), dtype=int) - 1
+        y_pos = np.zeros(len(ring), dtype=float) - 1
         for i in range(len(ring)):
             cur_fiber_num_in_mapping = np.flatnonzero((fibers_mapping['ring_id'] == ring[i]) &
                                                     (fibers_mapping['type'] == fibtype[i]) &
@@ -406,13 +400,17 @@ def cre_raw_exp(input_spectrum, fibtype, ring, position, wave_ccd, wave, nfib=60
                                                     (fibers_mapping['fiber_id'] == position[i]))
             if len(cur_fiber_num_in_mapping) > 0:
                 fib_id_on_slit[i] = np.atleast_1d(fibers_mapping['id'][cur_fiber_num_in_mapping])[0]
+                y_pos[i] = np.atleast_1d(fibers_mapping[f'y_{channel_type}'][cur_fiber_num_in_mapping])[0]
 
         fib_id_in_ring = np.zeros(nfib, dtype=int) - 1
+        current_y_pos = np.zeros(nfib, dtype=int) - 1
         # This array has the IDs = -1 for those fibers that are not used in the simulations
         for cur_fiber_num in range(nfib):
-            nt = np.flatnonzero(fib_id_on_slit == (cur_fiber_num + 1))
+            mask = fib_id_on_slit == (cur_fiber_num + 1)
+            nt = np.flatnonzero(mask)
             if len(nt) > 0:
                 fib_id_in_ring[cur_fiber_num] = np.atleast_1d(nt)[0]
+                current_y_pos[cur_fiber_num] = y_pos[mask][0]
 
         # Wavelength solution
         # TODO: This should be defined for each fiber to account for the differences in wavelength solution between them
@@ -439,11 +437,12 @@ def cre_raw_exp(input_spectrum, fibtype, ring, position, wave_ccd, wave, nfib=60
         #                                                               pix_grid_input_on_ccd, cur_fiber_num, nfib, bunds1,
         #                                                               fibs1, focus,
         #                                                               ccd_size, ccd_gap_size, ccd_props['x1'])))
+
         with Pool(n_process) as p:
             results = list(tqdm(p.imap(spec_2d_projection_parallel, [(input_spectrum[fib_id_in_ring[cur_fiber_num], :],
-                                                                      pix_grid_input_on_ccd, cur_fiber_num, nfib, bunds1,
-                                                                      fibs1, focus,
-                                                                      ccd_size, ccd_gap_size, ccd_props['x1'])
+                                                                      pix_grid_input_on_ccd, focus,
+                                                                      current_y_pos[cur_fiber_num], ccd_size,
+                                                                      ccd_gap_size, ccd_props['x1'])
                                                                      for cur_fiber_num in range(nfib)
                                                                      if fib_id_in_ring[cur_fiber_num] >= 0]),
                                 total=np.sum(fib_id_in_ring >= 0)))
@@ -470,8 +469,8 @@ def cre_raw_exp(input_spectrum, fibtype, ring, position, wave_ccd, wave, nfib=60
     if add_cr_hits:
         output = cosmic_rays(output, n_cr=n_cr, std_cr=std_cr)
 
-    # if channel_type in ['blue', 'ir']:
-    #     output = np.fliplr(output)
+    if channel_type in ['blue', 'ir']:
+        output = np.fliplr(output)
 
     output_hdus = (ccdspec_to_hdu(output, field_name, mjd, exp_name, channel_index[channel_type],
                                   flb=flb, exp_time=exp_time, ra=ra.value, dec=dec.value, expof=expof,
