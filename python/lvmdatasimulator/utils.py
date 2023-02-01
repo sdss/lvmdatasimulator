@@ -706,5 +706,53 @@ def yaml_to_plugmap(yaml_file):
     for col in ['ring_id','fiber_id','id']:
         outtable[col] = outtable[col].astype(int)
 
+
+    # adding the y-position information
+    for channel in ['blue', 'red', 'ir']:
+
+        new_y = compute_y_position(channel)
+
+        outtable[f'y_{channel}'] = np.zeros(len(outtable))
+
+        mask = outtable['slit'] == 'slit1'
+        outtable[f'y_{channel}'][mask] = new_y
+
+        mask = outtable['slit'] == 'slit2'
+        outtable[f'y_{channel}'][mask] = new_y
+
+        mask = outtable['slit'] == 'slit3'
+        outtable[f'y_{channel}'][mask] = new_y
+
+
     outname = os.path.join(DATA_DIR, 'instrument/fibers/plugmap.dat')
     outtable.write(outname, format='csv', overwrite=True)
+
+
+def compute_y_position(channel):
+
+    trc = {'blue': '00003082',
+           'red': '00001613',
+           'ir': '00001614'}
+
+    suffix = {'blue': 'b',
+              'red': 'r',
+              'ir': 'z'}
+
+    trc_name = f'sdR-s-{suffix[channel]}1-{trc[channel]}.trc.fits'
+    path = os.path.join(DATA_DIR, 'instrument')
+
+    with fits.open(f'{path}/{trc_name}') as hdu:
+            trc_data = hdu[0].data
+
+
+    fiber_id = [18, 162, 306, 325, 326, 327, 328, 329, 330, 331, 332, 333, 334, 335, 336, 337, 338,
+            339, 340, 341, 342, 343, 344, 345, 346, 347, 348, 349, 350, 351, 352, 353, 354, 355,
+            356, 357, 358, 359, 360, 486, 630]
+
+    interp = interp1d(fiber_id, trc_data[:, 0], fill_value='extrapolate')
+
+    new_fib = np.arange(36*18, dtype=int)
+
+    new_y = np.around(interp(new_fib), 2)
+
+    return new_y
