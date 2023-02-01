@@ -470,6 +470,9 @@ def cre_raw_exp(input_spectrum, fibtype, ring, position, wave_ccd, wave, nfib=60
     if add_cr_hits:
         output = cosmic_rays(output, n_cr=n_cr, std_cr=std_cr)
 
+    # if channel_type in ['blue', 'ir']:
+    #     output = np.fliplr(output)
+
     output_hdus = (ccdspec_to_hdu(output, field_name, mjd, exp_name, channel_index[channel_type],
                                   flb=flb, exp_time=exp_time, ra=ra.value, dec=dec.value, expof=expof,
                                   bzero=32768))
