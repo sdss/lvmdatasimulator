@@ -66,7 +66,7 @@ def spec_2d_projection_parallel(params):
     # Cross-disp. position of the center of the fiber
 
     r = config_2d['lines_curvature'][0]*ccd_size[1]
-    dxc_offset = config_2d['lines_curvature'][1] - r + np.sqrt(r ** 2 - (y_pos - (ccd_size[1]*0.5)) ** 2)
+    dxc_offset = -(config_2d['lines_curvature'][1] - r + np.sqrt(r ** 2 - (y_pos - (ccd_size[1]*0.5)) ** 2))
     convolve_half_window_x = 8  # Half size of the window for convolution
     convolve_half_window_y = 15  # Value is higher to get the curvature into account
     spec_res = np.zeros(shape=(int(convolve_half_window_y * 2 + 1), int(ccd_size[0] - ccd_gap_size)), dtype=float)
