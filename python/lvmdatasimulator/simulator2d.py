@@ -123,6 +123,8 @@ class Simulator2D:
         # data storage
         self.extinction = None
         self.sky = None
+        self.sky1 = None
+        self.sky2 = None
         self.target_spectra = None
         self.total_spectra = None
         self.standards = None
@@ -212,18 +214,36 @@ class Simulator2D:
         """
         Return sky emission spectrum sampled at instrumental wavelengths
         """
-
-        wave, brightness = util.open_sky_file(self.observation.sky_template,
-                                              self.observation.days_moon, self.telescope.name)
-
-        if self.observation.geocoronal is not None:
-            ha = self.observation.geocoronal
-            brightness = util.set_geocoronal_ha(wave, brightness, ha)
-
-        flux = brightness * self._area_fiber.value  # converting to Fluxes from SBrightness
+        # science sky template
+        flux, wave = util.open_sky_file(self.observation.sky_template,
+                                        self.observation.days_moon, self.telescope.name,
+                                        ha=self.observation.geocoronal,
+                                        area=self._area_fiber.value)
 
         log.info('Resample sky emission to instrument wavelength solution.')
         self.sky = util.resample_spectrum(self._wl_grid, wave, flux, fast=self.fast) * unit
+
+        if self.observation.sky1_template is not None:
+            log.info('Using different template for sky array n. 1')
+
+            flux1, wave1 = util.open_sky_file(self.observation.sky1_template,
+                                            self.observation.days_moon, self.telescope.name,
+                                            ha=self.observation.geocoronal,
+                                            area=self._area_fiber.value)
+
+            log.info('Resample sky emission to instrument wavelength solution.')
+            self.sky1 = util.resample_spectrum(self._wl_grid, wave1, flux1, fast=self.fast) * unit
+
+        if self.observation.sky2_template is not None:
+
+            log.info('Using different template for sky array n. 1')
+            flux2, wave2 = util.open_sky_file(self.observation.sky2_template,
+                                            self.observation.days_moon, self.telescope.name,
+                                            ha=self.observation.geocoronal,
+                                            area=self._area_fiber.value)
+
+            log.info('Resample sky emission to instrument wavelength solution.')
+            self.sky2 = util.resample_spectrum(self._wl_grid, wave2, flux2, fast=self.fast) * unit
 
     def extract_target_spectra(self, unit=u.erg / (u.cm ** 2 * u.s * u.AA)):
 
@@ -275,9 +295,11 @@ class Simulator2D:
         # simulating sky
         self.extract_sky()
         sky_e = util.flam2epp(self._wl_grid, self.sky, self._disp) * u.electron
-
         sky_fiber = sky_e * self.telescope.aperture_area
+
         sky = expand_to_full_fiber(sky_fiber, len(self.index))
+
+
         assert sky.shape == spectra.shape, 'Something wrong with sky and spectra'
 
         self.total_spectra = sky + spectra   # this is in electron
@@ -286,7 +308,21 @@ class Simulator2D:
         #     science_projection[i] = spec
 
         # reshape sky spectra
-        sky_projection = expand_to_full_fiber(sky_fiber, self.bundle.nfibers_sky)
+        if self.sky1 is not None:
+            sky1_e = util.flam2epp(self._wl_grid, self.sky1, self._disp) * u.electron
+            sky1_fiber = sky1_e * self.telescope.aperture_area
+            sky1 = expand_to_full_fiber(sky1_fiber, self.bundle.nfibers_sky1)
+        else:
+            sky1 = expand_to_full_fiber(sky_fiber, self.bundle.nfibers_sky1)
+
+        if self.sky2 is not None:
+            sky2_e = util.flam2epp(self._wl_grid, self.sky2, self._disp) * u.electron
+            sky2_fiber = sky2_e * self.telescope.aperture_area
+            sky2 = expand_to_full_fiber(sky2_fiber, self.bundle.nfibers_sky2)
+        else:
+            sky2 = expand_to_full_fiber(sky_fiber, self.bundle.nfibers_sky2)
+
+        sky_projection = np.concatenate([sky1, sky2])
 
         # get standard stars spectra
         self.extract_std_spectra(nstd=self.bundle.nfibers_std)

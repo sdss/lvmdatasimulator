@@ -111,15 +111,11 @@ class Simulator:
         """
         Return sky emission spectrum sampled at instrumental wavelengths
         """
-        wave, brightness = util.open_sky_file(self.observation.sky_template,
-                                              self.observation.days_moon, self.telescope.name)
-
-        if self.observation.geocoronal is not None:
-            ha = self.observation.geocoronal
-            brightness = util.set_geocoronal_ha(wave, brightness, ha)
-
         area_fiber = np.pi * (self.bundle.fibers_science[0].diameter / 2) ** 2  # all fibers same diam.
-        flux = brightness * area_fiber.value  # converting to Fluxes from SBrightness
+        flux, wave = util.open_sky_file(self.observation.sky_template,
+                                        self.observation.days_moon, self.telescope.name,
+                                        ha=self.observation.geocoronal,
+                                        area=area_fiber)
 
         log.info('Resample sky emission to instrument wavelength solution.')
         return self._resample_and_convolve(wave, flux, u.erg / (u.cm ** 2 * u.s * u.AA))

@@ -136,7 +136,9 @@ class FiberBundle:
         self.build_bundles()
 
         self.nfibers = len(self.fibers_science)
-        self.nfibers_sky = len(self.fibers_table_sky1)+len(self.fibers_table_sky2)
+        self.nfibers_sky1 = len(self.fibers_table_sky1)
+        self.nfibers_sky2 = len(self.fibers_table_sky2)
+        self.nfibers_sky = self.nfibers_sky1 + self.nfibers_sky2
         self.nfibers_std = len(self.fibers_table_std)
 
     def build_bundles(self):

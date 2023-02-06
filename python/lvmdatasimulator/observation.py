@@ -121,6 +121,8 @@ class Observation:
     airmass: float = None
     days_moon: int = None
     sky_template: str = None
+    sky1_template: str = None
+    sky2_template: str = None
     geocoronal: float = None
     narcs: int = 1
     nflats: int = 3

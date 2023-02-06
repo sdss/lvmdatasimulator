@@ -32,6 +32,11 @@ from lvmdatasimulator import DATA_DIR
 # unit conversions
 r_to_erg_ha = 5.661e-18 * u.erg/(u.cm * u.cm * u.s * u.arcsec**2)
 
+@dataclass(frozen=True)
+class Constants:
+    h: u.erg * u.s = 6.6260755e-27 * u.erg * u.s  # Planck's constant in [erg*s]
+    c: u.AA * u.s = 2.99792458e18 * u.AA / u.s  # Speed of light in [A/s]
+
 
 def assign_units(my_object, variables, default_units):
     """
@@ -506,26 +511,26 @@ def set_geocoronal_ha(wave, flux, ha):
     return flux
 
 
-def open_sky_file(filename=None, days_moon=None, telescope_name='LVM160'):
+def open_sky_file(filename=None, days_moon=None, telescope_name='LVM160',
+                  ha=None, area=None):
 
     if filename is None:
         log.info(f'Simulating the sky emission {days_moon} days from new moon.')
         sky_file = os.path.join(lvmdatasimulator.DATA_DIR, 'sky',
                                     f'LVM_{telescope_name}_SKY_{days_moon}.dat')
-
+    else:
+        sky_file = filename
     log.info(f'Using sky file: {sky_file}')
 
     data = ascii.read(sky_file)
     wave = data["col1"]
-    flux = data["col2"]
+    brightness = data["col2"]
 
-    return wave, flux
+    if ha is not None:
+        brightness = set_geocoronal_ha(wave, brightness, ha)
 
-
-@dataclass(frozen=True)
-class Constants:
-    h: u.erg * u.s = 6.6260755e-27 * u.erg * u.s  # Planck's constant in [erg*s]
-    c: u.AA * u.s = 2.99792458e18 * u.AA / u.s  # Speed of light in [A/s]
+    flux = brightness * area  # converting to Fluxes from SBrightness
+    return flux, wave
 
 
 def flam2epp(lam, flam, ddisp):
