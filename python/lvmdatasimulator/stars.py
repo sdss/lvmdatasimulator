@@ -21,6 +21,7 @@ from spectres import spectres
 from requests.exceptions import HTTPError
 # from scipy.interpolate import interp1d
 from lvmdatasimulator import log, STELLAR_LIBS, WORK_DIR
+import lvmdatasimulator.utils as util
 
 import os
 
@@ -28,7 +29,7 @@ import os
 Gaia.MAIN_GAIA_TABLE = "gaiadr2.gaia_source"  # Select Data Release 2. EDR3 is missing temperatures
 Gaia.ROW_LIMIT = -1
 kms = u.km / u.s
-c = 299792.458 * kms
+c = util.Constants.c.to(kms)
 
 
 class StarsList:
@@ -113,13 +114,14 @@ class StarsList:
             self.stars_table = Table(names=self.colnames, dtype=types, units=units)
             self.stars_table.add_index('star_id')
             self.wave = None  # empty for now
+            self.new_wave = None # empty for now
             self.spectra = None  # empty for now
             self.library = None  # empty for now
 
     def __len__(self):
         return len(self.stars_table)
 
-    def add_star(self, ra, dec, gmag, teff, ag, v):
+    def add_star(self, ra, dec, gmag, teff, ag, v, standard=False):
         """
         Manually add a single star to the list.
 
@@ -147,7 +149,8 @@ class StarsList:
 
         # check if the star is within the simulated FOV
 
-        self._check_inside(ra, dec)
+        if not standard:
+            self._check_inside(ra, dec)
 
         new_row = {'star_id': len(self.stars_table) + 1,
                    'ra': ra,
@@ -159,10 +162,14 @@ class StarsList:
                    'gaia': False,
                    'source_id': 0,
                    }
-
-        log.info('star {} with Teff {}, Gmag {} and velocity {} added at position ({} , {})'
-                 .format(new_row['star_id'], new_row['teff_val'], new_row['phot_g_mean_mag'],
-                         new_row['radial_velocity'], new_row['ra'], new_row['dec']))
+        if standard:
+            log.info('Standard star {} with Teff {}, Gmag {:0.2f} added.'
+                    .format(new_row['star_id'], new_row['teff_val'], new_row['phot_g_mean_mag'],
+                            new_row['radial_velocity'], new_row['ra'], new_row['dec']))
+        else:
+            log.info('star {} with Teff {}, Gmag {:0.2f} and velocity {} added at position ({} , {})'
+                    .format(new_row['star_id'], new_row['teff_val'], new_row['phot_g_mean_mag'],
+                            new_row['radial_velocity'], new_row['ra'], new_row['dec']))
 
         self.stars_table.add_row(new_row)
 
@@ -232,7 +239,7 @@ class StarsList:
         # finally saving the new table
         self.stars_table = vstack([self.stars_table, result])
 
-    def associate_spectra(self, shift=False, append=False,
+    def associate_spectra(self, shift=False, append=False, new_wave=None,
                           library=STELLAR_LIBS):
         """
         Associate spectra to the identifyied stars. It can both associate spectra to the full list
@@ -258,11 +265,11 @@ class StarsList:
 
         if append and self.spectra is not None:
             log.info('Appending new spectra to existing ones')
-            self._append_spectra(library, shift=False)
+            self._append_spectra(library, shift=shift, new_wave=new_wave)
         else:
-            self._associate_spectra(library, shift=False)
+            self._associate_spectra(library, shift=shift, new_wave=new_wave)
 
-    def _associate_spectra(self, library, shift=False):
+    def _associate_spectra(self, library, shift=False, new_wave=None):
         """
         Associate a spectrum from a syntetic library to each one of the stars in the list.
 
@@ -273,18 +280,25 @@ class StarsList:
                 shift the spectra according to the radial velocity of the stars. Defaults to False
         """
 
-        tmp_spectra = np.zeros((len(self), len(self.wave)))
+        if new_wave:
+            tmp_spectra = np.zeros((len(self), len(new_wave)))
+        else:
+            tmp_spectra = np.zeros((len(self), len(self.wave)))
 
         for i, row in enumerate(self.stars_table):
             spectrum = get_spectrum(row['teff_val'], library)
             if shift and row['radial_velocity']:
                 spectrum = shift_spectrum(self.wave, spectrum, row['radial_velocity'])
+            if new_wave is not None:
+                spectrum = util.resample_spectrum(new_wave.value, self.wave.value, flux=spectrum,
+                                                  fast=False)
+                self.new_wave=new_wave
 
             tmp_spectra[i] = spectrum
 
         self.spectra = tmp_spectra
 
-    def _append_spectra(self, library, shift=False):
+    def _append_spectra(self, library, shift=False, new_wave=None):
         """
         Associate spectra to newly added stars appending the spectra at the end of the list.
 
@@ -302,13 +316,19 @@ class StarsList:
             log.info('All stars have an associated spectrum')
             return
 
-        tmp_spectra = np.zeros((nstars - nspectra, len(self.wave)))
+        if new_wave:
+            tmp_spectra = np.zeros((nstars - nspectra, len(new_wave)))
+        else:
+            tmp_spectra = np.zeros((nstars - nspectra, len(self.wave)))
 
         for i, row in enumerate(self.stars_table):
             if i >= nspectra:
                 spectrum = get_spectrum(row['teff_val'], library)
                 if shift and row['radial_velocity']:
                     spectrum = shift_spectrum(self.wave, spectrum, row['radial_velocity'])
+                if new_wave is not None:
+                    spectrum = util.resample_spectrum(new_wave.value, self.wave.value, flux=spectrum, fast=False)
+                    self.new_wave = new_wave
 
                 tmp_spectra[i - nspectra] = spectrum
 
@@ -332,7 +352,10 @@ class StarsList:
         gaia_fluxes = passband.Vega_zero_flux * \
             10**(-0.4 * self.stars_table['phot_g_mean_mag'].data)
 
-        synth_flux = passband.get_flux(self.wave.value, self.spectra, axis=1)
+        if self.new_wave is None:
+            synth_flux = passband.get_flux(self.wave.value, self.spectra, axis=1)
+        else:
+            synth_flux = passband.get_flux(self.new_wave.value, self.spectra, axis=1)
 
         scale_factor = gaia_fluxes / synth_flux  # scale factor for the spectra
 
@@ -415,7 +438,10 @@ class StarsList:
         table.header['EXTNAME'] = 'TABLE'  # add name to the extension
 
         spectra = fits.ImageHDU(data=self.spectra, name='FLUX')  # creating the fluxes extension
-        wave = fits.ImageHDU(data=self.wave.value, name='WAVE')  # creating the wave extension
+        if self.new_wave is not None:
+            wave = fits.ImageHDU(data=self.new_wave.value, name='WAVE')  # creating the wave extension
+        else:
+            wave = fits.ImageHDU(data=self.wave.value, name='WAVE')
 
         hdul = fits.HDUList([primary, table, spectra, wave])
 
@@ -474,7 +500,7 @@ class StarsList:
                 self.colunits.append(self.stars_table[col].unit)
             self.stars_table.add_index('star_id')
 
-    def generate_gaia(self, wcs, gmag_limit=17, shift=False):
+    def generate_gaia(self, wcs, gmag_limit=17, shift=False, new_wave=None):
         """
         Generate the star list and associate the spectra automatically
 
@@ -486,7 +512,7 @@ class StarsList:
         """
         self.add_gaia_stars(gmag_limit=gmag_limit)
         self.compute_star_positions(wcs)
-        self.associate_spectra(shift=shift)
+        self.associate_spectra(shift=shift, new_wave=new_wave)
         self.rescale_spectra()
 
     def generate_stars_manually(self, wcs, parameters, shift=False):

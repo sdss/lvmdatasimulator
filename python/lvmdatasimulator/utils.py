@@ -13,7 +13,7 @@ import astropy.units as u
 import lvmdatasimulator
 
 from dataclasses import dataclass
-from astropy.io import fits
+from astropy.io import fits, ascii
 from astropy.table import Table
 from astropy.units import UnitConversionError
 from astropy.convolution import convolve_fft
@@ -21,11 +21,21 @@ from shapely.geometry import Point, Polygon, box
 from pyneb import RedCorr
 from lvmdatasimulator import log
 from sympy import divisors
-from scipy.interpolate import RectBivariateSpline
+from scipy.interpolate import RectBivariateSpline, interp1d
+from spectres import spectres
+from astropy.convolution import Gaussian1DKernel, convolve
+from astropy.io.misc import yaml
+
+from lvmdatasimulator import DATA_DIR
 
 
 # unit conversions
 r_to_erg_ha = 5.661e-18 * u.erg/(u.cm * u.cm * u.s * u.arcsec**2)
+
+@dataclass(frozen=True)
+class Constants:
+    h: u.erg * u.s = 6.6260755e-27 * u.erg * u.s  # Planck's constant in [erg*s]
+    c: u.AA * u.s = 2.99792458e18 * u.AA / u.s  # Speed of light in [A/s]
 
 
 def assign_units(my_object, variables, default_units):
@@ -501,11 +511,254 @@ def set_geocoronal_ha(wave, flux, ha):
     return flux
 
 
+def open_sky_file(filename=None, days_moon=None, telescope_name='LVM160',
+                  ha=None, area=None):
+
+    if filename is None:
+        log.info(f'Simulating the sky emission {days_moon} days from new moon.')
+        sky_file = os.path.join(lvmdatasimulator.DATA_DIR, 'sky',
+                                    f'LVM_{telescope_name}_SKY_{days_moon}.dat')
+    else:
+        sky_file = filename
+    log.info(f'Using sky file: {sky_file}')
+
+    data = ascii.read(sky_file)
+    wave = data["col1"]
+    brightness = data["col2"]
+
+    if ha is not None:
+        brightness = set_geocoronal_ha(wave, brightness, ha)
+
+    flux = brightness * area  # converting to Fluxes from SBrightness
+    return flux, wave
 
 
+def flam2epp(lam, flam, ddisp):
+    """
+    Convert flux density [erg/s/cm2/A] to photons per pixel [photons/s/cm2/pixel]
+
+    Args:
+        lam (array-like):
+            wavelength array associated to the spectrum
+        flam (array-like):
+            spectrum in units of erg/s/cm2/A
+        ddisp (float):
+            the pixel scale in A/pixel
+
+    Returns:
+        array-like:
+            spectrum converted to photons/s/cm2/pixel
+    """
+
+    return flam * lam * ddisp / (Constants.h * Constants.c)
 
 
+def epp2flam(lam, fe, ddisp):
+    """
+    Convert photons per pixel [photons/s/cm2/pixel] to flux density [erg/s/cm2/A]
+
+    Args:
+        lam (array):
+            wavelenght axis
+        fe (array):
+            spectrum in photons/s/cm2/pixel
+        ddisp (float):
+            dispersion in A/pix
 
 
+    Returns:
+        array:
+            spectrum in erg/s/cm2/A
+    """
+
+    return fe * Constants.h * Constants.c / (lam * ddisp)
 
 
+def resample_spectrum(new_wave, old_wave, flux, fast=True):
+    """
+    Resample spectrum to a new wavelength grid using the spectres package.
+
+    Args:
+        new_wave (array-like):
+            new wavelength axis.
+        old_wave (array-like):
+            original wavelength axis
+        flux (array-like):
+            original spectrum
+
+    Returns:
+        array-like:
+            spectrum resampled onto the new_wave axis
+    """
+    if fast:
+        f = interp1d(old_wave, flux, fill_value='extrapolate')
+        resampled = f(new_wave)
+    else:
+        resampled = spectres(new_wave, old_wave, flux)
+
+    return resampled
+
+
+def convolve_for_gaussian(spectrum, fwhm, boundary):
+    """
+    Convolve a spectrum for a Gaussian kernel.
+
+    Args:
+        spectrum (array):
+            spectrum to be convolved.
+        fwhm (float):
+            FWHM of the gaussian kernel.
+        boundary (str):
+            flag indicating how to handle boundaries.
+
+    Returns:
+        array:
+            convolved spectrum
+    """
+
+    stddev = fwhm / 2.355  # from fwhm to sigma
+    size = round_up_to_odd(stddev)  # size of the kernel
+
+    kernel = Gaussian1DKernel(stddev=stddev.value, x_size=size.value)  # gaussian kernel
+    return convolve(spectrum, kernel, boundary=boundary)
+
+
+def yaml_to_plugmap(yaml_file):
+    """
+    Convert the machine readable fiber file in the format required by the simulator.
+    The output is a plugmap.dat file that i saved directly into data/instrument/fibers
+
+    Args:
+        yaml_file (string):
+            complete name (including path) to the machine readable yaml file with the fiber info
+
+    """
+
+    # creating a big table with the current arrays
+    name_science = '/home/econgiu/Data/LVM/lvmdatasimulator/data/instrument/science_array.dat'
+
+    table_old = ascii.read(name_science)
+
+    # open the new machine readable file and rearranging it as astropy table
+    with open(yaml_file) as ff:
+        fibers = yaml.load(ff)
+
+    table_new = Table(rows=fibers['fibers'], names=['fiberid', 'spectrographid', 'blockid',
+                                                    'finblock', 'targettype', 'ifulabel',
+                                                    'finifu', 'xpmm', 'ypmxx', 'ringnum',
+                                                    'fibstatus'])
+
+    # convert from mm to arcsec -> yaml offsets are in mm
+    conv = 37/0.33
+
+    table_new['xpmm'] *= conv
+    table_new['ypmxx'] *= conv
+
+    # rotating the science array to match the actual orientation
+    angle_rad = 90 * np.pi / 180  # to radians
+
+    # Angle grows moving from north to east!
+
+    newx = table_old['x'] * np.cos(angle_rad) + table_old['y'] * np.sin(angle_rad)
+    newy = table_old['y'] * np.cos(angle_rad) - table_old['x'] * np.sin(angle_rad)
+
+    table_old['x'] = newx
+    table_old['y'] = newy
+
+
+    # reordering the info that need to go into the plugmap
+    table_new['ring_id'] = np.zeros(len(table_new))
+    table_new['fiber_id'] = np.zeros(len(table_new))
+    stype = []
+    slit = []
+    table_new['id'] = np.zeros(len(table_new))
+
+    for i, row in enumerate(table_new):
+        # matching the fibers in both table
+        dist = np.sqrt((table_old['x'] - table_new['xpmm'][i])**2 +
+                       (table_old['y'] - table_new['ypmxx'][i])**2)
+        id = np.argmin(dist)
+
+        # associating the correct info to each column
+        table_new['ring_id'][i] = table_old['ring_id'][id]
+        table_new['fiber_id'][i] = table_old['fiber_id'][id]
+        if row['targettype'] == 'science':
+            stype.append('science')
+        elif row['targettype'] == 'standard':
+            stype.append('std')
+        elif row['targettype'] == 'SKY' and row['ifulabel'].startswith('A'):
+            stype.append('sky1')
+        else:
+            stype.append('sky2')
+
+        slit.append(f'slit{row["spectrographid"]}')
+
+    table_new['slit'] = slit
+    table_new['type'] = stype
+
+    idx = np.arange(648, dtype=int)
+    mask = table_new['slit'] == 'slit1'
+    table_new['id'][mask] = idx
+
+    mask = table_new['slit'] == 'slit2'
+    table_new['id'][mask] = idx
+
+    mask = table_new['slit'] == 'slit3'
+    table_new['id'][mask] = idx
+
+    # save the final plugmap.dap
+    outtable = table_new['type','ring_id','fiber_id','slit','id'].copy()
+    for col in ['ring_id','fiber_id','id']:
+        outtable[col] = outtable[col].astype(int)
+
+
+    # adding the y-position information
+    for channel in ['blue', 'red', 'ir']:
+
+        new_y = compute_y_position(channel)
+
+        outtable[f'y_{channel}'] = np.zeros(len(outtable))
+
+        mask = outtable['slit'] == 'slit1'
+        outtable[f'y_{channel}'][mask] = new_y
+
+        mask = outtable['slit'] == 'slit2'
+        outtable[f'y_{channel}'][mask] = new_y
+
+        mask = outtable['slit'] == 'slit3'
+        outtable[f'y_{channel}'][mask] = new_y
+
+
+    outname = os.path.join(DATA_DIR, 'instrument/fibers/plugmap.dat')
+    outtable.write(outname, format='csv', overwrite=True)
+
+
+def compute_y_position(channel):
+
+    trc = {'blue': '00003082',
+           'red': '00001613',
+           'ir': '00001614'}
+
+    suffix = {'blue': 'b',
+              'red': 'r',
+              'ir': 'z'}
+
+    trc_name = f'sdR-s-{suffix[channel]}1-{trc[channel]}.trc.fits'
+    path = os.path.join(DATA_DIR, 'instrument')
+
+    with fits.open(f'{path}/{trc_name}') as hdu:
+            trc_data = hdu[0].data
+
+    fiber_id = [18, 162, 306, 325, 326, 327, 328, 329, 330, 331, 332, 333, 334, 335, 336, 337, 338,
+            339, 340, 341, 342, 343, 344, 345, 346, 347, 348, 349, 350, 351, 352, 353, 354, 355,
+            356, 357, 358, 359, 360, 486, 630]
+
+
+    # I'm using as reference the middle of the trace
+    interp = interp1d(fiber_id, trc_data[:, 2040], fill_value='extrapolate')
+
+    new_fib = np.arange(36*18, dtype=int)
+
+    new_y = np.around(interp(new_fib), 2)
+
+    return new_y

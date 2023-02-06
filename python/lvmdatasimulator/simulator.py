@@ -16,131 +16,27 @@
 # 2020-09-28: New zeropoints and bug fixes ported from Guillermo's code
 # 2021-04-08: added 'run_lvmetc' function to facilitate importing this as a package
 
-from lvmdatasimulator import fibers
 import numpy as np
 import astropy.units as u
 
 from multiprocessing import Pool
 from collections import OrderedDict
 from scipy import special
-from scipy.interpolate import interp1d
-from spectres import spectres
 from astropy.io import ascii, fits
-from astropy.table import vstack, Table
-from dataclasses import dataclass
-from astropy.convolution import Gaussian1DKernel, convolve
+from astropy.table import vstack
 
 import lvmdatasimulator
+import lvmdatasimulator.utils as util
 from lvmdatasimulator.instrument import Spectrograph
 from lvmdatasimulator.field import LVMField
 from lvmdatasimulator.fibers import FiberBundle
 from lvmdatasimulator.observation import Observation
 from lvmdatasimulator.telescope import Telescope
 from lvmdatasimulator import log
-from lvmdatasimulator.utils import round_up_to_odd, set_geocoronal_ha
+
 from joblib import Parallel, delayed
 import os
 # import sys
-
-
-@dataclass(frozen=True)
-class Constants:
-    h: u.erg * u.s = 6.6260755e-27 * u.erg * u.s  # Planck's constant in [erg*s]
-    c: u.AA * u.s = 2.99792458e18 * u.AA / u.s  # Speed of light in [A/s]
-
-
-def flam2epp(lam, flam, ddisp):
-    """
-    Convert flux density [erg/s/cm2/A] to photons per pixel [photons/s/cm2/pixel]
-
-    Args:
-        lam (array-like):
-            wavelength array associated to the spectrum
-        flam (array-like):
-            spectrum in units of erg/s/cm2/A
-        ddisp (float):
-            the pixel scale in A/pixel
-
-    Returns:
-        array-like:
-            spectrum converted to photons/s/cm2/pixel
-    """
-
-    return flam * lam * ddisp / (Constants.h * Constants.c)
-
-
-def epp2flam(lam, fe, ddisp):
-    """
-    Convert photons per pixel [photons/s/cm2/pixel] to flux density [erg/s/cm2/A]
-
-    Args:
-        lam (array):
-            wavelenght axis
-        fe (array):
-            spectrum in photons/s/cm2/pixel
-        ddisp (float):
-            dispersion in A/pix
-
-
-    Returns:
-        array:
-            spectrum in erg/s/cm2/A
-    """
-
-    return fe * Constants.h * Constants.c / (lam * ddisp)
-
-
-def resample_spectrum(new_wave, old_wave, flux, fast=True):
-    """
-    Resample spectrum to a new wavelength grid using the spectres package.
-
-    Args:
-        new_wave (array-like):
-            new wavelength axis.
-        old_wave (array-like):
-            original wavelength axis
-        flux (array-like):
-            original spectrum
-
-    Returns:
-        array-like:
-            spectrum resampled onto the new_wave axis
-    """
-    if fast:
-        f = interp1d(old_wave, flux, fill_value='extrapolate')
-        resampled = f(new_wave)
-    else:
-        resampled = spectres(new_wave, old_wave, flux)
-
-    return resampled
-
-
-def convolve_for_gaussian(spectrum, fwhm, boundary):
-    """
-    Convolve a spectrum for a Gaussian kernel.
-
-    Args:
-        spectrum (array):
-            spectrum to be convolved.
-        fwhm (float):
-            FWHM of the gaussian kernel.
-        boundary (str):
-            flag indicating how to handle boundaries.
-
-    Returns:
-        array:
-            convolved spectrum
-    """
-
-    stddev = fwhm / 2.355  # from fwhm to sigma
-    size = round_up_to_odd(stddev)  # size of the kernel
-
-    kernel = Gaussian1DKernel(stddev=stddev.value, x_size=size.value)  # gaussian kernel
-    return convolve(spectrum, kernel, boundary=boundary)
-
-
-###################################################################################################
-
 
 class Simulator:
     def __init__(
@@ -169,6 +65,12 @@ class Simulator:
         self.root = os.path.join(root, subdir)
         self.overwrite = overwrite
         self.fast = fast
+
+        # use field coords as default if nothing is given in Observation
+        if self.observation.target_coords is None:
+            self.observation.target_coords = self.source.coord
+            self.observation.ra = self.source.ra
+            self.observation.dec = self.source.dec
 
         # creating empty storage
         self.output_no_noise = OrderedDict()  # realization without noise
@@ -209,31 +111,14 @@ class Simulator:
         """
         Return sky emission spectrum sampled at instrumental wavelengths
         """
-
-        if self.observation.sky_template is None:
-            days_moon = self.observation.days_moon
-            log.info(f'Simulating the sky emission {days_moon} days from new moon.')
-            sky_file = os.path.join(lvmdatasimulator.DATA_DIR, 'sky',
-                                    f'LVM_{self.telescope.name}_SKY_{days_moon}.dat')
-        else:
-            sky_file = self.observation.sky_template
-
-        log.info(f'Using sky file: {sky_file}')
-
-        data = ascii.read(sky_file)
-        wave = data["col1"]
-        flux = data["col2"]
-
-        if self.observation.geocoronal is not None:
-            ha_flux = self.observation.geocoronal
-
-            flux = set_geocoronal_ha(wave, flux, ha_flux)
-
-        area_fiber = np.pi * (self.bundle.fibers[0].diameter / 2) ** 2  # all fibers same diam.
-        brightness = flux * area_fiber.value  # converting to Fluxes from SBrightness
+        area_fiber = np.pi * (self.bundle.fibers_science[0].diameter / 2) ** 2  # all fibers same diam.
+        flux, wave = util.open_sky_file(self.observation.sky_template,
+                                        self.observation.days_moon, self.telescope.name,
+                                        ha=self.observation.geocoronal,
+                                        area=area_fiber)
 
         log.info('Resample sky emission to instrument wavelength solution.')
-        return self._resample_and_convolve(wave, brightness, u.erg / (u.cm ** 2 * u.s * u.AA))
+        return self._resample_and_convolve(wave, flux, u.erg / (u.cm ** 2 * u.s * u.AA))
 
     def _resample_and_convolve(self, old_wave, old_flux, unit=None):
         """
@@ -256,16 +141,16 @@ class Simulator:
         disp0 = np.median(old_wave[1:-1] - old_wave[0:-2]) * u.AA / u.pix
         tmp_lam = np.arange(np.amin(old_wave), np.amax(old_wave), disp0.value)
 
-        resampled_v0 = resample_spectrum(tmp_lam, old_wave, old_flux, fast=self.fast)
+        resampled_v0 = util.resample_spectrum(tmp_lam, old_wave, old_flux, fast=self.fast)
 
 
         if self.fast:
             results = [self._resample_and_convolve_loop((fiber, disp0, resampled_v0, tmp_lam, unit))
-                       for fiber in self.bundle.fibers]
+                       for fiber in self.bundle.fibers_science]
         else:
             with Pool(lvmdatasimulator.n_process) as pool:
                 results = pool.map(self._resample_and_convolve_loop, [(fiber, disp0, resampled_v0,
-                tmp_lam, unit) for fiber in self.bundle.fibers])
+                tmp_lam, unit) for fiber in self.bundle.fibers_science])
 
         out_spec = OrderedDict(results)
 
@@ -283,9 +168,9 @@ class Simulator:
         for branch in self.spectrograph.branches:
             lsf_fwhm = branch.lsf_fwhm / disp0  # from A to pix
 
-            convolved = convolve_for_gaussian(resampled_v0, lsf_fwhm, boundary="extend")
-            resampled_v1 = resample_spectrum(branch.wavecoord.wave.value, tmp_lam, convolved,
-                                             fast=self.fast)
+            convolved = util.convolve_for_gaussian(resampled_v0, lsf_fwhm, boundary="extend")
+            resampled_v1 = util.resample_spectrum(branch.wavecoord.wave.value, tmp_lam, convolved,
+                                                  fast=self.fast)
 
             if unit:
                 fiber_spec[branch.name] = resampled_v1 * unit
@@ -300,18 +185,18 @@ class Simulator:
         wl_grid = np.arange(3500, 9910.01, 0.06) * u.AA
 
         log.info(f"Recovering target spectra for {self.bundle.nfibers} fibers.")
-        index, spectra = self.source.extract_spectra(self.bundle.fibers, wl_grid,
+        index, spectra = self.source.extract_spectra(self.bundle.fibers_science, wl_grid,
                                                      obs_coords=self.observation.target_coords)
 
         log.info('Resampling spectra to the instrument wavelength solution.')
 
         if self.fast:
             results = [self._extract_target_spectra((fiber, spectra, index, wl_grid))
-                       for fiber in self.bundle.fibers]
+                       for fiber in self.bundle.fibers_science]
         else:
             with Pool(lvmdatasimulator.n_process) as pool:
                 results = pool.map(self._extract_target_spectra, [(fiber, spectra, index, wl_grid)
-                for fiber in self.bundle.fibers])
+                for fiber in self.bundle.fibers_science])
 
         obj_spec = OrderedDict(results)
 
@@ -333,9 +218,9 @@ class Simulator:
         for branch in self.spectrograph.branches:
             lsf_fwhm = branch.lsf_fwhm / disp0  # from A to pix
 
-            convolved = convolve_for_gaussian(original, lsf_fwhm, boundary="extend")
-            resampled_v1 = resample_spectrum(branch.wavecoord.wave.value, wl_grid.value,
-                                             convolved, fast=self.fast)
+            convolved = util.convolve_for_gaussian(original, lsf_fwhm, boundary="extend")
+            resampled_v1 = util.resample_spectrum(branch.wavecoord.wave.value, wl_grid.value,
+                                                  convolved, fast=self.fast)
 
             fiber_spec[branch.name] = resampled_v1 * (u.erg / (u.cm ** 2 * u.s * u.AA))
 
@@ -404,13 +289,13 @@ class Simulator:
             if self.fast:
                 results = [self._simulate_observations_single_fiber((fiber, self.target_spectra,
                                                                      exptime_unit))
-                        for fiber in self.bundle.fibers]
+                        for fiber in self.bundle.fibers_science]
             else:
                 with Pool(lvmdatasimulator.n_process) as pool:
                     results = pool.map(self._simulate_observations_single_fiber, [(fiber,
                                                                                    self.target_spectra,
                                                                                    exptime_unit)
-                    for fiber in self.bundle.fibers])
+                    for fiber in self.bundle.fibers_science])
 
             # reorganize outputs
             ids = []  # fiber ids
@@ -471,7 +356,7 @@ class Simulator:
 
         out_spectrum = OrderedDict()
 
-        for fiber in self.bundle.fibers:
+        for fiber in self.bundle.fibers_science:
 
             branch_spec = OrderedDict()
             for branch in self.spectrograph.branches:
@@ -480,9 +365,9 @@ class Simulator:
 
                 lsf_fwhm = branch.lsf_fwhm / dlam
 
-                convolved = convolve_for_gaussian(flux.value, lsf_fwhm, boundary="extend")
-                resampled_v1 = resample_spectrum(branch.wavecoord.wave.value, wave.value,
-                                                 convolved, fast=self.fast)
+                convolved = util.convolve_for_gaussian(flux.value, lsf_fwhm, boundary="extend")
+                resampled_v1 = util.resample_spectrum(branch.wavecoord.wave.value, wave.value,
+                                                      convolved, fast=self.fast)
 
                 resampled_v1 *= unit_flux
                 to_flux = resampled_v1 * np.pi * (fiber.diameter/2)**2  # from SB to flux
@@ -507,13 +392,13 @@ class Simulator:
             if self.fast:
                 results = [self._simulate_observations_single_fiber((fiber, self.target_spectra,
                                                                      exptime_unit))
-                        for fiber in self.bundle.fibers]
+                        for fiber in self.bundle.fibers_science]
             else:
                 with Pool(lvmdatasimulator.n_process) as pool:
                     results = pool.map(self._simulate_observations_single_fiber, [(fiber,
                                                                                    self.target_spectra,
                                                                                    exptime_unit)
-                    for fiber in self.bundle.fibers])
+                    for fiber in self.bundle.fibers_science])
 
             # reorganize outputs
             ids = []
@@ -799,11 +684,11 @@ class Simulator:
         for branch in self.spectrograph.branches:
 
             # convert spectrum to electrons
-            spectrum_e = flam2epp(branch.wavecoord.wave, spectrum[branch.name],
-                                  branch.wavecoord.step)
+            spectrum_e = util.flam2epp(branch.wavecoord.wave, spectrum[branch.name],
+                                       branch.wavecoord.step)
 
             # compute constant
-            constant = exptime * branch.efficiency *\
+            constant = exptime * branch.efficiency() *\
                 self.telescope.aperture_area
 
             # atmospheric extinction
@@ -820,7 +705,7 @@ class Simulator:
         on the detector caused by the fiber.
         """
 
-        nypix = int(round_up_to_odd(fiber.nypix.value))
+        nypix = int(util.round_up_to_odd(fiber.nypix.value))
 
         out = OrderedDict()
         for branch in self.spectrograph.branches:
@@ -856,11 +741,11 @@ class Simulator:
         out = OrderedDict()
         for branch in self.spectrograph.branches:
             # convert spectrum to electrons
-            sky_e = flam2epp(branch.wavecoord.wave, sky_spectrum[branch.name],
-                             branch.wavecoord.step)
+            sky_e = util.flam2epp(branch.wavecoord.wave, sky_spectrum[branch.name],
+                                  branch.wavecoord.step)
 
             # compute constant
-            constant = exptime * branch.efficiency * self.telescope.aperture_area
+            constant = exptime * branch.efficiency() * self.telescope.aperture_area
             out[branch.name] = sky_e * constant * u.electron
 
         return out
@@ -1038,7 +923,7 @@ class Simulator:
         signal = np.zeros((nfibers, branch.wavecoord.npix), dtype=np.float32)
         sky = np.zeros((nfibers, branch.wavecoord.npix), dtype=np.float32)
 
-        for i, fiber in enumerate(self.bundle.fibers):
+        for i, fiber in enumerate(self.bundle.fibers_science):
             fib_id.append(fiber.to_table())
 
             signal[i, :] = self.target_spectra[fiber.id][branch.name]
@@ -1086,7 +971,7 @@ class Simulator:
         snr = np.zeros((nfibers, branch.wavecoord.npix), dtype=np.float32)
 
         for i, spectra in enumerate(exposures.values()):
-            fib_id.append(self.bundle.fibers[i].to_table())
+            fib_id.append(self.bundle.fibers_science[i].to_table())
             target[i, :] = spectra["target"][branch.name]
             total[i, :] = spectra["signal"][branch.name]
             noise[i, :] = spectra["noise"][branch.name]
@@ -1118,6 +1003,8 @@ class Simulator:
         primary.header["DAY-MOON"] = (self.observation.days_moon,
                                       "Days from new moon")
 
+        primary.header['SIMUL'] = ('1D', 'Simulator version (1D or 2D)')
+
         return primary
 
     def _flux_calibration(self, fiber_id, exposure, exptime):
@@ -1129,7 +1016,7 @@ class Simulator:
 
         for branch in self.spectrograph.branches:
             # this remove the signature of the instruments and goes back to the real spectrum
-            fluxcalib = exptime * branch.efficiency *\
+            fluxcalib = exptime * branch.efficiency() *\
                 self.telescope.aperture_area
             telluric = self.extinction[fiber_id][branch.name] * self.observation.airmass
 
@@ -1143,14 +1030,14 @@ class Simulator:
             tmp_noise /= 10 ** (-0.4 * telluric)
             tmp_target /= 10 ** (-0.4 * telluric)
 
-            signal_out[branch.name] = epp2flam(branch.wavecoord.wave, tmp_signal,
-                                               branch.wavecoord.step)
-            target_out[branch.name] = epp2flam(branch.wavecoord.wave, tmp_target,
-                                               branch.wavecoord.step)
-            sky_out[branch.name] = epp2flam(branch.wavecoord.wave, tmp_sky,
-                                            branch.wavecoord.step)
-            noise_out[branch.name] = epp2flam(branch.wavecoord.wave, tmp_noise,
-                                              branch.wavecoord.step)
+            signal_out[branch.name] = util.epp2flam(branch.wavecoord.wave, tmp_signal,
+                                                    branch.wavecoord.step)
+            target_out[branch.name] = util.epp2flam(branch.wavecoord.wave, tmp_target,
+                                                    branch.wavecoord.step)
+            sky_out[branch.name] = util.epp2flam(branch.wavecoord.wave, tmp_sky,
+                                                 branch.wavecoord.step)
+            noise_out[branch.name] = util.epp2flam(branch.wavecoord.wave, tmp_noise,
+                                                   branch.wavecoord.step)
 
         return {"signal": signal_out,
                 "target": target_out,
@@ -1328,7 +1215,7 @@ class Simulator:
                   file=f)
             print('image', file=f)
 
-            for fiber in self.bundle.fibers:
+            for fiber in self.bundle.fibers_science:
                 # converting to pixels
                 coord = self.observation.target_coords.spherical_offsets_by(fiber.x, fiber.y)
                 x, y = self.source.wcs.all_world2pix(coord.ra, coord.dec, 1)
@@ -1341,7 +1228,7 @@ class Simulator:
 
         # I'm assuming that all fibers will have the same diameter on the sky
         # For now this is fine, but it might not be ok anymore with the real instrument
-        diameter = np.ceil(self.bundle.fibers[0].diameter / self.source.pxsize).value
+        diameter = np.ceil(self.bundle.fibers_science[0].diameter / self.source.pxsize).value
         if diameter % 2 == 0:
             size = int(diameter) + 3
         else:
@@ -1354,7 +1241,7 @@ class Simulator:
         radius = np.sqrt((xx - center)**2 + (yy - center)**2)
         kernel[radius < diameter / 2] = 1
 
-        for fiber in self.bundle.fibers:
+        for fiber in self.bundle.fibers_science:
             flux = values[ids['id'] == fiber.id]
             fiber_coord = self.source.coord.spherical_offsets_by(fiber.x, fiber.y)
 
