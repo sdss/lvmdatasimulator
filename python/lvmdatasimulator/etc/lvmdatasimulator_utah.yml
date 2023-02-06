@@ -33,3 +33,20 @@ data_dir: "data"  # Path to the model grids etc. (relative to the ROOT of packag
 work_dir: "./"  # Path to the directory where the computation results will be saved
                 # (relative to the ROOT of package unless it begins with / or \\ or ./)
 
+# === 2D simulator configs ===
+sim2d_params:
+    nfib_per_block: 36  # Number of fibers per block on CCD
+    null_fiber_offset: 36.0  # Y-offset of the first fiber on CCD TODO: not sure if it is needed
+    lines_curvature: [5, 120] # Parameters defining the lines curvature (same for all CCDs and channels):
+                                 # radius/ccd_sise_y for the position of the 1st pixels in each fibers,
+                                 # and position along dispersion axis of the 1st pixel in the central fiber
+    trace_curvature: [0, 0, 0, 0, 8e-10, 8e-10, 2060, 2040] # Parameters defining the curvature of the
+                                # fibers traces on CCD curvature (same for all CCDs and channels)
+                                # Curvature is defined as dy = a(x-xc)**2+b(x-xc),
+                                # where a = a2*(y-yc)**2+a1*(y-yc)+a0 and b = b2*(y-yc)**2+b1*(y-yc)+b0
+                                # List contains [a0, b0, a2, b2, a1, b1, xc, yc]
+                                # TODO: requires calibration based on lab data
+    psf_rootname: "focus_lvm"  # Root name for files with PSF measurements in each channel
+    fibers_ccd_map_name: "plugmap.dat"  # Name of the file defining the order of the fibers on slit/CCD
+    fibers_pack_name: 'opFibers.par'  # Name of the file defining how the fibers packed #TODO: or not?
+    ccd_properties: 'ccd_properties.dat'  # Name of the file defining the properties of CCD (bias, npix, gain etc)
