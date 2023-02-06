@@ -66,6 +66,12 @@ class Simulator:
         self.overwrite = overwrite
         self.fast = fast
 
+        # use field coords as default if nothing is given in Observation
+        if self.observation.target_coords is None:
+            self.observation.target_coords = self.source.coord
+            self.observation.ra = self.source.ra
+            self.observation.dec = self.source.dec
+
         # creating empty storage
         self.output_no_noise = OrderedDict()  # realization without noise
         self.output_noise = OrderedDict()  # realization with noise

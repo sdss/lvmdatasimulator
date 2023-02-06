@@ -103,6 +103,12 @@ class Simulator2D:
         self.fast = fast
         self.compress = compress
 
+        # use field coords as default if nothing is given in Observation
+        if self.observation.target_coords is None:
+            self.observation.target_coords = self.source.coord
+            self.observation.ra = self.source.ra
+            self.observation.dec = self.source.dec
+
         # creating empty storage
         self.output = None
         # self.output_coadd = OrderedDict()

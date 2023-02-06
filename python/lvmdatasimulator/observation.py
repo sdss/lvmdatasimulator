@@ -21,7 +21,7 @@ from astropy.time import Time
 from astropy.coordinates import get_body, EarthLocation, AltAz, SkyCoord
 from astroplan import moon_illumination
 from typing import List
-from lvmdatasimulator import WORK_DIR
+from lvmdatasimulator import WORK_DIR, log
 
 import matplotlib.pyplot as plt
 from astropy.visualization import astropy_mpl_style, quantity_support
@@ -107,8 +107,8 @@ class Observation:
     """
 
     name: str = 'LVM_field'
-    ra: float = 0.0
-    dec: float = 0.0
+    ra: float = None
+    dec: float = None
     unit_ra: u = u.deg
     unit_dec: u = u.deg
     time: str = '2022-01-01T00:00:00.00'  # UT time of observations
@@ -154,6 +154,8 @@ class Observation:
             raise ValueError(f'days_moon must be between 0 and 14, while it is {self.days_moon}')
 
         if self.airmass is None:
+            if self.target_coords is None:
+                raise ValueError('If no coordinates are given, airmass must be defined.')
             self.airmass = self.target_coords_altaz.secz.value
         elif self.airmass < 1:
             raise ValueError(f'airmass must be >= 1, but it is {self.airmass}')
@@ -166,12 +168,19 @@ class Observation:
     @cached_property
     def target_coords(self):
         '''get target coordinates'''
-        return SkyCoord(self.ra, self.dec)
+        if self.ra is None or self.dec is None:
+            log.warning('No coordinates have been provided. The ones from the source field will be used')
+            return None
+        else:
+            return SkyCoord(self.ra, self.dec)
 
     @cached_property
     def target_coords_altaz(self):
         '''get target altazimuthal coordinates'''
-        return self.target_coords.transform_to(self._altaz)
+        if self.target_coords is not None:
+            return self.target_coords.transform_to(self._altaz)
+        else:
+            return None
 
     @cached_property
     def _altaz(self):
@@ -221,7 +230,8 @@ class Observation:
     def moon_distance(self):
         '''get distance between the target field and the moon'''
         # this is weird. moon to target is ok, target to moon is not
-        return self.moon_coords.separation(self.target_coords)
+        if self.target_coords is not None:
+            return self.moon_coords.separation(self.target_coords)
 
     @cached_property
     def moon_illumination(self):
