@@ -25,7 +25,8 @@ from lvmdatasimulator.utils import assign_units
 from scipy.interpolate import interp1d
 
 
-fluxunit = u.erg / (u.cm ** 2 * u.s * u.arcsec ** 2)
+brtunit = u.erg / (u.cm ** 2 * u.s * u.arcsec ** 2)
+fluxunit = u.erg / (u.cm ** 2 * u.s)
 velunit = u.km / u.s
 
 
@@ -506,7 +507,7 @@ class LVMField:
             obs_coords = self.coord
             log.warning('Bundle center coords are not defined, using the coords of the field.')
 
-        spectrum = np.zeros(shape=(len(fibers), len(wl_grid))) * fluxunit * u.arcsec ** 2
+        spectrum = np.zeros(shape=(len(fibers), len(wl_grid))) * fluxunit
         fiber_id = []
         dl = (wl_grid[1] - wl_grid[0]).to(u.AA)
         xx, yy = np.meshgrid(np.arange(self.npixels), np.arange(self.npixels))
@@ -540,12 +541,11 @@ class LVMField:
                     p = interp1d(self.starlist.wave.to(u.AA).value, self.starlist.spectra[star_id], bounds_error=False,
                                  fill_value='extrapolate')
                     # !!! APPLY EXTINCTION BY DARK NEBULAE TO STARS !!!
-                    spectrum[index, :] += (p(wl_grid.value) * dl.value * fluxunit * u.arcsec ** 2)
+                    spectrum[index, :] += (p(wl_grid.value) * dl.value * fluxunit)
         if np.max(aperture_mask) < fibers_coords.shape[0]:
             fibers_coords = fibers_coords[:np.max(aperture_mask), :]
         log.info("Start extracting nebular spectra")
-        spectrum_ism = self.ism.get_spectrum(wl_grid.to(u.AA), aperture_mask, fibers_coords,
-                                             self.pxsize.value)
+        spectrum_ism = self.ism.get_spectrum(wl_grid.to(u.AA), aperture_mask, fibers_coords)
         if spectrum_ism is not None:
             spectrum[: len(spectrum_ism), :] += spectrum_ism
         return np.array(fiber_id), spectrum / dl.value / u.AA

@@ -4,7 +4,7 @@ utah_cluster: False # If True, then it will alter the work_dir later for running
 
 nprocess: 8  # number of processes for parallelization
 
-cloudy_models_name: 'LVM_cloudy_models.fits'         # Name for the pre-computed emission-line models to be used
+cloudy_models_name: 'LVM_cloudy_models_phys.fits'         # Name for the pre-computed emission-line models to be used
                                                      # (should be stored in 'data' directory)
 mappings_models_name: 'LVM_mappings_models.fits'       # Name for the pre-computed MAPPINGS models to be used
                                                      # (should be stored in 'data' directory)
@@ -13,12 +13,12 @@ continuum_models_name: 'LVM_continuum_models.fits'   # Name for the pre-computed
 stellar_library_name: 'pollux_resampled_v0.fits'     # Name for the library of stellar spectra
                                                      # (should be stored in 'data' directory)
 cloudy_default_params:  # parameters for the Cloudy model to be used by default
-    id: 'Cloud_366'
+    id: 'Cloud_227'
     Geometry: 'Cloud'
-    Z: 0.4
+    Z: 0.8
     nH: 100.
-    Teff: 35000.
-    LogLsun: 5.5
+    Teff: 40000.
+    LogLsun: 6.0
 
 mappings_default_params:  # parameters for the MAPPINGS model to be used by default
     id: 'Shock_1681'
