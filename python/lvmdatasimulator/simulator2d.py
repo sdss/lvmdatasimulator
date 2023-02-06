@@ -90,6 +90,7 @@ class Simulator2D:
         overwrite: bool = True,
         fast: bool = True,
         compress: bool = True,
+        save_std: bool = True
     ):
 
         self.source = source
@@ -102,6 +103,7 @@ class Simulator2D:
         self.overwrite = overwrite
         self.fast = fast
         self.compress = compress
+        self.save_std = save_std
 
         # use field coords as default if nothing is given in Observation
         if self.observation.target_coords is None:
@@ -272,6 +274,10 @@ class Simulator2D:
 
         stars.associate_spectra(shift=False, new_wave=self._wl_grid)
         stars.rescale_spectra()
+
+        if self.save_std:
+            outname = os.path.join(self.source.name, 'std_stars.fits.gz')
+            stars.save_to_fits(outname=outname)
 
         self.standards = stars
 
