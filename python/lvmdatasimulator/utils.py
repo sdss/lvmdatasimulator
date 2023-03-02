@@ -768,16 +768,32 @@ def compute_y_position(channel):
     with fits.open(f'{path}/{trc_name}') as hdu:
             trc_data = hdu[0].data
 
-    fiber_id = [18, 162, 306, 325, 326, 327, 328, 329, 330, 331, 332, 333, 334, 335, 336, 337, 338,
-            339, 340, 341, 342, 343, 344, 345, 346, 347, 348, 349, 350, 351, 352, 353, 354, 355,
-            356, 357, 358, 359, 360, 486, 630]
+    '''
+    Here I am doing a trick to put the correct spacing in the final image
+    I am first assuming that each gap takes the space of 2 fibers.
+    I give each fiber an ID which consider these two additional fibers per bundle, then
+    I do the interpolation and recover the position of all the fibers (real+manually added).
+    At this point, I am removing the non existing values
 
+    '''
+
+    # fiber_id = [18, 162, 306, 325, 326, 327, 328, 329, 330, 331, 332, 333, 334, 335, 336, 337, 338,
+    #             339, 340, 341, 342, 343, 344, 345, 346, 347, 348, 349, 350, 351, 352, 353, 354, 355,
+    #             356, 357, 358, 359, 360, 486, 630]
+
+    fiber_id = [18, 168, 320, 341, 342, 343, 344, 345, 346, 347, 348, 349, 350, 351, 352, 353, 354,
+                355, 356, 357, 358, 359, 360, 361, 362, 363, 364, 365, 366, 367, 368, 369, 370, 371,
+                372, 373, 374, 375, 376, 512, 662]
 
     # I'm using as reference the middle of the trace
     interp = interp1d(fiber_id, trc_data[:, 2040], fill_value='extrapolate')
 
-    new_fib = np.arange(36*18, dtype=int)
+    new_fib = np.arange(36*18+17*2, dtype=int)
 
     new_y = np.around(interp(new_fib), 2)
+
+    for i in range(1, 18):
+        new_y = np.delete(new_y, 36*i+1)
+        new_y = np.delete(new_y, 36*i)
 
     return new_y
