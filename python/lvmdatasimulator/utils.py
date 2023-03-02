@@ -25,6 +25,8 @@ from scipy.interpolate import RectBivariateSpline, interp1d
 from spectres import spectres
 from astropy.convolution import Gaussian1DKernel, convolve
 from astropy.io.misc import yaml
+import contextlib
+import joblib
 
 from lvmdatasimulator import DATA_DIR
 
@@ -36,6 +38,23 @@ r_to_erg_ha = 5.661e-18 * u.erg/(u.cm * u.cm * u.s * u.arcsec**2)
 class Constants:
     h: u.erg * u.s = 6.6260755e-27 * u.erg * u.s  # Planck's constant in [erg*s]
     c: u.AA * u.s = 2.99792458e18 * u.AA / u.s  # Speed of light in [A/s]
+
+
+@contextlib.contextmanager
+def tqdm_joblib(tqdm_object):
+    """Context manager to patch joblib to report into tqdm progress bar given as argument (taken from stackoverflow)"""
+    class TqdmBatchCompletionCallback(joblib.parallel.BatchCompletionCallBack):
+        def __call__(self, *args, **kwargs):
+            tqdm_object.update(n=self.batch_size)
+            return super().__call__(*args, **kwargs)
+
+    old_batch_callback = joblib.parallel.BatchCompletionCallBack
+    joblib.parallel.BatchCompletionCallBack = TqdmBatchCompletionCallback
+    try:
+        yield tqdm_object
+    finally:
+        joblib.parallel.BatchCompletionCallBack = old_batch_callback
+        tqdm_object.close()
 
 
 def assign_units(my_object, variables, default_units):

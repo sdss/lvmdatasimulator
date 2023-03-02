@@ -7,6 +7,8 @@
 
 import os.path
 import numpy as np
+
+import lvmdatasimulator
 from lvmdatasimulator import COMMON_SETUP_2D as config_2d
 from lvmdatasimulator import DATA_DIR, n_process
 from astropy.io import fits, ascii
@@ -16,12 +18,14 @@ from astropy.convolution import convolve
 from astropy.convolution.kernels import Gaussian2DKernel
 from multiprocessing import Pool
 from tqdm import tqdm
+from lvmdatasimulator.utils import tqdm_joblib
+from joblib import Parallel, delayed, parallel_backend
 
 
 def spec_fragment_convolve_psf(spec_oversampled_cut=None, xpos_oversampled_cut=None, xpos_ccd=None, ypos_ccd=None,
                                focus=None, convolve_half_window=10):
     # == Convolve with PSF
-    ny_conv = int(convolve_half_window*2+1)
+    ny_conv = int(convolve_half_window * 2 + 1)
     nx_conv = len(spec_oversampled_cut)
     x_t, y_t = np.meshgrid((xpos_oversampled_cut-xpos_ccd),
                            np.arange(ny_conv).astype(float) - convolve_half_window)
@@ -30,12 +34,13 @@ def spec_fragment_convolve_psf(spec_oversampled_cut=None, xpos_oversampled_cut=N
     dy_offset = (a2*(y_t + ypos_ccd - yc)**2 + a1*(y_t + ypos_ccd - yc) + a0) * (x_t + xpos_ccd - xc) ** 2 + (
             b2 * (y_t + ypos_ccd - yc) ** 2 + b1 * (y_t + ypos_ccd - yc) + b0) * (x_t + xpos_ccd - xc)
     y_t -= dy_offset
-    # TODO check what is in the FOCUS files. What in the 1st and 2nd column? PSF along the slit and disp?
-    #  Or vice-versa? For now - assume that 0 is along dispersion axis (in agreement with the code below),
-    #  although it is cotrary to Hector's example
-    psf_x = np.ones(shape=(ny_conv, nx_conv), dtype=float) * focus[0, int(xpos_ccd), int(ypos_ccd)]  # psf along the dispersion axis
-    psf_y = np.ones(shape=(ny_conv, nx_conv), dtype=float) * focus[1, int(xpos_ccd), int(ypos_ccd)]  # psf along the slit
-    psf_xy = np.ones(shape=(ny_conv, nx_conv), dtype=float) * focus[2, int(xpos_ccd), int(ypos_ccd)]  # psf covariance
+
+    # psf along the dispersion axis
+    psf_x = np.ones(shape=(ny_conv, nx_conv), dtype=float) * focus[0, int(xpos_ccd), int(ypos_ccd)]
+    # psf along the slit
+    psf_y = np.ones(shape=(ny_conv, nx_conv), dtype=float) * focus[1, int(xpos_ccd), int(ypos_ccd)]
+    # psf covariance
+    psf_xy = np.ones(shape=(ny_conv, nx_conv), dtype=float) * focus[2, int(xpos_ccd), int(ypos_ccd)]
 
     return np.nansum(
         np.exp(-0.5 / (1 - psf_xy ** 2) * ((x_t / psf_x) ** 2 + (y_t / psf_y) ** 2 -
@@ -44,13 +49,10 @@ def spec_fragment_convolve_psf(spec_oversampled_cut=None, xpos_oversampled_cut=N
         axis=1)
 
 
-def spec_2d_projection_parallel(params):
-    spec_cur_fiber, pix_grid_input_on_ccd, focus, y_pos, \
-        ccd_size, ccd_gap_size, ccd_gap_left = params
-
+def spec_2d_projection_parallel(spec_cur_fiber, pix_grid_input_on_ccd, focus, y_pos,
+                                ccd_size, ccd_gap_size, ccd_gap_left):
     # Cross-disp. position of the center of the fiber
-
-    r = config_2d['lines_curvature'][0]*ccd_size[1]
+    r = config_2d['lines_curvature'][0] * ccd_size[1]
     dxc_offset = -(config_2d['lines_curvature'][1] - r + np.sqrt(r ** 2 - (y_pos - (ccd_size[1]*0.5)) ** 2))
     convolve_half_window_x = 8  # Half size of the window for convolution
     convolve_half_window_y = 15  # Value is higher to get the curvature into account
@@ -58,8 +60,11 @@ def spec_2d_projection_parallel(params):
 
     # for cur_pix in range(int(dxc_offset - convolve_half_window), ccd_size[0] - ccd_gap_size):
     for cur_pix in range(ccd_size[0] - ccd_gap_size):
-        pix_oversampled = np.flatnonzero((pix_grid_input_on_ccd >= (cur_pix - dxc_offset - convolve_half_window_x)) &
-                                         (pix_grid_input_on_ccd < (cur_pix - dxc_offset + convolve_half_window_x + 1)))
+        pix_oversampled = np.flatnonzero(#(pix_grid_input_on_ccd >= (-dxc_offset)) &
+                                         (pix_grid_input_on_ccd >= (cur_pix - dxc_offset - convolve_half_window_x)) &
+                                         (pix_grid_input_on_ccd < (cur_pix - dxc_offset + convolve_half_window_x + 1)) #&
+                                         #(pix_grid_input_on_ccd < int(ccd_size[0] - ccd_gap_size - dxc_offset))
+        )
         if len(pix_oversampled) > 0:
             val = spec_fragment_convolve_psf(spec_oversampled_cut=spec_cur_fiber[pix_oversampled],
                                              xpos_oversampled_cut=pix_grid_input_on_ccd[pix_oversampled]+dxc_offset,
@@ -309,34 +314,14 @@ def cre_raw_exp(input_spectrum, fibtype, ring, position, wave_ccd, wave, nfib=60
                                          fill_value='extrapolate')(wave)
 
         log.info(f"Project the spectra of camera #{cam} and {channel_type} channel onto CCD")
-        # results = []
-        # for cur_fiber_num in range(nfib):
-        #     if fib_id_in_ring[cur_fiber_num]<0:
-        #         continue
-        #     results.append(spec_2d_projection_parallel((input_spectrum[fib_id_in_ring[cur_fiber_num], :],
-        #                                    pix_grid_input_on_ccd, cur_fiber_num, nfib, bunds1,
-        #                                    fibs1, focus,
-        #                                    ccd_size, ccd_gap_size, ccd_props['x1'])))
 
+        with tqdm_joblib(tqdm(total=np.sum(fib_id_in_ring >= 0))):
+            results = Parallel(n_jobs=n_process)(delayed(spec_2d_projection_parallel)(
+                input_spectrum[fib_id_in_ring[cur_fiber_num], :],
+                pix_grid_input_on_ccd, focus,
+                current_y_pos[cur_fiber_num], ccd_size,
+                ccd_gap_size, ccd_props['x1']) for cur_fiber_num in range(nfib) if fib_id_in_ring[cur_fiber_num] >= 0)
 
-        # pixtab_wl_solution = apply_wl_solution(pix_grid_input_on_ccd)
-
-        # results = []
-        # for cur_fiber_num in range(nfib):
-        #     if fib_id_in_ring[cur_fiber_num] >= 0:
-        #         results.append(spec_2d_projection_parallel((input_spectrum[fib_id_in_ring[cur_fiber_num], :],
-        #                                                               pix_grid_input_on_ccd, cur_fiber_num, nfib, bunds1,
-        #                                                               fibs1, focus,
-        #                                                               ccd_size, ccd_gap_size, ccd_props['x1'])))
-
-        with Pool(n_process) as p:
-            results = list(tqdm(p.imap(spec_2d_projection_parallel, [(input_spectrum[fib_id_in_ring[cur_fiber_num], :],
-                                                                      pix_grid_input_on_ccd, focus,
-                                                                      current_y_pos[cur_fiber_num], ccd_size,
-                                                                      ccd_gap_size, ccd_props['x1'])
-                                                                     for cur_fiber_num in range(nfib)
-                                                                     if fib_id_in_ring[cur_fiber_num] >= 0]),
-                                total=np.sum(fib_id_in_ring >= 0)))
         for res_element in results:
             output[res_element[1][0]: res_element[1][1]+1, :] += res_element[0]
 
