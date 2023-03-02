@@ -478,7 +478,6 @@ def run_lvm_etc(params, check_lines=None, desired_snr=None, continuum=False, del
             plt.subplots_adjust(hspace=0)
             plt.show()
 
-
     if delete:
         log.info('Deleting output directory')
         # not sure about what is the best solution
