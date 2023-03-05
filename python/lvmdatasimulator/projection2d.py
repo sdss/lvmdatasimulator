@@ -50,21 +50,17 @@ def spec_fragment_convolve_psf(spec_oversampled_cut=None, xpos_oversampled_cut=N
 
 
 def spec_2d_projection_parallel(spec_cur_fiber, pix_grid_input_on_ccd, focus, y_pos,
-                                ccd_size, ccd_gap_size, ccd_gap_left):
+                                ccd_size, ccd_gap_size, ccd_gap_left, convolve_half_window_x, convolve_half_window_y):
     # Cross-disp. position of the center of the fiber
     r = config_2d['lines_curvature'][0] * ccd_size[1]
     dxc_offset = -(config_2d['lines_curvature'][1] - r + np.sqrt(r ** 2 - (y_pos - (ccd_size[1]*0.5)) ** 2))
-    convolve_half_window_x = 8  # Half size of the window for convolution
-    convolve_half_window_y = 15  # Value is higher to get the curvature into account
     spec_res = np.zeros(shape=(int(convolve_half_window_y * 2 + 1), int(ccd_size[0] - ccd_gap_size)), dtype=float)
 
     # for cur_pix in range(int(dxc_offset - convolve_half_window), ccd_size[0] - ccd_gap_size):
     for cur_pix in range(ccd_size[0] - ccd_gap_size):
-        pix_oversampled = np.flatnonzero(#(pix_grid_input_on_ccd >= (-dxc_offset)) &
-                                         (pix_grid_input_on_ccd >= (cur_pix - dxc_offset - convolve_half_window_x)) &
-                                         (pix_grid_input_on_ccd < (cur_pix - dxc_offset + convolve_half_window_x + 1)) #&
-                                         #(pix_grid_input_on_ccd < int(ccd_size[0] - ccd_gap_size - dxc_offset))
-        )
+        pix_oversampled = np.flatnonzero((pix_grid_input_on_ccd >= (cur_pix - dxc_offset - convolve_half_window_x)) &
+                                         (pix_grid_input_on_ccd < (cur_pix - dxc_offset + convolve_half_window_x + 1))
+                                         )
         if len(pix_oversampled) > 0:
             val = spec_fragment_convolve_psf(spec_oversampled_cut=spec_cur_fiber[pix_oversampled],
                                              xpos_oversampled_cut=pix_grid_input_on_ccd[pix_oversampled]+dxc_offset,
@@ -314,13 +310,17 @@ def cre_raw_exp(input_spectrum, fibtype, ring, position, wave_ccd, wave, nfib=60
                                          fill_value='extrapolate')(wave)
 
         log.info(f"Project the spectra of camera #{cam} and {channel_type} channel onto CCD")
-
+        # Half size of the window for convolution
+        convolve_half_window_x = np.ceil(np.nanmax(focus[0, :, :])*6).astype(int)
+        # Value is higher to get the curvature into account
+        convolve_half_window_y = np.ceil(np.nanmax(focus[1, :, :])*6*1.5).astype(int)
         with tqdm_joblib(tqdm(total=np.sum(fib_id_in_ring >= 0))):
             results = Parallel(n_jobs=n_process)(delayed(spec_2d_projection_parallel)(
                 input_spectrum[fib_id_in_ring[cur_fiber_num], :],
                 pix_grid_input_on_ccd, focus,
                 current_y_pos[cur_fiber_num], ccd_size,
-                ccd_gap_size, ccd_props['x1']) for cur_fiber_num in range(nfib) if fib_id_in_ring[cur_fiber_num] >= 0)
+                ccd_gap_size, ccd_props['x1'], convolve_half_window_x, convolve_half_window_y)
+                                                 for cur_fiber_num in range(nfib) if fib_id_in_ring[cur_fiber_num] >= 0)
 
         for res_element in results:
             output[res_element[1][0]: res_element[1][1]+1, :] += res_element[0]

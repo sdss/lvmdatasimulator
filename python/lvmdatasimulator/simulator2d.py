@@ -31,9 +31,9 @@ import os
 from lvmdatasimulator.projection2d import cre_raw_exp
 
 
-def reduce_size(spectrum, wave, wave_min, wave_max):
+def reduce_size(spectrum, wave, wave_min, wave_max, delta_w=0):
 
-    mask = np.all([wave > wave_min, wave< wave_max], axis=0)
+    mask = np.all([wave > (wave_min-delta_w), wave < (wave_max+delta_w)], axis=0)
     newwave = wave[mask]
     out_shape = (spectrum.shape[0], mask.sum())
     if len(spectrum.shape) == 2:
@@ -366,11 +366,12 @@ class Simulator2D:
             tmp_std = std * branch.efficiency(self._wl_grid)
 
             new_sky[branch.name], _ = reduce_size(tmp_sky, self._wl_grid,
-                                                  branch.wavecoord.start, branch.wavecoord.end)
+                                                  branch.wavecoord.start, branch.wavecoord.end, delta_w=100*u.Angstrom)
             new_sci[branch.name], _ = reduce_size(tmp_science, self._wl_grid,
-                                                  branch.wavecoord.start,branch.wavecoord.end)
+                                                  branch.wavecoord.start,branch.wavecoord.end, delta_w=100*u.Angstrom)
             new_std[branch.name], wave = reduce_size(tmp_std, self._wl_grid,
-                                                     branch.wavecoord.start, branch.wavecoord.end)
+                                                     branch.wavecoord.start, branch.wavecoord.end,
+                                                     delta_w=100*u.Angstrom)
             new_wave[branch.name] = wave
 
         for i, time in enumerate(self.observation.exptimes):
@@ -416,7 +417,7 @@ class Simulator2D:
             for branch in self.spectrograph.branches:
                 tmp = calib * branch.efficiency(self._wl_grid)
                 resized, wave = reduce_size(tmp, self._wl_grid,
-                                            branch.wavecoord.start, branch.wavecoord.end)
+                                            branch.wavecoord.start, branch.wavecoord.end, delta_w=100 * u.Angstrom)
                 new_calib[branch.name] = resized
                 new_wave[branch.name] = wave
 
