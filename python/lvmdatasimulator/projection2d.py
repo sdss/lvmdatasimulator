@@ -161,13 +161,10 @@ def raw_data_header(h, field_name, mjd, exp_name, typ, flb='science', ra=0.0, de
         flab = 'science '
     elif flb == 'arc':
         flab = 'arc     '
-        # expt = 4.0
     elif flb == 'flat':
         flab = 'flat    '
-        # expt = 25.0
     elif flb == 'bias':
         flab = 'bias    '
-        expt = 0
 
     h["TELESCOP"] = 'LVM data simulator'
     h["FILENAME"] = 'sdR-' + typ + '-' + f"{exp_name:08}" + '.fits'

@@ -27,6 +27,7 @@ Shortly, the current version of the code can be divided three main sections:
 - **Source field**, which produces the 2 fits files containing the stellar and ISM components that are used further for simulations.
 - **Instrumentation and observing conditions** -with this part of the code the user can configure the properties of the LVM instrument (e.g., number of the fibers to use in simulations, their location etc.), of the sky conditions (e.g. Sky conditions, airmass, etc ) and the details of the observations (e.g. exposure time)
 - **Simulator** join all these together and produce the output "observed" spectra and images from the generated "source field"
+- **Simulator2D** is an alternative to **Simulator** for making the Raw LVM spectra (mimics DRP input)
 
 The detailed documentation of these blocks will be added later to this readme.
 At the moment, we prepared two tutorials for users on how to use the code.
@@ -35,6 +36,7 @@ At the moment, we prepared two tutorials for users on how to use the code.
 - [Tutorial #2](https://github.com/sdss/lvmdatasimulator/blob/main/examples/LVM_data_simulator_tutorial2.ipynb) digs deeper into the configuration of some aspects of the simulator (fiber bundle, Observation class) and describe the properties of the output files.
 - [Tutorial #3](https://github.com/sdss/lvmdatasimulator/blob/main/examples/LVM_data_simulator_tutorial3.ipynb) explains in more details how to configure the source field, simulate different types of nebulae. It has two major parts. One describes the very simplified simulations, while another considers different aspects on how to deal with the varying line rations and gas kinematics.
 - [Tutorial #4](https://github.com/sdss/lvmdatasimulator/blob/main/examples/LVM_data_simulator_tutorial4.ipynb) shows how to use the simulator as a simple ETC.
+- [Tutorial #5](https://github.com/sdss/lvmdatasimulator/blob/main/examples/LVM_data_simulator_tutorial5.ipynb) describes 2D simulations (how to produce Raw LVM spectra = DRP input)
 
 
 

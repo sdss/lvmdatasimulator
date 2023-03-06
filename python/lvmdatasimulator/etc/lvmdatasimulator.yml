@@ -35,7 +35,7 @@ work_dir: "./"  # Path to the directory where the computation results will be sa
 
 # === 2D simulator configs ===
 sim2d_params:
-    lines_curvature: [5, 70] # Parameters defining the lines curvature (same for all CCDs and channels):
+    lines_curvature: [5, 90] # Parameters defining the lines curvature (same for all CCDs and channels):
                                  # radius/ccd_sise_y for the position of the 1st pixels in each fibers,
                                  # and position along dispersion axis of the 1st pixel in the central fiber
     trace_curvature: [0, 0, 0, 0, 8e-10, 8e-10, 2060, 2040] # Parameters defining the curvature of the
