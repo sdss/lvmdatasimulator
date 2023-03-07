@@ -1078,14 +1078,13 @@ class Simulator:
         for wavelength_range in wavelength_ranges:
             for branch in self.spectrograph.branches:
                 if branch.wavecoord.start < wavelength_range[0] * unit_range \
-                    and branch.wavecoord.end > wavelength_range[1] * unit_range:
+                        and branch.wavecoord.end > wavelength_range[1] * unit_range:
                     for exptime in self.observation.exptimes:
-                        ids, target, total, _, _, _ = self._reorganize_to_rss(branch,
-                                                                              self.output_calib[exptime])
+                        ids, target, total, noise, _, _ = self._reorganize_to_rss(branch, self.output_calib[exptime])
                         target_out = np.zeros((self.source.npixels, self.source.npixels),
                                               dtype=np.float32)
                         total_out = np.zeros((self.source.npixels, self.source.npixels),
-                                              dtype=np.float32)
+                                             dtype=np.float32)
 
                         wcs = self.source.wcs
                         head = wcs.to_header()
@@ -1103,9 +1102,11 @@ class Simulator:
 
                         target_val = np.nansum(target[:, mask], axis=1) * dl
                         total_val = np.nansum(total[:, mask], axis=1) * dl
+                        total_noise = np.sqrt(np.nansum(noise[:, mask]**2, axis=1)) * dl
 
                         # Just the target
-                        target_out = self._populate_map(target_out, target_val, ids, wcs)
+                        target_out, sn_out = self._populate_map(target_out, target_val, ids, wcs,
+                                                                noise_values=total_noise)
 
                         filename = os.path.join(self.outdir,
                             f"{self.source.name}_{branch.name}_{self.bundle.bundle_name}"\
@@ -1125,6 +1126,15 @@ class Simulator:
                             + f"_{int(wavelength_range[0])}_{int(wavelength_range[1])}"
                             + f"_{exptime}s_total_map.fits")
                         hdu = fits.PrimaryHDU(data=total_out.astype(np.float32), header=head)
+
+                        hdu.writeto(filename, overwrite=True)
+                        log.info(f' Saving {filename}...')
+
+                        filename = os.path.join(self.outdir,
+                                                f"{self.source.name}_{branch.name}_{self.bundle.bundle_name}"
+                                                + f"_{int(wavelength_range[0])}_{int(wavelength_range[1])}"
+                                                + f"_{exptime}s_sn_map.fits")
+                        hdu = fits.PrimaryHDU(data=sn_out.astype(np.float32), header=head)
 
                         hdu.writeto(filename, overwrite=True)
                         log.info(f' Saving {filename}...')
@@ -1224,34 +1234,45 @@ class Simulator:
 
         log.info(f' Saving {outname}...')
 
-    def _populate_map(self, map, values, ids, wcs):
+    def _populate_map(self, map, values, ids, wcs, noise_values=None):
 
         # I'm assuming that all fibers will have the same diameter on the sky
         # For now this is fine, but it might not be ok anymore with the real instrument
-        diameter = np.ceil(self.bundle.fibers_science[0].diameter / self.source.pxsize).value
-        if diameter % 2 == 0:
-            size = int(diameter) + 3
-        else:
-            size = int(diameter) + 2
+        diameter = (self.bundle.fibers_science[0].diameter / self.source.pxsize).value
+        # diameter_int = np.ceil(diameter_flt)
+        # if diameter_int % 2 == 0:
+        #     size = int(diameter_int) + 3
+        # else:
+        #     size = int(diameter_int) + 2
 
-        kernel = np.zeros((size, size), dtype=np.float32)
-        center = kernel.shape[0] // 2  # center of new array
+        # kernel = np.zeros((size, size), dtype=np.float32)
+        # center = kernel.shape[0] // 2  # center of new array
 
-        yy, xx = np.mgrid[:kernel.shape[0], :kernel.shape[1]]
-        radius = np.sqrt((xx - center)**2 + (yy - center)**2)
-        kernel[radius < diameter / 2] = 1
+        yy, xx = np.mgrid[:map.shape[0], :map.shape[1]]
+        # radius = np.sqrt((xx - center)**2 + (yy - center)**2)
+        # kernel[radius < (diameter_flt / 2)] = 1
+        if noise_values is not None:
+            noise_map = np.zeros_like(map)
 
         for fiber in self.bundle.fibers_science:
             flux = values[ids['id'] == fiber.id]
             fiber_coord = self.source.coord.spherical_offsets_by(fiber.x, fiber.y)
 
             fiber_x, fiber_y = wcs.world_to_pixel(fiber_coord)
-            fiber_x = int(np.rint(fiber_x))
-            fiber_y = int(np.rint(fiber_y))
-
-            map[fiber_y-center: fiber_y+center+1, fiber_x-center: fiber_x+center+1] += kernel * flux
-
-        return map
+            # fiber_x = int(np.rint(fiber_x))
+            # fiber_y = int(np.rint(fiber_y))
+            mask = (((xx - fiber_x)**2 + (yy - fiber_y)**2) <= ((diameter/2)**2)).astype(int)
+            map += mask * flux
+            # map[fiber_y-center: fiber_y+center+1, fiber_x-center: fiber_x+center+1] += kernel * flux
+            if noise_values is not None:
+                cn = noise_values[ids['id'] == fiber.id]
+                noise_map += (mask * cn**2)
+                # noise_map[fiber_y - center: fiber_y + center + 1, fiber_x - center: fiber_x + center + 1] += \
+                #     (kernel * cn**2)
+        if noise_values is not None:
+            return map, map/np.sqrt(noise_map)
+        else:
+            return map
 
     def _recover_wcs(self):
 
