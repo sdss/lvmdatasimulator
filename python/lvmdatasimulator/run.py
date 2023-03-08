@@ -252,7 +252,7 @@ def run_simulator_1d(params):
     log.info('Done. Elapsed time: {:0.1f}'.format(time.time()-start))
 
 
-def run_lvm_etc(params, check_lines=None, desired_snr=None, continuum=False, delete=True, dlam=1):
+def run_lvm_etc(params, check_lines=None, desired_snr=None, continuum=False, delete=True, dlam=1, saveplot=None):
     """
         Simple run the simulations in the mode of exposure time calculator.
 
@@ -266,10 +266,14 @@ def run_lvm_etc(params, check_lines=None, desired_snr=None, continuum=False, del
                 Desired signal-to-noise ratios in corresponding lines. Should be of the same size as check_lines
             continuum (bool):
                 If True, then S/N will be measured assuming the source spectrum is continuum (signal = flux per pixel);
-                otherwise (default) the flux is integrated in the window of ±2A assuming the
+                otherwise (default) the flux is integrated in the window of ±1A assuming the
                 emission line spectrum(noise is also scaled)
             delete (bool):
                 delete all the output files. Defaults to True.
+            dlam (float):
+                width of the window to extract the line flux, in angstrom
+            saveplot (str):
+                if present, then the output plot will be saved in the file
     """
 
     if isinstance(params, str):
@@ -425,6 +429,7 @@ def run_lvm_etc(params, check_lines=None, desired_snr=None, continuum=False, del
 
     if params.get('exptimes', None) is None:
         fig, ax = plt.subplots()
+        plt.grid(':')
         for l_id, line in enumerate(check_lines):
 
             ax.scatter(exptimes, snr_output[l_id, :], label=str(line))
@@ -448,7 +453,8 @@ def run_lvm_etc(params, check_lines=None, desired_snr=None, continuum=False, del
 
         ax.set_xlabel("Exposure time, s")
         ax.set_ylabel("Expected S/N ratio")
-
+        if saveplot is not None:
+            fig.savefig(saveplot, dpi=300, bbox_inches='tight')
         plt.show()
     else:
         for exp_id, exptime in enumerate(exptimes):
@@ -464,6 +470,7 @@ def run_lvm_etc(params, check_lines=None, desired_snr=None, continuum=False, del
                 snr = hdu['SNR'].data[0]
 
             fig, ax = plt.subplots(2, 1, figsize=(12, 6), sharex=True)
+            plt.grid(':')
             ax[0].plot(wave, np.log10(flux), c='k', label='Flux')
             ax[0].plot(wave, np.log10(err), c='r', label='Error')
             ax[1].plot(wave, np.log10(snr), c='b')
@@ -476,6 +483,8 @@ def run_lvm_etc(params, check_lines=None, desired_snr=None, continuum=False, del
             ax[1].set_ylabel('S/N')
             ax[1].set_xlabel('Wavelength ($\\AA$)')
             plt.subplots_adjust(hspace=0)
+            if saveplot is not None:
+                fig.savefig(saveplot, dpi=150, bbox_inches='tight')
             plt.show()
 
     if delete:
