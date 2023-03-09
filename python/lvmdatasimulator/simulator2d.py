@@ -152,7 +152,7 @@ class Simulator2D:
 
         self._project_2d_calibs(flat, 'flat', self.observation.flat_exptimes, self.observation.nflats)
 
-    def create_arc(self, hg=False, ne=False, ar=False, xe=False):
+    def create_arc(self, hg=False, ne=False, ar=False, xe=False, start_from=0):
 
         if not np.any([hg, ne, ar, xe]):
             raise ValueError('At least one lamp should be selected')
@@ -196,11 +196,15 @@ class Simulator2D:
         # collapsing in the single required arc
         arcs = arcs.sum(axis=0)
 
-        self._project_2d_calibs(arcs, 'arc', self.observation.arc_exptimes, self.observation.narcs)
+        if start_from != 0:
+            start_from -= 1
+
+        self._project_2d_calibs(arcs, 'arc', self.observation.arc_exptimes, self.observation.narcs,
+                                start_from)
 
     def create_bias(self):
 
-        self._project_2d_calibs(None, 'bias', 0, self.observation.nbias)
+        self._project_2d_calibs(None, 'bias', 0, self.observation.nbias, 0)
 
     def extract_extinction(self, extinction_file=os.path.join(DATA_DIR, 'sky',
                                                               'LVM_LVM160_KLAM.dat')):
@@ -395,7 +399,7 @@ class Simulator2D:
                                     camera=name, exp_type='science', branch=branch,
                                     exp_name=expname)
 
-    def _project_2d_calibs(self, data, calib_name, exptimes, nexpo):
+    def _project_2d_calibs(self, data, calib_name, exptimes, nexpo, start_from):
 
         if not isinstance(exptimes, list):
             exptimes = [exptimes]
@@ -421,10 +425,11 @@ class Simulator2D:
                 new_calib[branch.name] = resized
                 new_wave[branch.name] = wave
 
+
         for i, time in enumerate(exptimes):
             for j in range(nexpo):
                 if calib_name == 'arc':
-                    exp_name = 10000+(i*j)+j+1
+                    exp_name = 10000+(i*j)+j+1+start_from
                 elif calib_name == 'flat':
                     exp_name = 1000+(i*j)+j+1
                 elif calib_name == 'bias':
