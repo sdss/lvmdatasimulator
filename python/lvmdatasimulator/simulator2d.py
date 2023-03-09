@@ -399,7 +399,7 @@ class Simulator2D:
                                     camera=name, exp_type='science', branch=branch,
                                     exp_name=expname)
 
-    def _project_2d_calibs(self, data, calib_name, exptimes, nexpo, start_from):
+    def _project_2d_calibs(self, data, calib_name, exptimes, nexpo, start_from=0):
 
         if not isinstance(exptimes, list):
             exptimes = [exptimes]
