@@ -154,7 +154,7 @@ class Simulator2D:
         self._project_2d_calibs(flat, 'flat', self.observation.flat_exptimes, self.observation.nflats,
                                 overwrite=overwrite, list_lamps='00100')
 
-    def create_arc(self, hg=False, ne=False, ar=False, xe=False, overwrite=True):
+    def create_arc(self, hg=False, ne=False, ar=False, xe=False, overwrite=True, start_from=0):
 
         if not np.any([hg, ne, ar, xe]):
             raise ValueError('At least one lamp should be selected')
@@ -204,8 +204,11 @@ class Simulator2D:
         # collapsing in the single required arc
         arcs = arcs.sum(axis=0)
 
+        if start_from != 0:
+            start_from -= 1
+
         self._project_2d_calibs(arcs, 'arc', self.observation.arc_exptimes, self.observation.narcs, overwrite=overwrite,
-                                list_lamps="".join(list_lamps))
+                                list_lamps="".join(list_lamps), start_from=start_from)
 
     def create_bias(self, overwrite=True):
 
@@ -403,7 +406,7 @@ class Simulator2D:
                                     camera=name, exp_type='science', branch=branch,
                                     exp_name=expname)
 
-    def _project_2d_calibs(self, data, calib_name, exptimes, nexpo, overwrite=True, list_lamps='00000'):
+    def _project_2d_calibs(self, data, calib_name, exptimes, nexpo, overwrite=True, list_lamps='00000', start_from=0):
 
         if not isinstance(exptimes, list):
             exptimes = [exptimes]
@@ -430,7 +433,7 @@ class Simulator2D:
                 new_wave[branch.name] = wave
 
         if calib_name == 'arc':
-            add_file_index = 10001
+            add_file_index = 10001 + start_from
         elif calib_name == 'flat':
             add_file_index = 1001
         elif calib_name == 'bias':
