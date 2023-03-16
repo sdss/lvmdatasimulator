@@ -20,7 +20,8 @@ from multiprocessing import Pool
 from tqdm import tqdm
 from lvmdatasimulator.utils import tqdm_joblib
 from joblib import Parallel, delayed, parallel_backend
-
+from astropy import units as u
+from astropy.time import Time
 
 def spec_fragment_convolve_psf(spec_oversampled_cut=None, xpos_oversampled_cut=None, xpos_ccd=None, ypos_ccd=None,
                                focus=None, convolve_half_window=10):
@@ -155,8 +156,8 @@ def cosmic_rays(ccdimage, n_cr=100, std_cr=5, deep=10.0, cr_intensity=1e5):
 #     return space, bspa
 
 
-def raw_data_header(h, field_name, mjd, exp_name, typ, flb='science', ra=0.0, dec=0.0, azim=180.0, alt=90.0,
-                    exp_time=900.0, bzero=32768):
+def raw_data_header(h, obstime, mjd, exp_name, channel, cam, flb='science', ra=0.0, dec=0.0, azim=180.0, alt=90.0,
+                    exp_time=900.0, bzero=32768, list_lamps='00000', gain=None, readnoise=None, gap_pos=None):
     if flb == 'science':
         flab = 'science '
     elif flb == 'arc':
@@ -166,53 +167,66 @@ def raw_data_header(h, field_name, mjd, exp_name, typ, flb='science', ra=0.0, de
     elif flb == 'bias':
         flab = 'bias    '
 
-    h["TELESCOP"] = 'LVM data simulator'
-    h["FILENAME"] = 'sdR-' + typ + '-' + f"{exp_name:08}" + '.fits'
-    h["CAMERAS"] = typ + '      '
-    h["EXPOSURE"] = exp_name
-    h["FLAVOR"] = (flab, 'exposure type, SDSS spectro style')
-    h["MJD"] = (np.int(mjd), 'APO fMJD day at start of exposure')
-    h["TAI-BEG"] = ((np.float(mjd) + 0.25) * 24.0 * 3600.0, 'MJD(TAI) seconds at start of integration')
-    h["DATE-OBS"] = ('2012-03-20T06:00:00', 'TAI date at start of integration')
-    h["NAME"] = (field_name + '-' + mjd + '-01', 'The name of the currently loaded plate')
-    h["CONFIID"] = (field_name, 'The currently FPS configuration')
-    h["OBJSYS"] = ('ICRS    ', 'The TCC objSys')
+    h["FILENAME"] = (f'sdR-s-{channel}{cam}-{exp_name}.fits.gz', 'File basename')
+    h["EXPOSURE"] = (int(exp_name), 'Exposure number')
+    h["SPEC"] = ('sp1', 'Spectrograph name')
+    h["OBSERVAT"] = ('LCO', 'Observatory')
+    h["OBSTIME"] = (obstime, "Start of the observation")
+    h["MJD"] = (np.int(mjd), 'Modified Julian Date')
+    h["EXPTIME"] = (exp_time, 'Exposure time')
+    h["DARKTIME"] = (exp_time, 'Dark time')
+    h["IMAGETYP"] = (flab, 'Image type')
+    h['INTSTART'] = (obstime, 'Start of the integration')
+    h['INTEND'] = ((Time(obstime)+exp_time*u.s).to_value('fits'), 'End of the integration')
+    h['CCD'] = (f'{channel}{cam}', 'CCD name')
+    # h['CCDID'] = ('STA27977', 'Unique identifier of the CCD')
+    # h['CCDTYPE'] = ('STA4850 ', 'CCD type')
+    if gain is not None:
+        for ind, g in enumerate(gain):
+            h[f'GAIN{ind+1}'] = (g, f"CCD gain AD{ind+1} [e-/ADU]")
+    if readnoise is not None:
+        for ind, rn in enumerate(readnoise):
+            h[f'RDNOISE{ind+1}'] = (rn, f'CCD read noise AD{ind+1} [e-]')
+    h['CCDSUM'] = ('1 1     ', 'Horizontal and vertical binning')
+    h['DATASEC'] = (f"[1:{h['NAXIS1']},1:{h['NAXIS2']}]", 'Section of the detector containing data')
+    h['CCDSEC'] = (f"[1:{h['NAXIS1']},1:{h['NAXIS2']}]", 'Section of the detector read out')
+    h['BIASSEC'] = (f"[{gap_pos[0]}:{gap_pos[1]},1:{h['NAXIS2']}]", 'Section of calibration / bias data')
+    h['TRIMSEC'] = (f"[1:{gap_pos[0]-1},1:{h['NAXIS2']}],[{gap_pos[1]+1}:{h['NAXIS1']},1:{h['NAXIS2']}]",
+                    'Section with useful data')
+    h['BUFFER'] = (1, 'The buffer number read')
+    h['HARTMANN'] = ('0 0     ', 'Left/right. 0=open 1=closed')
+
+    onoff = ['OFF     ', 'ON      ']
+    lamp_on_off = {"ARGON": onoff[int(list_lamps[0])],
+                   "NEON": onoff[int(list_lamps[1])],
+                   "LDLS": onoff[int(list_lamps[2])],
+                   "HGNE": onoff[int(list_lamps[3])],
+                   "XENON": onoff[int(list_lamps[3])]}
+    for kv in lamp_on_off:
+        h[kv] = (lamp_on_off[kv], 'Status of the corresponding lamp')
+    h["BSCALE"] = 1
+    h["BZERO"] = bzero
+
+    # h["DATE-OBS"] = ('2012-03-20T06:00:00', 'TAI date at start of integration')
+    # h["OBJSYS"] = ('ICRS    ', 'The TCC objSys')
     if ra is not None:
         h["RA"] = (ra, 'RA of telescope boresight (deg)')
-        h["RADEG"] = (ra , 'RA of telescope pointing(deg)')
+        # h["RADEG"] = (ra , 'RA of telescope pointing(deg)')
     if dec is not None:
         h["DEC"] = (dec, 'Dec of telescope boresight (deg)')
-        h["DECDEG"] = (dec, 'Dec of telescope pointing (deg)')
+        # h["DECDEG"] = (dec, 'Dec of telescope pointing (deg)')
     if azim is not None:
         h["AZ"] = (azim, 'Azimuth axis pos. (approx, deg)')
     if alt is not None:
         h["ALT"] = (alt, 'Altitude axis pos. (approx, deg)')
-    if 'flat    ' in flab:
-        h["FF"] = ('1 1 1 1 ', 'FF lamps 1:on 0:0ff')
-        h["NE"] = ('0 0 0 0 ', 'NE lamps 1:on 0:0ff')
-        h["HGCD"] = ('0 0 0 0 ', 'HGCD lamps 1:on 0:0ff')
-        h["FFS"] = ('1 1 1 1 1 1 1 1', 'Flatfield Screen 1:closed 0:open')
-    elif 'science ' in flab:
-        h["FF"] = ('0 0 0 0 ', 'FF lamps 1:on 0:0ff')
-        h["NE"] = ('0 0 0 0 ', 'NE lamps 1:on 0:0ff')
-        h["HGCD"] = ('0 0 0 0 ', 'HGCD lamps 1:on 0:0ff')
-        h["FFS"] = ('0 0 0 0 0 0 0 0', 'Flatfield Screen 1:closed 0:open')
-    elif 'arc     ' in flab:
-        h["FF"] = ('0 0 0 0 ', 'FF lamps 1:on 0:0ff')
-        h["NE"] = ('1 1 1 1 ', 'NE lamps 1:on 0:0ff')
-        h["HGCD"] = ('1 1 1 1 ', 'HGCD lamps 1:on 0:0ff')
-        h["FFS"] = ('1 1 1 1 1 1 1 1', 'Flatfield Screen 1:closed 0:open')
-    h["REQTIME"] = (exp_time, 'requested exposure time')
-    h["EXPTIME"] = (exp_time, 'measured exposure time, s')
-    h["BSCALE"] = 1
-    h["BZERO"] = bzero
+
     return h
 
 
 def cre_raw_exp(input_spectrum, fibtype, ring, position, wave_ccd, wave, nfib=600, flb='s',
                 channel_type="blue", cam=1, ccd_noise_factor=1.0, n_cr=130, std_cr=5,
-                mjd='45223', field_name='00000', exp_name='0', exp_time=900.0, ra=0.0,
-                dec=0.0, add_cr_hits=True):
+                obstime=None, mjd=None, exp_name='0', exp_time=900.0, ra=0.0,
+                dec=0.0, add_cr_hits=True, list_lamps='00000'):
 
     """
     Creates the Raw 2D LVM exposure from the provided spectrum
@@ -231,14 +245,15 @@ def cre_raw_exp(input_spectrum, fibtype, ring, position, wave_ccd, wave, nfib=60
         channel_type: Type of the current channel of spectrograph (blue, red or ir)
         cam: ID of the camera
         nfib: Total number of fibers for current camera CCD
-        flb: types of the exposures (???)
-        mjd: Date of the observation (???)
-        field_name: Name of the observed field (plate) (???)
-        exp_name: Name of exposure (???)
+        flb: type of the exposure
+        obstime: Date and time of the observation
+        mjd: Modified Julian Day of the observation
+        exp_name: Number of exposure
         exp_time: exposure time
         ra: RA of the pointing
         dec: DEC of the pointing
         add_cr_hits: add or not CR hits
+        list_lamps: State of the lamps (argon/neon/flat/HgNe/Xenon; 1=enabled, 0=disabled)
 
     Returns: Tuple of 2 HDUs containing projected spectrum+header and associated bias+header
 
@@ -345,26 +360,30 @@ def cre_raw_exp(input_spectrum, fibtype, ring, position, wave_ccd, wave, nfib=60
     if channel_type in ['blue', 'ir']:
         output = np.fliplr(output)
 
-    output_hdus = (ccdspec_to_hdu(output, field_name, mjd, exp_name, channel_index[channel_type],
-                                  flb=flb, exp_time=exp_time, ra=ra.value, dec=dec.value, bzero=32768))
+    output_hdus = (ccdspec_to_hdu(output, obstime, mjd, exp_name, channel_index[channel_type], cam,
+                                  flb=flb, exp_time=exp_time, ra=ra.value, dec=dec.value, bzero=32768,
+                                  ccd_props=ccd_props, list_lamps=list_lamps))
     return output_hdus
 
 
-def ccdspec_to_hdu(data, field_name, mjd, exp_name, channel=None, flb='science', exp_time=0., ra=None, dec=None,
-                   bzero=32768):
+def ccdspec_to_hdu(data, obstime, mjd, exp_name, channel=None, cam=None, flb='science', exp_time=0., ra=None, dec=None,
+                   bzero=32768, ccd_props=None, list_lamps='00000'):
     """
     Saturate the output array and convert it to the fits format with a proper fits header
     Args:
         data: numpy array containing the reprojected spectrum (or bias)
-        field_name: Name of the observed field (plate)
-        mjd: Date of the observations (???)
-        exp_name: name of exposure (???)
+        obstime: Time of observations
+        mjd: Modified Julian Day of the observation
+        exp_name: name of exposure
         channel: index corresponding to the channel of spectrograph (b, r, or z)
+        cam: index of camera
         flb: type of exposure
         exp_time: Exposure time
         ra: RA of the pointing
         dec: Dec of the pointing
         bzero: bzero level in fits file (corresponds to saturation level + 1)
+        ccd_props: row defining the properties of CCD for current channel
+        list_lamps: State of the lamps (argon/neon/flat/HgNe/Xenon; 1=enabled, 0=disabled)
 
     Returns: HDU list where primary HDU contains this data
 
@@ -376,8 +395,17 @@ def ccdspec_to_hdu(data, field_name, mjd, exp_name, channel=None, flb='science',
     hdu.header["NAXIS"] = 2
     hdu.header["NAXIS1"] = data.shape[1]
     hdu.header["NAXIS2"] = data.shape[0]
-    hdu.header = raw_data_header(hdu.header, field_name, mjd, exp_name, channel, flb=flb,
-                                 exp_time=exp_time, ra=ra, dec=dec, bzero=bzero)
+    if ccd_props is not None:
+        gain = [ccd_props['gain_1'], ccd_props['gain_2'], ccd_props['gain_3'], ccd_props['gain_3']]
+        readnoise = [ccd_props['noise']]*4
+        gap_pos = [ccd_props['x1']+2, ccd_props['x2']]  # added +1 to convert to fits coordinates (starts from 1)
+    else:
+        gain = [1, 1, 1, 1]
+        readnoise = [3.8]*4
+        gap_pos = [2040, 2080]
+    hdu.header = raw_data_header(hdu.header, obstime, mjd, exp_name, channel, cam, flb=flb,
+                                 exp_time=exp_time, ra=ra, dec=dec, bzero=bzero, gain=gain,
+                                 readnoise=readnoise, gap_pos=gap_pos, list_lamps=list_lamps)
     hlist = fits.HDUList([hdu])
     hlist.update_extend()
     return hlist

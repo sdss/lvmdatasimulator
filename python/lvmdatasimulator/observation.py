@@ -111,7 +111,7 @@ class Observation:
     dec: float = None
     unit_ra: u = u.deg
     unit_dec: u = u.deg
-    time: str = '2022-01-01T00:00:00.00'  # UT time of observations
+    time: str = Time.now().to_value('fits')  # UT time of observations
     location: EarthLocation = EarthLocation.of_site('lco')
     utcoffset: u.hour = -3 * u.hour  # Correction to local time. It is important to keep it updated
     exptimes: List[int] = field(default_factory=lambda: ['900'])  # exposure time in s

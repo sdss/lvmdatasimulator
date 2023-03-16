@@ -26,6 +26,7 @@ from lvmdatasimulator.stars import StarsList
 from lvmdatasimulator import log
 import lvmdatasimulator.utils as util
 from joblib import Parallel, delayed
+import glob
 
 import os
 from lvmdatasimulator.projection2d import cre_raw_exp
@@ -141,7 +142,7 @@ class Simulator2D:
         self._area_fiber = np.pi * (self.bundle.fibers_science[0].diameter / 2) ** 2
         self._fibers_per_spec = int(self.bundle.max_fibers / 3)
 
-    def create_flat(self):
+    def create_flat(self, overwrite=True):
 
         log.info('Creating flat fields...')
 
@@ -150,14 +151,17 @@ class Simulator2D:
 
         flat = util.resample_spectrum(self._wl_grid, data['wave'], data['flux'], fast=self.fast)
 
-        self._project_2d_calibs(flat, 'flat', self.observation.flat_exptimes, self.observation.nflats)
+        self._project_2d_calibs(flat, 'flat', self.observation.flat_exptimes, self.observation.nflats,
+                                overwrite=overwrite, list_lamps='00100')
 
-    def create_arc(self, hg=False, ne=False, ar=False, xe=False):
+    def create_arc(self, hg=False, ne=False, ar=False, xe=False, overwrite=True):
 
         if not np.any([hg, ne, ar, xe]):
             raise ValueError('At least one lamp should be selected')
 
         arcs = np.zeros((4, len(self._wl_grid)))
+
+        list_lamps = ['0']*5
 
         if hg:
             filename = os.path.join(DATA_DIR, 'lamps', 'mercury_arc_sb.dat')
@@ -167,6 +171,7 @@ class Simulator2D:
 
             arcs[0] = util.resample_spectrum(self._wl_grid, data['wave'], data['flux'],
                                              fast=self.fast)
+            list_lamps[3] = '1'
 
         if ne:
             filename = os.path.join(DATA_DIR, 'lamps', 'neon_arc_sb.dat')
@@ -175,6 +180,7 @@ class Simulator2D:
             log.info('Including Ne lamp...')
 
             arcs[1] = util.resample_spectrum(self._wl_grid, data['wave'], data['flux'], fast=self.fast)
+            list_lamps[1] = '1'
 
         if ar:
             filename = os.path.join(DATA_DIR, 'lamps', 'argon_arc_sb.dat')
@@ -183,6 +189,7 @@ class Simulator2D:
             log.info('Including Ar lamp...')
 
             arcs[2] = util.resample_spectrum(self._wl_grid, data['wave'], data['flux'], fast=self.fast)
+            list_lamps[0] = '1'
 
         if xe:
             filename = os.path.join(DATA_DIR, 'lamps', 'xenon_arc_sb.dat')
@@ -192,15 +199,17 @@ class Simulator2D:
 
             arcs[3] = util.resample_spectrum(self._wl_grid, data['wave'], data['flux'],
                                              fast=self.fast)
+            list_lamps[4] = '1'
 
         # collapsing in the single required arc
         arcs = arcs.sum(axis=0)
 
-        self._project_2d_calibs(arcs, 'arc', self.observation.arc_exptimes, self.observation.narcs)
+        self._project_2d_calibs(arcs, 'arc', self.observation.arc_exptimes, self.observation.narcs, overwrite=overwrite,
+                                list_lamps="".join(list_lamps))
 
-    def create_bias(self):
+    def create_bias(self, overwrite=True):
 
-        self._project_2d_calibs(None, 'bias', 0, self.observation.nbias)
+        self._project_2d_calibs(None, 'bias', 0, self.observation.nbias, overwrite=overwrite)
 
     def extract_extinction(self, extinction_file=os.path.join(DATA_DIR, 'sky',
                                                               'LVM_LVM160_KLAM.dat')):
@@ -209,8 +218,7 @@ class Simulator2D:
         self.extinction_file = extinction_file
         data = ascii.read(self.extinction_file)
 
-        self.extinction = util.resample_spectrum(self._wl_grid, data['col1'], data['col2'],
-                                            fast=self.fast)
+        self.extinction = util.resample_spectrum(self._wl_grid, data['col1'], data['col2'], fast=self.fast)
 
     def extract_sky(self, unit=u.erg / (u.cm ** 2 * u.s * u.AA)):
         """
@@ -395,7 +403,7 @@ class Simulator2D:
                                     camera=name, exp_type='science', branch=branch,
                                     exp_name=expname)
 
-    def _project_2d_calibs(self, data, calib_name, exptimes, nexpo):
+    def _project_2d_calibs(self, data, calib_name, exptimes, nexpo, overwrite=True, list_lamps='00000'):
 
         if not isinstance(exptimes, list):
             exptimes = [exptimes]
@@ -421,17 +429,20 @@ class Simulator2D:
                 new_calib[branch.name] = resized
                 new_wave[branch.name] = wave
 
+        if calib_name == 'arc':
+            add_file_index = 10001
+        elif calib_name == 'flat':
+            add_file_index = 1001
+        elif calib_name == 'bias':
+            add_file_index = 101
+        else:
+            log.error(f"Unrecognized calibration name is detected: {calib_name}")
+            return
+
+        channel_index = {'blue': 'b', 'red': 'r', 'ir': 'z'}
         for i, time in enumerate(exptimes):
             for j in range(nexpo):
-                if calib_name == 'arc':
-                    exp_name = 10000+(i*j)+j+1
-                elif calib_name == 'flat':
-                    exp_name = 1000+(i*j)+j+1
-                elif calib_name == 'bias':
-                    exp_name = 100+(i*j)+j+1
-                else:
-                    log.error(f"Unrecognized calibration name is detected: {calib_name}")
-                    return
+                exp_name = add_file_index+(i*j)+j
 
                 log.info(f'Saving {calib_name} exposures with exptime {time}s')
                 for branch in self.spectrograph.branches:
@@ -447,13 +458,21 @@ class Simulator2D:
                         calib_final = expand_to_full_fiber(calib, self.bundle.max_fibers)
                     # calib_final = calib_final.T
 
+                    fileout_root = f'sdR-s-{channel_index[name]}1-'+f'{exp_name:08}'[:-len(str(add_file_index))+1]
+                    if not overwrite and (i == 0) and (j == 0):
+                        files_exist = glob.glob(os.path.join(self.outdir,
+                                                             f'{fileout_root}*.fits.gz'))
+                        if len(files_exist) > 0:
+                            exp_name += max([(int(curfile.split('-')[-1].split('.fits.gz')[0]) -
+                                              add_file_index + 1) for curfile in files_exist])
+
                     self._to_camera(spectra=calib_final, wave=new_wave[name],
                                     fibtype=fibtype, ringid=ringid, pos=pos, exptime=time,
                                     camera=name, exp_type=calib_name, branch=branch,
-                                    exp_name=exp_name)
+                                    exp_name=exp_name, list_lamps=list_lamps)
 
     def _to_camera(self, spectra, wave, fibtype, ringid, pos, exptime, camera, exp_type,
-                   branch, exp_name):
+                   branch, exp_name, list_lamps='00000'):
 
         n_cr = int(branch.cosmic_rates.value * exptime)
 
@@ -481,10 +500,12 @@ class Simulator2D:
                                             cam=cam+1, n_cr=n_cr, exp_name=exp_name,
                                             exp_time=exptime,
                                             ra=self.observation.ra, dec=self.observation.dec,
+                                            obstime=str(self.observation.time),
                                             mjd=str(self.observation.mjd),
-                                            flb=exp_type, add_cr_hits=n_cr > 0)
+                                            flb=exp_type, add_cr_hits=n_cr > 0,
+                                            list_lamps=list_lamps)
             if projected_spectra is not None:
-                fileout_data = os.path.join(self.outdir, f'sdR-{channel_index[camera]}{cam+1}-{exp_name:08}.fits')
+                fileout_data = os.path.join(self.outdir, f'sdR-s-{channel_index[camera]}{cam+1}-{exp_name:08}.fits')
                 if self.compress:
                     fileout_data += '.gz'
                 projected_spectra[0].writeto(fileout_data, overwrite=True)
