@@ -1024,6 +1024,12 @@ class Cloud3D(Nebula):
     _rad_bins: int = 0
     _npix_los: int = 100
 
+    # Provide full path to the 3D/4D cube containing emissivities in cartesian space
+    # (if 4D, then the first coordinate is wavelength).
+    # The shape must be identical to what is normally produced with the simulator with the present parameters
+    # Can be used for swapping the nebula to, for example, perturbed one
+    force_use_cube: str = None
+
     def __post_init__(self):
         self._assign_all_units()
         if self._rad_bins == 0:
@@ -1134,6 +1140,19 @@ class Cloud3D(Nebula):
 
     @cached_property
     def _brightness_3d_cartesian(self):
+        if self.force_use_cube is not None:
+            s_cart = (len(self._cartesian_z_grid), len(self._cartesian_y_grid), len(self._cartesian_x_grid))
+            if not os.path.exists(self.force_use_cube):
+                log.warning(f"Wrong path to the provided cube for Cloud3D/Bubble3D nebula. "
+                            f"Continue with the original simulation. Check the path: {self.force_use_cube}")
+            else:
+                with fits.open(self.force_use_cube) as hdu:
+                    if hdu[0].data.shape != s_cart:
+                        log.warning(f"Dimentions of the provided cube for Cloud3D/Bubble3D nebula ({hdu[0].data.shape}) "
+                                    f"are inconsistent with the original simulation ({s_cart}). "
+                                    f"Continue with the original simulations. Check your file: {self.force_use_cube}")
+                    else:
+                        return hdu[0].data
         return interpolate_sphere_to_cartesian(self._brightness_3d_spherical, x_grid=self._cartesian_x_grid,
                                                y_grid=self._cartesian_y_grid, z_grid=self._cartesian_z_grid,
                                                rad_grid=self._rad_grid, theta_grid=self._theta_grid,
@@ -1142,6 +1161,19 @@ class Cloud3D(Nebula):
     @cached_property
     def _brightness_4d_cartesian(self):
         s = self._brightness_4d_spherical.shape
+        if self.force_use_cube is not None:
+            s_cart = (s[0], len(self._cartesian_z_grid), len(self._cartesian_y_grid), len(self._cartesian_x_grid))
+            if not os.path.exists(self.force_use_cube):
+                log.warning(f"Wrong path to the provided cube for Cloud3D/Bubble3D nebula. "
+                            f"Continue with the original simulation. Check the path: {self.force_use_cube}")
+            else:
+                with fits.open(self.force_use_cube) as hdu:
+                    if hdu[0].data.shape != s_cart:
+                        log.warning(f"Dimentions of the provided cube for Cloud3D/Bubble3D nebula ({hdu[0].data.shape}) "
+                                    f"are inconsistent with the original simulation ({s_cart}). "
+                                    f"Continue with the original simulations. Check your file: {self.force_use_cube}")
+                    else:
+                        return hdu[0].data
         return np.array(Parallel(n_jobs=lvmdatasimulator.n_process)(delayed(interpolate_sphere_to_cartesian)
                                                                     (cur_line_array,
                                                                      self._cartesian_x_grid, self._cartesian_y_grid,
@@ -1656,6 +1688,8 @@ class ISM:
                                 'ext_rv': 3.1,  # Value of R_V for extinction curve calculation (used for dark nebulae)
                                 'vel_gradient: 12. * u.km / u.s / u.pc  # Line-of-sight velocity gradient
                                 'vel_pa: 30. * u.degree  # PA of kinematical axis (for vel_gradient or vel_rot)
+                                'force_use_cube': provide path to the 3D/4D cube with emissivities
+                                        to be used instead of the generated one
                                 }]
         """
         if type(all_objects) is dict:
@@ -1683,14 +1717,14 @@ class ISM:
                                    'continuum_type', 'continuum_data', 'continuum_flux', 'continuum_mag',
                                    'continuum_wl', 'ext_law', 'ext_rv', 'vel_gradient', 'vel_rot', 'vel_pa',
                                    'n_brightest_lines', 'offset_RA', 'offset_DEC', 'RA', 'DEC',
-                                   'pxsize'],
+                                   'pxsize', 'force_use_cube'],
                                   [0, 0, 0., 1., 0, self.sys_velocity, self.turbulent_sigma, 0, 0.1, 0, 0, self.distance,
                                    None, None, 0, None, 5500., self.ext_law, self.R_V, 0, 0, kin_pa_default, None,
-                                   None, None, None, None, self.pxscale],
+                                   None, None, None, None, self.pxscale, None],
                                   [brtunit, fluxunit, u.mag, None, velunit, velunit, velunit, None, None,
                                    u.pc, u.pc, u.kpc, None, None, brtunit/u.AA, u.mag / u.arcsec ** 2, u.Angstrom,
                                    None, None, velunit / u.pc, velunit, u.degree, None, u.arcsec, u.arcsec,
-                                   u.degree, u.degree, None]):
+                                   u.degree, u.degree, None, None]):
                 set_default_dict_values(cur_obj, k, v, unit=unit)
 
             tot = 0
@@ -1984,6 +2018,7 @@ class ISM:
                                                 spectrum_type=model_type,
                                                 n_brightest_lines=cur_obj['n_brightest_lines'],
                                                 linerat_constant=cur_obj['linerat_constant'],
+                                                force_use_cube=cur_obj['force_use_cube'],
                                                 )
                 elif cur_obj['type'] == "Cloud3D":
                     generated_object = Cloud3D(xc=x, yc=y,
@@ -2005,6 +2040,7 @@ class ISM:
                                                linerat_constant=cur_obj['linerat_constant'],
                                                vel_gradient=cur_obj['vel_gradient'],
                                                vel_pa=cur_obj['vel_pa'],
+                                               force_use_cube=cur_obj['force_use_cube'],
                                              )
 
                 elif cur_obj['type'] == "Filament":
