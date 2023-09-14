@@ -276,8 +276,7 @@ class Nebula:
     def __post_init__(self):
         self._assign_all_units()
         self._assign_position_params()
-        self._ref_line_id = 0
-        self.linerat_constant = True  # True if the ratio of line fluxes shouldn't change across the nebula
+        self._assign_wavelength()
         if self.spectrum_type not in [None, 'mappings', 'cloudy']:
             raise ModelsError('These models are not supported')
 
@@ -295,6 +294,14 @@ class Nebula:
                 cur_list_properties.append(prp)
                 cur_list_units.append(unit)
         assign_units(self, cur_list_properties, cur_list_units)
+
+    def _assign_wavelength(self, spatial_variations = False):
+        self.wl_list = None  # list of lines used to set up this object; populated by self.add_nebula
+                             # (will be None if not emission; 6562.81 if const flux rat., list of lines otherwise)
+        self._ref_line_id = 0
+        if not spatial_variations:
+            self.linerat_constant = True  # True if the ratio of line fluxes shouldn't change across the nebula
+
 
     def _assign_position_params(self, conversion_type='rect'):
         if conversion_type == 'rect':
@@ -459,8 +466,7 @@ class Rectangle(Nebula):
     def __post_init__(self):
         self._assign_all_units()
         self._assign_position_params()
-        self._ref_line_id = 0
-        self.linerat_constant = True  # True if the ratio of line fluxes shouldn't change across the nebula
+        self._assign_wavelength()
 
 
 @dataclass
@@ -479,8 +485,7 @@ class Ellipse(Nebula):
         self._assign_all_units()
         self._npix_los = 1
         self._assign_position_params(conversion_type='ellipse')
-        self._ref_line_id = 0
-        self.linerat_constant = True  # True if the ratio of line fluxes shouldn't change across the nebula
+        self._assign_wavelength()
 
     @cached_property
     def _brightness_3d_cartesian(self):
@@ -512,8 +517,8 @@ class Circle(Ellipse):
         self.ax_ratio = 1.
         self._npix_los = 1
         self._assign_position_params(conversion_type='ellipse')
-        self._ref_line_id = 0
-        self.linerat_constant = True  # True if the ratio of line fluxes shouldn't change across the nebula
+        self._assign_wavelength()
+
 
 
 @dataclass
@@ -532,8 +537,7 @@ class Filament(Nebula):
         self._assign_all_units()
         self._assign_position_params(conversion_type='cylinder')
         self._npix_los = 1
-        self._ref_line_id = 0
-        self.linerat_constant = True  # True if the ratio of line fluxes shouldn't change across the nebula
+        self._assign_wavelength()
 
     @cached_property
     def _brightness_3d_cartesian(self):
@@ -680,8 +684,7 @@ class Galaxy(Nebula):
         self._npix_los = 1
         self.r_max = self.r_eff.to(u.pc).value / self.pxscale.to(u.pc).value * self.rad_lim
         self._assign_position_params(conversion_type='galaxy')
-        self._ref_line_id = 0
-        self.linerat_constant = True  # True if the ratio of line fluxes shouldn't change across the nebula
+        self._assign_wavelength()
 
     @cached_property
     def _brightness_3d_cartesian(self):
@@ -764,7 +767,7 @@ class Cloud(Nebula):
         elif (self.x0 is not None) and (self.y0 is not None):
             self.xc = self.x0 + delta
             self.yc = self.y0 + delta
-        self._ref_line_id = 0
+        self._assign_wavelength(spatial_variations=True)
 
     @cached_property
     def _theta_grid(self):
@@ -1041,7 +1044,7 @@ class Cloud3D(Nebula):
         elif (self.x0 is not None) and (self.y0 is not None):
             self.xc = self.x0 + delta
             self.yc = self.y0 + delta
-        self._ref_line_id = 0
+        self._assign_wavelength(spatial_variations=True)
 
     @cached_property
     def _theta_grid(self):
@@ -1460,7 +1463,9 @@ class ISM:
 
         self._add_fits_extension(name="Comp_{0}_Brightness".format(obj_id), value=brt,
                                  obj_to_add=obj_to_add, zorder=zorder, add_fits_kw=add_fits_kw, add_counter=True)
+        wl_list = None
         if (obj_to_add.max_brightness > 0) or (obj_to_add.total_flux > 0):
+            wl_list = [6562.81]
             if brt_4d is not None:
                 if type(obj_to_add) == CustomNebula:
                     wl_list = obj_to_add.lines_wl
@@ -1530,6 +1535,8 @@ class ISM:
         if continuum is not None:
             self._add_fits_extension(name="Comp_{0}_Continuum".format(obj_id), value=continuum,
                                      obj_to_add=obj_to_add, zorder=zorder, add_fits_kw=add_fits_kw)
+
+        obj_to_add.wl_list = wl_list
         return self.content
 
     def save_ism(self, filename):
