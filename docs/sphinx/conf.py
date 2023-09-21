@@ -50,7 +50,7 @@ if sphinx_template == 'sphinx-bootstrap':
 # ones.
 extensions = ['sphinx.ext.autodoc', 'sphinx.ext.napoleon', 'sphinx.ext.autosummary',
               'sphinx.ext.todo', 'sphinx.ext.viewcode', 'sphinx.ext.mathjax',
-              'sphinx.ext.intersphinx']
+              'sphinx.ext.intersphinx', 'myst_nb']
 
 # Add any paths that contain templates here, relative to this directory.
 templates_path = ['_templates']
@@ -70,8 +70,8 @@ master_doc = 'index'
 
 # General information about the project.
 project = 'lvmdatasimulator'
-copyright = '{0}, {1}'.format('2021', 'Oleg Egorov')
-author = 'Oleg Egorov'
+copyright = '{0}, {1}'.format('2021', 'Oleg Egorov, Enrico Congiu')
+author = 'Oleg Egorov, Enrico Congiu'
 
 # The version info for the project you're documenting, acts as replacement for
 # |version| and |release|, also used in various other places throughout the
@@ -87,7 +87,7 @@ release = __version__
 #
 # This is also used if you do content translation via gettext catalogs.
 # Usually you set "language" from the command line for these cases.
-language = None
+language = 'en'
 
 # List of patterns, relative to source directory, that match files and
 # directories to ignore when looking for source files.
@@ -148,7 +148,7 @@ html_css_files = []
 
 if sphinx_template == 'sphinx-bootstrap':
 
-    html_theme = 'bootstrap'
+    html_theme = 'sphinx_rtd_theme'
 
     html_sidebars = {}
 

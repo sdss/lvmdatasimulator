@@ -4,6 +4,8 @@
 Change Log
 ==========
 
+2023/04/11 - starting to work on the documentation
+
 2022/08/09 - adding possibility to run ETC with a user provided spectrum
 
 2022/08/05 - v0.9.2 released

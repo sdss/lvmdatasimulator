@@ -2,14 +2,14 @@
 .. _api:
 
 lvmdatasimulator Reference
-=========================
+==========================
 
 .. _api-main:
 
 Main
 ----
 
-.. automodule:: lvmdatasimulator.main
+.. automodule:: lvmdatasimulator
    :members:
    :undoc-members:
    :show-inheritance:
