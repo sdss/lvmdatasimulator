@@ -480,23 +480,23 @@ class Simulator2D:
         n_cr = int(branch.cosmic_rates.value * exptime)
 
         if camera == 'blue':
-            expn = '00002998'
-            cam = 'b1'
+            lamp = 'hgne'
+            branch = 'b'
         elif camera == 'red':
-            expn = '00001563'
-            cam = 'r1'
+            lamp = 'neon'
+            branch = 'r'
         elif camera == 'ir':
-            expn = '00001563'
-            cam = 'z1'
+            lamp = 'neon'
+            branch = 'z'
         else:
             log.error(f"Unrecognized spectrograph branch: {camera}")
             return
-        cube_file = f'{DATA_DIR}/instrument/sdR-s-{cam}-{expn}.disp.fits'
-        wave2d, _ = fits.getdata(cube_file, 0, header=True)
-        wave_ccd = wave2d[3]
 
         channel_index = {'blue': 'b', 'red': 'r', 'ir': 'z'}
         for cam in range(3):
+            cube_file = f'{DATA_DIR}/instrument/lvm-mwave_{lamp}-{branch}{cam+1}.fits'
+            wave2d, _ = fits.getdata(cube_file, 0, header=True)
+            wave_ccd = wave2d[323] # selecting the middle fiber.
             projected_spectra = cre_raw_exp(spectra, fibtype=fibtype, ring=ringid,
                                             position=pos, wave_ccd=wave_ccd, wave=wave,
                                             nfib=self._fibers_per_spec, channel_type=camera,
