@@ -664,8 +664,9 @@ def yaml_to_plugmap(yaml_file):
 
     table_new = Table(rows=fibers['fibers'], names=['fiberid', 'spectrographid', 'blockid',
                                                     'finblock', 'targettype', 'ifulabel',
-                                                    'finifu', 'xpmm', 'ypmxx', 'ringnum',
-                                                    'fibstatus'])
+                                                    'finifu', 'telescope', 'xpmm', 'ypmxx',
+                                                    'ringnum','orig_ifulabel', 'orig_slitlabel',
+                                                    'finsector', 'fmap', 'ypix', 'fibstatus'])
 
     # convert from mm to arcsec -> yaml offsets are in mm
     conv = 37/0.33
@@ -733,36 +734,28 @@ def yaml_to_plugmap(yaml_file):
 
     # adding the y-position information
     for channel in ['blue', 'red', 'ir']:
+        for camera in range(3):
 
-        new_y = compute_y_position(channel)
+            print(channel, camera+1)
+            new_y = compute_y_position(channel, camera+1)
 
-        outtable[f'y_{channel}'] = np.zeros(len(outtable))
+            outtable[f'y_{channel}'] = np.zeros(len(outtable))
 
-        mask = outtable['slit'] == 'slit1'
-        outtable[f'y_{channel}'][mask] = new_y
-
-        mask = outtable['slit'] == 'slit2'
-        outtable[f'y_{channel}'][mask] = new_y
-
-        mask = outtable['slit'] == 'slit3'
-        outtable[f'y_{channel}'][mask] = new_y
-
+            mask = outtable['slit'] == f'slit{camera+1}'
+            outtable[f'y_{channel}'][mask] = new_y
 
     outname = os.path.join(DATA_DIR, 'instrument/fibers/plugmap.dat')
     outtable.write(outname, format='csv', overwrite=True)
 
 
-def compute_y_position(channel):
-
-    trc = {'blue': '00003082',
-           'red': '00001613',
-           'ir': '00001614'}
+def compute_y_position(channel, camera):
 
     suffix = {'blue': 'b',
               'red': 'r',
               'ir': 'z'}
 
-    trc_name = f'sdR-s-{suffix[channel]}1-{trc[channel]}.trc.fits'
+    trc_name = f'lvm-mtrace-{suffix[channel]}{camera}.fits'
+    print(trc_name)
     path = os.path.join(DATA_DIR, 'instrument')
 
     with fits.open(f'{path}/{trc_name}') as hdu:
@@ -777,23 +770,6 @@ def compute_y_position(channel):
 
     '''
 
-    # fiber_id = [18, 162, 306, 325, 326, 327, 328, 329, 330, 331, 332, 333, 334, 335, 336, 337, 338,
-    #             339, 340, 341, 342, 343, 344, 345, 346, 347, 348, 349, 350, 351, 352, 353, 354, 355,
-    #             356, 357, 358, 359, 360, 486, 630]
-
-    fiber_id = [18, 168, 320, 341, 342, 343, 344, 345, 346, 347, 348, 349, 350, 351, 352, 353, 354,
-                355, 356, 357, 358, 359, 360, 361, 362, 363, 364, 365, 366, 367, 368, 369, 370, 371,
-                372, 373, 374, 375, 376, 512, 662]
-
-    # I'm using as reference the middle of the trace
-    interp = interp1d(fiber_id, trc_data[:, 2040], fill_value='extrapolate')
-
-    new_fib = np.arange(36*18+17*2, dtype=int)
-
-    new_y = np.around(interp(new_fib), 2)
-
-    for i in range(1, 18):
-        new_y = np.delete(new_y, 36*i+1)
-        new_y = np.delete(new_y, 36*i)
+    new_y = trc_data[:, 2040]
 
     return new_y
