@@ -496,9 +496,9 @@ class Simulator2D:
         for cam in range(3):
             cube_file = f'{DATA_DIR}/instrument/lvm-mwave_{lamp}-{branch}{cam+1}.fits'
             wave2d, _ = fits.getdata(cube_file, 0, header=True)
-            wave_ccd = wave2d[323] # selecting the middle fiber.
+            # wave_ccd = wave2d[323] # selecting the middle fiber.
             projected_spectra = cre_raw_exp(spectra, fibtype=fibtype, ring=ringid,
-                                            position=pos, wave_ccd=wave_ccd, wave=wave,
+                                            position=pos, wave_ccd=wave2d, wave=wave,
                                             nfib=self._fibers_per_spec, channel_type=camera,
                                             cam=cam+1, n_cr=n_cr, exp_name=exp_name,
                                             exp_time=exptime,
