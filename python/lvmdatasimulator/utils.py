@@ -706,7 +706,7 @@ def yaml_to_plugmap(yaml_file):
             stype.append('science')
         elif row['targettype'] == 'standard':
             stype.append('std')
-        elif row['targettype'] == 'SKY' and row['ifulabel'].startswith('A'):
+        elif row['telescope'] == 'SkyW':
             stype.append('sky1')
         else:
             stype.append('sky2')
@@ -734,15 +734,13 @@ def yaml_to_plugmap(yaml_file):
 
     # adding the y-position information
     for channel in ['blue', 'red', 'ir']:
+        outtable[f'y_{channel}'] = np.zeros(len(outtable))
         for camera in range(3):
 
-            print(channel, camera+1)
             new_y = compute_y_position(channel, camera+1)
 
-            outtable[f'y_{channel}'] = np.zeros(len(outtable))
-
             mask = outtable['slit'] == f'slit{camera+1}'
-            outtable[f'y_{channel}'][mask] = new_y
+            outtable[f'y_{channel}'][mask] = new_y.round(2)
 
     outname = os.path.join(DATA_DIR, 'instrument/fibers/plugmap.dat')
     outtable.write(outname, format='csv', overwrite=True)
@@ -755,7 +753,6 @@ def compute_y_position(channel, camera):
               'ir': 'z'}
 
     trc_name = f'lvm-mtrace-{suffix[channel]}{camera}.fits'
-    print(trc_name)
     path = os.path.join(DATA_DIR, 'instrument')
 
     with fits.open(f'{path}/{trc_name}') as hdu:
