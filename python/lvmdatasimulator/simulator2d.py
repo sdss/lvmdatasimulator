@@ -503,6 +503,7 @@ class Simulator2D:
                                             cam=cam+1, n_cr=n_cr, exp_name=exp_name,
                                             exp_time=exptime,
                                             ra=self.observation.ra, dec=self.observation.dec,
+                                            airmass=self.observation.airmass,
                                             obstime=str(self.observation.time),
                                             mjd=str(self.observation.mjd),
                                             flb=exp_type, add_cr_hits=n_cr > 0,
