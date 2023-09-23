@@ -276,8 +276,7 @@ class Nebula:
     def __post_init__(self):
         self._assign_all_units()
         self._assign_position_params()
-        self._ref_line_id = 0
-        self.linerat_constant = True  # True if the ratio of line fluxes shouldn't change across the nebula
+        self._assign_wavelength()
         if self.spectrum_type not in [None, 'mappings', 'cloudy']:
             raise ModelsError('These models are not supported')
 
@@ -295,6 +294,14 @@ class Nebula:
                 cur_list_properties.append(prp)
                 cur_list_units.append(unit)
         assign_units(self, cur_list_properties, cur_list_units)
+
+    def _assign_wavelength(self, spatial_variations = False):
+        self.wl_list = None  # list of lines used to set up this object; populated by self.add_nebula
+                             # (will be None if not emission; 6562.81 if const flux rat., list of lines otherwise)
+        self._ref_line_id = 0
+        if not spatial_variations:
+            self.linerat_constant = True  # True if the ratio of line fluxes shouldn't change across the nebula
+
 
     def _assign_position_params(self, conversion_type='rect'):
         if conversion_type == 'rect':
@@ -459,8 +466,7 @@ class Rectangle(Nebula):
     def __post_init__(self):
         self._assign_all_units()
         self._assign_position_params()
-        self._ref_line_id = 0
-        self.linerat_constant = True  # True if the ratio of line fluxes shouldn't change across the nebula
+        self._assign_wavelength()
 
 
 @dataclass
@@ -479,8 +485,7 @@ class Ellipse(Nebula):
         self._assign_all_units()
         self._npix_los = 1
         self._assign_position_params(conversion_type='ellipse')
-        self._ref_line_id = 0
-        self.linerat_constant = True  # True if the ratio of line fluxes shouldn't change across the nebula
+        self._assign_wavelength()
 
     @cached_property
     def _brightness_3d_cartesian(self):
@@ -512,8 +517,8 @@ class Circle(Ellipse):
         self.ax_ratio = 1.
         self._npix_los = 1
         self._assign_position_params(conversion_type='ellipse')
-        self._ref_line_id = 0
-        self.linerat_constant = True  # True if the ratio of line fluxes shouldn't change across the nebula
+        self._assign_wavelength()
+
 
 
 @dataclass
@@ -532,8 +537,7 @@ class Filament(Nebula):
         self._assign_all_units()
         self._assign_position_params(conversion_type='cylinder')
         self._npix_los = 1
-        self._ref_line_id = 0
-        self.linerat_constant = True  # True if the ratio of line fluxes shouldn't change across the nebula
+        self._assign_wavelength()
 
     @cached_property
     def _brightness_3d_cartesian(self):
@@ -680,8 +684,7 @@ class Galaxy(Nebula):
         self._npix_los = 1
         self.r_max = self.r_eff.to(u.pc).value / self.pxscale.to(u.pc).value * self.rad_lim
         self._assign_position_params(conversion_type='galaxy')
-        self._ref_line_id = 0
-        self.linerat_constant = True  # True if the ratio of line fluxes shouldn't change across the nebula
+        self._assign_wavelength()
 
     @cached_property
     def _brightness_3d_cartesian(self):
@@ -764,7 +767,7 @@ class Cloud(Nebula):
         elif (self.x0 is not None) and (self.y0 is not None):
             self.xc = self.x0 + delta
             self.yc = self.y0 + delta
-        self._ref_line_id = 0
+        self._assign_wavelength(spatial_variations=True)
 
     @cached_property
     def _theta_grid(self):
@@ -1024,6 +1027,12 @@ class Cloud3D(Nebula):
     _rad_bins: int = 0
     _npix_los: int = 100
 
+    # Provide full path to the 3D/4D cube containing emissivities in cartesian space
+    # (if 4D, then the first coordinate is wavelength).
+    # The shape must be identical to what is normally produced with the simulator with the present parameters
+    # Can be used for swapping the nebula to, for example, perturbed one
+    force_use_cube: str = None
+
     def __post_init__(self):
         self._assign_all_units()
         if self._rad_bins == 0:
@@ -1035,7 +1044,7 @@ class Cloud3D(Nebula):
         elif (self.x0 is not None) and (self.y0 is not None):
             self.xc = self.x0 + delta
             self.yc = self.y0 + delta
-        self._ref_line_id = 0
+        self._assign_wavelength(spatial_variations=True)
 
     @cached_property
     def _theta_grid(self):
@@ -1134,6 +1143,19 @@ class Cloud3D(Nebula):
 
     @cached_property
     def _brightness_3d_cartesian(self):
+        if self.force_use_cube is not None:
+            s_cart = (len(self._cartesian_z_grid), len(self._cartesian_y_grid), len(self._cartesian_x_grid))
+            if not os.path.exists(self.force_use_cube):
+                log.warning(f"Wrong path to the provided cube for Cloud3D/Bubble3D nebula. "
+                            f"Continue with the original simulation. Check the path: {self.force_use_cube}")
+            else:
+                with fits.open(self.force_use_cube) as hdu:
+                    if hdu[0].data.shape != s_cart:
+                        log.warning(f"Dimentions of the provided cube for Cloud3D/Bubble3D nebula ({hdu[0].data.shape}) "
+                                    f"are inconsistent with the original simulation ({s_cart}). "
+                                    f"Continue with the original simulations. Check your file: {self.force_use_cube}")
+                    else:
+                        return hdu[0].data
         return interpolate_sphere_to_cartesian(self._brightness_3d_spherical, x_grid=self._cartesian_x_grid,
                                                y_grid=self._cartesian_y_grid, z_grid=self._cartesian_z_grid,
                                                rad_grid=self._rad_grid, theta_grid=self._theta_grid,
@@ -1142,6 +1164,19 @@ class Cloud3D(Nebula):
     @cached_property
     def _brightness_4d_cartesian(self):
         s = self._brightness_4d_spherical.shape
+        if self.force_use_cube is not None:
+            s_cart = (s[0], len(self._cartesian_z_grid), len(self._cartesian_y_grid), len(self._cartesian_x_grid))
+            if not os.path.exists(self.force_use_cube):
+                log.warning(f"Wrong path to the provided cube for Cloud3D/Bubble3D nebula. "
+                            f"Continue with the original simulation. Check the path: {self.force_use_cube}")
+            else:
+                with fits.open(self.force_use_cube) as hdu:
+                    if hdu[0].data.shape != s_cart:
+                        log.warning(f"Dimentions of the provided cube for Cloud3D/Bubble3D nebula ({hdu[0].data.shape}) "
+                                    f"are inconsistent with the original simulation ({s_cart}). "
+                                    f"Continue with the original simulations. Check your file: {self.force_use_cube}")
+                    else:
+                        return hdu[0].data
         return np.array(Parallel(n_jobs=lvmdatasimulator.n_process)(delayed(interpolate_sphere_to_cartesian)
                                                                     (cur_line_array,
                                                                      self._cartesian_x_grid, self._cartesian_y_grid,
@@ -1428,7 +1463,9 @@ class ISM:
 
         self._add_fits_extension(name="Comp_{0}_Brightness".format(obj_id), value=brt,
                                  obj_to_add=obj_to_add, zorder=zorder, add_fits_kw=add_fits_kw, add_counter=True)
+        wl_list = None
         if (obj_to_add.max_brightness > 0) or (obj_to_add.total_flux > 0):
+            wl_list = [6562.81]
             if brt_4d is not None:
                 if type(obj_to_add) == CustomNebula:
                     wl_list = obj_to_add.lines_wl
@@ -1498,6 +1535,8 @@ class ISM:
         if continuum is not None:
             self._add_fits_extension(name="Comp_{0}_Continuum".format(obj_id), value=continuum,
                                      obj_to_add=obj_to_add, zorder=zorder, add_fits_kw=add_fits_kw)
+
+        obj_to_add.wl_list = wl_list
         return self.content
 
     def save_ism(self, filename):
@@ -1656,6 +1695,8 @@ class ISM:
                                 'ext_rv': 3.1,  # Value of R_V for extinction curve calculation (used for dark nebulae)
                                 'vel_gradient: 12. * u.km / u.s / u.pc  # Line-of-sight velocity gradient
                                 'vel_pa: 30. * u.degree  # PA of kinematical axis (for vel_gradient or vel_rot)
+                                'force_use_cube': provide path to the 3D/4D cube with emissivities
+                                        to be used instead of the generated one
                                 }]
         """
         if type(all_objects) is dict:
@@ -1683,14 +1724,14 @@ class ISM:
                                    'continuum_type', 'continuum_data', 'continuum_flux', 'continuum_mag',
                                    'continuum_wl', 'ext_law', 'ext_rv', 'vel_gradient', 'vel_rot', 'vel_pa',
                                    'n_brightest_lines', 'offset_RA', 'offset_DEC', 'RA', 'DEC',
-                                   'pxsize'],
+                                   'pxsize', 'force_use_cube'],
                                   [0, 0, 0., 1., 0, self.sys_velocity, self.turbulent_sigma, 0, 0.1, 0, 0, self.distance,
                                    None, None, 0, None, 5500., self.ext_law, self.R_V, 0, 0, kin_pa_default, None,
-                                   None, None, None, None, self.pxscale],
+                                   None, None, None, None, self.pxscale, None],
                                   [brtunit, fluxunit, u.mag, None, velunit, velunit, velunit, None, None,
                                    u.pc, u.pc, u.kpc, None, None, brtunit/u.AA, u.mag / u.arcsec ** 2, u.Angstrom,
                                    None, None, velunit / u.pc, velunit, u.degree, None, u.arcsec, u.arcsec,
-                                   u.degree, u.degree, None]):
+                                   u.degree, u.degree, None, None]):
                 set_default_dict_values(cur_obj, k, v, unit=unit)
 
             tot = 0
@@ -1984,6 +2025,7 @@ class ISM:
                                                 spectrum_type=model_type,
                                                 n_brightest_lines=cur_obj['n_brightest_lines'],
                                                 linerat_constant=cur_obj['linerat_constant'],
+                                                force_use_cube=cur_obj['force_use_cube'],
                                                 )
                 elif cur_obj['type'] == "Cloud3D":
                     generated_object = Cloud3D(xc=x, yc=y,
@@ -2005,6 +2047,7 @@ class ISM:
                                                linerat_constant=cur_obj['linerat_constant'],
                                                vel_gradient=cur_obj['vel_gradient'],
                                                vel_pa=cur_obj['vel_pa'],
+                                               force_use_cube=cur_obj['force_use_cube'],
                                              )
 
                 elif cur_obj['type'] == "Filament":
