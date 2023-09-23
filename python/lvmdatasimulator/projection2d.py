@@ -170,7 +170,7 @@ def raw_data_header(h, obstime, mjd, exp_name, channel, cam, flb='science', ra=0
 
     h["FILENAME"] = (f'sdR-s-{channel}{cam}-{exp_name}.fits.gz', 'File basename')
     h["EXPOSURE"] = (int(exp_name), 'Exposure number')
-    h["SPEC"] = ('sp2', 'Spectrograph name')
+    h["SPEC"] = (f'sp{cam}', 'Spectrograph name')
     h["OBSERVAT"] = ('LCO', 'Observatory')
     h["OBSTIME"] = (obstime, "Start of the observation")
     h["MJD"] = (int(mjd), 'Modified Julian Date')
@@ -246,12 +246,12 @@ def raw_data_header(h, obstime, mjd, exp_name, channel, cam, flb='science', ra=0
     if ra is not None:
         for t in ['Sci', 'SkyE', 'SkyW']:
             h[f"TE{t.upper()}RA"] = (ra, f'{t} telescope reported RA [deg]')
-            h['PO{t.upper()}RA'] = (ra,  f'{t} target RA [deg]')
+            h[f'PO{t.upper()}RA'] = (ra,  f'{t} target RA [deg]')
         h[f"TESPECRA"] = (ra, 'Spec telescope initial pointing RA [deg]')
     if dec is not None:
         for t in ['Sci', 'SkyE', 'SkyW']:
             h[f"TE{t.upper()}DE"] = (dec, f'{t} telescope reported Dec [deg]')
-            h['PO{t.upper()}DE'] = (dec, f'{t} target Dec [deg]')
+            h[f'PO{t.upper()}DE'] = (dec, f'{t} target Dec [deg]')
         h[f"TESPECDE"] = (dec, 'Spec telescope initial pointing Dec [deg]')
     if airmass is not None:
         for t in ['Sci', 'SkyE', 'SkyW']:

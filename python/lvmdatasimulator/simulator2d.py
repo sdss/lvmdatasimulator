@@ -288,6 +288,8 @@ class Simulator2D:
 
         if self.save_std:
             outname = os.path.join(self.source.name, 'std_stars.fits.gz')
+            if not os.path.isdir(self.source.name):
+                os.makedirs(self.source.name)
             stars.save_to_fits(outname=outname)
 
         self.standards = stars
