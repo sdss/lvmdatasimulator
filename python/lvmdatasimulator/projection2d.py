@@ -95,7 +95,7 @@ def cosmic_rays(ccdimage, n_cr=100, std_cr=5, deep=10.0, cr_intensity=1e5):
     """
     ny, nx = ccdimage.shape
     cr_image = np.zeros_like(ccdimage)
-    nc = np.abs(n_cr + np.int(np.random.randn(1)[0] * std_cr))
+    nc = np.abs(n_cr + int(np.random.randn(1)[0] * std_cr))
     if nc == 0:
         nc = 1
     xof = np.random.random_sample(nc) * nx
@@ -104,15 +104,15 @@ def cosmic_rays(ccdimage, n_cr=100, std_cr=5, deep=10.0, cr_intensity=1e5):
     phi = np.random.random_sample(nc) * 85. + 5.0
     lent = deep / np.sin(phi * np.pi / 180.0)
     for k in range(nc):
-        lx = np.int(lent[k] * np.cos(thet[k] * np.pi / 180.0)) + 1
+        lx = int(lent[k] * np.cos(thet[k] * np.pi / 180.0)) + 1
         x_tc = np.arange(lx) + xof[k]
         cof = yof[k] - np.tan(thet[k] * np.pi / 180.0) * xof[k]
         y_tc = np.tan(thet[k] * np.pi / 180.0) * x_tc + cof
         for i in range(0, lx):
-            xt1 = np.max([0, np.min([np.int(x_tc[i]) - 1, nx])])
-            xt2 = np.max([0, np.min([np.int(x_tc[i]), nx])])
-            yt1 = np.max([0, np.min([np.int(y_tc[i]) - 1, ny])])
-            yt2 = np.max([0, np.min([np.int(y_tc[i]), ny])])
+            xt1 = np.max([0, np.min([int(x_tc[i]) - 1, nx])])
+            xt2 = np.max([0, np.min([int(x_tc[i]), nx])])
+            yt1 = np.max([0, np.min([int(y_tc[i]) - 1, ny])])
+            yt2 = np.max([0, np.min([int(y_tc[i]), ny])])
             cr_image[xt1:xt2, yt1:yt2] = cr_intensity
     dv = 0.5
     PSF = Gaussian2DKernel(x_stddev=dv, y_stddev=dv)
@@ -173,7 +173,7 @@ def raw_data_header(h, obstime, mjd, exp_name, channel, cam, flb='science', ra=0
     h["SPEC"] = ('sp2', 'Spectrograph name')
     h["OBSERVAT"] = ('LCO', 'Observatory')
     h["OBSTIME"] = (obstime, "Start of the observation")
-    h["MJD"] = (np.int(mjd), 'Modified Julian Date')
+    h["MJD"] = (int(mjd), 'Modified Julian Date')
     h["EXPTIME"] = (exp_time, 'Exposure time')
     h["DARKTIME"] = (exp_time, 'Dark time')
     h["IMAGETYP"] = (flab, 'Image type')
@@ -227,7 +227,7 @@ def raw_data_header(h, obstime, mjd, exp_name, channel, cam, flb='science', ra=0
                      'Overscan section for quadrant 3')
     h['BIASSEC4'] = (f"[{int((gap_pos[1] + gap_pos[0]) / 2)+1}:{gap_pos[1]},1:{gap_pos[2]-1}]",
                      'Overscan section for quadrant 4')
-    h["SMJD"] = (np.int(mjd), 'SDSS Modified Julian Date')
+    h["SMJD"] = (int(mjd), 'SDSS Modified Julian Date')
     h["DPOS"] = (0, "Dither position")
     h['BUFFER'] = (1, 'The buffer number read')
     h['HARTMANN'] = ('0 0     ', 'Left/right. 0=open 1=closed')
