@@ -31,17 +31,23 @@ def spec_fragment_convolve_psf(spec_oversampled_cut=None, xpos_oversampled_cut=N
     x_t, y_t = np.meshgrid((xpos_oversampled_cut-xpos_ccd),
                            np.arange(ny_conv).astype(float) - convolve_half_window)
 
-    a0, b0, a2, b2, a1, b1, xc, yc = np.array(config_2d['trace_curvature']).astype(float)
-    dy_offset = (a2*(y_t + ypos_ccd - yc)**2 + a1*(y_t + ypos_ccd - yc) + a0) * (x_t + xpos_ccd - xc) ** 2 + (
-            b2 * (y_t + ypos_ccd - yc) ** 2 + b1 * (y_t + ypos_ccd - yc) + b0) * (x_t + xpos_ccd - xc)
-    y_t -= dy_offset
+    # Old version
+    # a0, b0, a2, b2, a1, b1, xc, yc = np.array(config_2d['trace_curvature']).astype(float)
+    # dy_offset = (a2*(y_t + ypos_ccd - yc)**2 + a1*(y_t + ypos_ccd - yc) + a0) * (x_t + xpos_ccd - xc) ** 2 + (
+    #         b2 * (y_t + ypos_ccd - yc) ** 2 + b1 * (y_t + ypos_ccd - yc) + b0) * (x_t + xpos_ccd - xc)
+    # y_t -= dy_offset
+
+    # using real traces
+    y_center =  np.take(ypos_ccd, ypos_ccd.size//2)
+
+    y_t += ypos_ccd - y_center
 
     # psf along the dispersion axis
-    psf_x = np.ones(shape=(ny_conv, nx_conv), dtype=float) * focus[0, int(xpos_ccd), int(ypos_ccd)]
+    psf_x = np.ones(shape=(ny_conv, nx_conv), dtype=float) * focus[0, int(xpos_ccd), int(y_center)]
     # psf along the slit
-    psf_y = np.ones(shape=(ny_conv, nx_conv), dtype=float) * focus[1, int(xpos_ccd), int(ypos_ccd)]
+    psf_y = np.ones(shape=(ny_conv, nx_conv), dtype=float) * focus[1, int(xpos_ccd), int(y_center)]
     # psf covariance
-    psf_xy = np.ones(shape=(ny_conv, nx_conv), dtype=float) * focus[2, int(xpos_ccd), int(ypos_ccd)]
+    psf_xy = np.ones(shape=(ny_conv, nx_conv), dtype=float) * focus[2, int(xpos_ccd), int(y_center)]
 
     return np.nansum(
         np.exp(-0.5 / (1 - psf_xy ** 2) * ((x_t / psf_x) ** 2 + (y_t / psf_y) ** 2 -
@@ -50,8 +56,9 @@ def spec_fragment_convolve_psf(spec_oversampled_cut=None, xpos_oversampled_cut=N
         axis=1)
 
 
-def spec_2d_projection_parallel(spec_cur_fiber, pix_grid_input_on_ccd, focus, y_pos,
-                                ccd_size, ccd_gap_size, ccd_gap_left, convolve_half_window_x, convolve_half_window_y):
+def spec_2d_projection_parallel(spec_cur_fiber, pix_grid_input_on_ccd, focus, trace, y_pos,
+                                ccd_size, ccd_gap_size, ccd_gap_left, convolve_half_window_x,
+                                convolve_half_window_y):
     # Cross-disp. position of the center of the fiber
     # r = config_2d['lines_curvature'][0] * ccd_size[1]
     # dxc_offset = -(config_2d['lines_curvature'][1] - r + np.sqrt(r ** 2 - (y_pos - (ccd_size[1]*0.5)) ** 2))
@@ -65,7 +72,7 @@ def spec_2d_projection_parallel(spec_cur_fiber, pix_grid_input_on_ccd, focus, y_
         if len(pix_oversampled) > 0:
             val = spec_fragment_convolve_psf(spec_oversampled_cut=spec_cur_fiber[pix_oversampled],
                                              xpos_oversampled_cut=pix_grid_input_on_ccd[pix_oversampled],
-                                             xpos_ccd=cur_pix, ypos_ccd=y_pos, focus=focus,
+                                             xpos_ccd=cur_pix, ypos_ccd=trace[pix_oversampled], focus=focus,
                                              convolve_half_window=convolve_half_window_y
                                              )
         else:
@@ -259,19 +266,28 @@ def raw_data_header(h, obstime, mjd, exp_name, channel, cam, flb='science', ra=0
     return h
 
 
-def interp_array_1d(data, new_wave):
+def interp_wave(data, for_interp):
 
-    newdata = np.zeros((data.shape[0], len(new_wave)))
-
+    newdata = np.zeros((data.shape[0], len(for_interp)))
     for i in range(data.shape[0]):
         newdata[i, :] = interp1d(data[i, :], np.arange(data.shape[1]), bounds_error=False,
-                                 fill_value='extrapolate')(new_wave)
+                                fill_value='extrapolate')(for_interp)
+
+
+    return newdata
+
+def interp_trace(data, for_interp):
+
+    newdata = np.zeros((data.shape[0], for_interp.shape[1]))
+    for i in range(data.shape[0]):
+        newdata[i, :] = interp1d(np.arange(data.shape[1]), data[i, :], bounds_error=False,
+                                fill_value=(data[i, 0], data[i, -1]))(for_interp[i, :])
+
 
     return newdata
 
 
-
-def cre_raw_exp(input_spectrum, fibtype, ring, position, wave_ccd, wave, nfib=600, flb='s',
+def cre_raw_exp(input_spectrum, fibtype, ring, position, wave_ccd, wave, trace, nfib=600, flb='s',
                 channel_type="blue", cam=1, ccd_noise_factor=1.0, n_cr=130, std_cr=5,
                 obstime=None, mjd=None, exp_name='0', exp_time=900.0, ra=0.0,
                 dec=0.0, airmass=1.0, add_cr_hits=True, list_lamps='00000'):
@@ -330,8 +346,8 @@ def cre_raw_exp(input_spectrum, fibtype, ring, position, wave_ccd, wave, nfib=60
             # TODO: at the moment, these files are of 4120x4080 size. Perhaps they should either take into account the
             #  gap, or be of 4080x4080 size. For now, I cut the excess
             focus = fits.getdata(os.path.join(DATA_DIR, 'focus',
-                                              f"{config_2d['psf_rootname']}_{channel_type}1.fits.gz"),
-                                 0, header=False).T[:, :ccd_size[0]-ccd_gap_size, :]
+                                              f"{config_2d['psf_rootname']}_{channel_type}{cam}.fits.gz"),
+                                 0, header=False).T
         except FileNotFoundError:
             focus = np.ones([3, ccd_size[0]-ccd_gap_size, ccd_size[1]], dtype=float)
             focus[1, :, :] = 0.9
@@ -368,7 +384,8 @@ def cre_raw_exp(input_spectrum, fibtype, ring, position, wave_ccd, wave, nfib=60
         # Wavelength solution
         # TODO: This should be defined for each fiber to account for the differences in wavelength solution between them
         # Done!!!
-        pix_grid_input_on_ccd = interp_array_1d(wave_ccd, wave)
+        pix_grid_input_on_ccd = interp_wave(wave_ccd, wave)
+        trace = interp_trace(trace, pix_grid_input_on_ccd)
 
         log.info(f"Project the spectra of camera #{cam} and {channel_type} channel onto CCD")
         # Half size of the window for convolution
@@ -378,7 +395,7 @@ def cre_raw_exp(input_spectrum, fibtype, ring, position, wave_ccd, wave, nfib=60
         with tqdm_joblib(tqdm(total=np.sum(fib_id_in_ring >= 0))):
             results = Parallel(n_jobs=n_process)(delayed(spec_2d_projection_parallel)(
                 input_spectrum[fib_id_in_ring[cur_fiber_num], :],
-                pix_grid_input_on_ccd[cur_fiber_num, :], focus,
+                pix_grid_input_on_ccd[cur_fiber_num, :], focus, trace[cur_fiber_num],
                 current_y_pos[cur_fiber_num], ccd_size,
                 ccd_gap_size, ccd_props['x1'], convolve_half_window_x, convolve_half_window_y)
                                                  for cur_fiber_num in range(nfib) if fib_id_in_ring[cur_fiber_num] >= 0)

@@ -496,11 +496,13 @@ class Simulator2D:
 
         channel_index = {'blue': 'b', 'red': 'r', 'ir': 'z'}
         for cam in range(3):
-            cube_file = f'{DATA_DIR}/instrument/lvm-mwave_{lamp}-{branch}{cam+1}.fits'
-            wave2d, _ = fits.getdata(cube_file, 0, header=True)
+            wave_file = f'{DATA_DIR}/instrument/lvm-mwave_{lamp}-{branch}{cam+1}.fits'
+            wave2d = fits.getdata(wave_file, 0)
+            trace_file = f'{DATA_DIR}/instrument/lvm-mtrace-{branch}{cam+1}.fits'
+            trc2d = fits.getdata(trace_file, 0)
             # wave_ccd = wave2d[323] # selecting the middle fiber.
             projected_spectra = cre_raw_exp(spectra, fibtype=fibtype, ring=ringid,
-                                            position=pos, wave_ccd=wave2d, wave=wave,
+                                            position=pos, wave_ccd=wave2d, wave=wave, trace=trc2d,
                                             nfib=self._fibers_per_spec, channel_type=camera,
                                             cam=cam+1, n_cr=n_cr, exp_name=exp_name,
                                             exp_time=exptime,
