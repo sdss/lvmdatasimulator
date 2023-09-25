@@ -95,7 +95,7 @@ def cosmic_rays(ccdimage, n_cr=100, std_cr=5, deep=10.0, cr_intensity=1e5):
     """
     ny, nx = ccdimage.shape
     cr_image = np.zeros_like(ccdimage)
-    nc = np.abs(n_cr + np.int(np.random.randn(1)[0] * std_cr))
+    nc = np.abs(n_cr + int(np.random.randn(1)[0] * std_cr))
     if nc == 0:
         nc = 1
     xof = np.random.random_sample(nc) * nx
@@ -104,15 +104,15 @@ def cosmic_rays(ccdimage, n_cr=100, std_cr=5, deep=10.0, cr_intensity=1e5):
     phi = np.random.random_sample(nc) * 85. + 5.0
     lent = deep / np.sin(phi * np.pi / 180.0)
     for k in range(nc):
-        lx = np.int(lent[k] * np.cos(thet[k] * np.pi / 180.0)) + 1
+        lx = int(lent[k] * np.cos(thet[k] * np.pi / 180.0)) + 1
         x_tc = np.arange(lx) + xof[k]
         cof = yof[k] - np.tan(thet[k] * np.pi / 180.0) * xof[k]
         y_tc = np.tan(thet[k] * np.pi / 180.0) * x_tc + cof
         for i in range(0, lx):
-            xt1 = np.max([0, np.min([np.int(x_tc[i]) - 1, nx])])
-            xt2 = np.max([0, np.min([np.int(x_tc[i]), nx])])
-            yt1 = np.max([0, np.min([np.int(y_tc[i]) - 1, ny])])
-            yt2 = np.max([0, np.min([np.int(y_tc[i]), ny])])
+            xt1 = np.max([0, np.min([int(x_tc[i]) - 1, nx])])
+            xt2 = np.max([0, np.min([int(x_tc[i]), nx])])
+            yt1 = np.max([0, np.min([int(y_tc[i]) - 1, ny])])
+            yt2 = np.max([0, np.min([int(y_tc[i]), ny])])
             cr_image[xt1:xt2, yt1:yt2] = cr_intensity
     dv = 0.5
     PSF = Gaussian2DKernel(x_stddev=dv, y_stddev=dv)
@@ -156,8 +156,9 @@ def cosmic_rays(ccdimage, n_cr=100, std_cr=5, deep=10.0, cr_intensity=1e5):
 #     return space, bspa
 
 
-def raw_data_header(h, obstime, mjd, exp_name, channel, cam, flb='science', ra=0.0, dec=0.0, azim=180.0, alt=90.0,
-                    exp_time=900.0, bzero=32768, list_lamps='00000', gain=None, readnoise=None, gap_pos=None):
+def raw_data_header(h, obstime, mjd, exp_name, channel, cam, flb='science', ra=0.0, dec=0.0, airmass=1.0,
+                    exp_time=900.0, bzero=32768, list_lamps='00000', gain=None, readnoise=None, gap_pos=None,
+                    objname=None):
     if flb == 'science':
         flab = 'science '
     elif flb == 'arc':
@@ -169,30 +170,65 @@ def raw_data_header(h, obstime, mjd, exp_name, channel, cam, flb='science', ra=0
 
     h["FILENAME"] = (f'sdR-s-{channel}{cam}-{exp_name}.fits.gz', 'File basename')
     h["EXPOSURE"] = (int(exp_name), 'Exposure number')
-    h["SPEC"] = ('sp1', 'Spectrograph name')
+    h["SPEC"] = (f'sp{cam}', 'Spectrograph name')
     h["OBSERVAT"] = ('LCO', 'Observatory')
     h["OBSTIME"] = (obstime, "Start of the observation")
-    h["MJD"] = (np.int(mjd), 'Modified Julian Date')
+    h["MJD"] = (int(mjd), 'Modified Julian Date')
     h["EXPTIME"] = (exp_time, 'Exposure time')
     h["DARKTIME"] = (exp_time, 'Dark time')
     h["IMAGETYP"] = (flab, 'Image type')
     h['INTSTART'] = (obstime, 'Start of the integration')
+    h['LMST'] = (1.00, "Local mean sidereal time (approximate) [hr]")
     h['INTEND'] = ((Time(obstime)+exp_time*u.s).to_value('fits'), 'End of the integration')
     h['CCD'] = (f'{channel}{cam}', 'CCD name')
-    # h['CCDID'] = ('STA27977', 'Unique identifier of the CCD')
-    # h['CCDTYPE'] = ('STA4850 ', 'CCD type')
+    h['CCDID'] = ('STA29925', 'Unique identifier of the CCD')
+    h['CCDTYPE'] = ('STA4850 ', 'CCD type')
+    h['TELESCOP'] = "SDSS 0.16m"
+    h['SURVEY'] = "LVM"
+    h["CCDTEMP1"] = (-104.67, "Temperature of the sensor (HEATERX 12)")
+    h["CCDTEMP2"] = (-182.88, "Temperature of the sensor (HEATERX 12)")
+
+    if objname is not None:
+        h['OBJECT'] = (objname, 'Name of the target observed')
+    else:
+        h['OBJECT'] = 'Simulation'
+    h['TILE_ID'] = (-999, "The tile_id of this observation")
     if gain is not None:
-        for ind, g in enumerate(gain):
-            h[f'GAIN{ind+1}'] = (g, f"CCD gain AD{ind+1} [e-/ADU]")
+        # Note: sectors in real data go from left to rightm but from top to bottom.
+        # In the simulator - from bottom to top.
+        h['GAIN1'] = (gain[2], f"CCD gain AD1 [e-/ADU]")
+        h['GAIN2'] = (gain[3], f"CCD gain AD1 [e-/ADU]")
+        h['GAIN3'] = (gain[0], f"CCD gain AD1 [e-/ADU]")
+        h['GAIN4'] = (gain[1], f"CCD gain AD1 [e-/ADU]")
+        # for ind, g in enumerate(gain):
+        #     h[f'GAIN{ind+1}'] = (g, f"CCD gain AD{ind+1} [e-/ADU]")
     if readnoise is not None:
-        for ind, rn in enumerate(readnoise):
-            h[f'RDNOISE{ind+1}'] = (rn, f'CCD read noise AD{ind+1} [e-]')
+        h[f'RDNOISE1'] = (readnoise[2], f'CCD read noise AD1 [e-]')
+        h[f'RDNOISE2'] = (readnoise[3], f'CCD read noise AD1 [e-]')
+        h[f'RDNOISE3'] = (readnoise[0], f'CCD read noise AD1 [e-]')
+        h[f'RDNOISE4'] = (readnoise[1], f'CCD read noise AD1 [e-]')
+        # for ind, rn in enumerate(readnoise):
+        #     h[f'RDNOISE{ind+1}'] = (rn, f'CCD read noise AD{ind+1} [e-]')
     h['CCDSUM'] = ('1 1     ', 'Horizontal and vertical binning')
     h['DATASEC'] = (f"[1:{h['NAXIS1']},1:{h['NAXIS2']}]", 'Section of the detector containing data')
     h['CCDSEC'] = (f"[1:{h['NAXIS1']},1:{h['NAXIS2']}]", 'Section of the detector read out')
-    h['BIASSEC'] = (f"[{gap_pos[0]}:{gap_pos[1]},1:{h['NAXIS2']}]", 'Section of calibration / bias data')
-    h['TRIMSEC'] = (f"[1:{gap_pos[0]-1},1:{h['NAXIS2']}],[{gap_pos[1]+1}:{h['NAXIS1']},1:{h['NAXIS2']}]",
-                    'Section with useful data')
+    # h['BIASSEC'] = (f"[{gap_pos[0]}:{gap_pos[1]},1:{h['NAXIS2']}]", 'Section of calibration / bias data')
+    # h['TRIMSEC'] = (f"[1:{gap_pos[0]-1},1:{h['NAXIS2']}],[{gap_pos[1]+1}:{h['NAXIS1']},1:{h['NAXIS2']}]",
+    #                 'Section with useful data')
+    h['TRIMSEC1'] = (f"[1:{gap_pos[0]-1}, {gap_pos[3]+1}:{h['NAXIS2']}]", "Data section for quadrant 1")
+    h['TRIMSEC2'] = (f"[{gap_pos[1]+1}:{h['NAXIS1']}, {gap_pos[3]+1}:{h['NAXIS2']}]", "Data section for quadrant 2")
+    h['TRIMSEC3'] = (f"[1:{gap_pos[0] - 1}, 1:{gap_pos[2]-1}]", "Data section for quadrant 3")
+    h['TRIMSEC4'] = (f"[{gap_pos[1]+1}:{h['NAXIS1']}, 1:{gap_pos[2]-1}]", "Data section for quadrant 4")
+    h['BIASSEC1'] = (f"[{gap_pos[0]}:{int((gap_pos[1]+gap_pos[0])/2)},{gap_pos[3]+1}:{h['NAXIS2']}]",
+                     'Overscan section for quadrant 1')
+    h['BIASSEC2'] = (f"[{int((gap_pos[1] + gap_pos[0]) / 2)+1}:{gap_pos[1]},{gap_pos[3] + 1}:{h['NAXIS2']}]",
+                     'Overscan section for quadrant 2')
+    h['BIASSEC3'] = (f"[{gap_pos[0]}:{int((gap_pos[1]+gap_pos[0])/2)},1:{gap_pos[2]-1}]",
+                     'Overscan section for quadrant 3')
+    h['BIASSEC4'] = (f"[{int((gap_pos[1] + gap_pos[0]) / 2)+1}:{gap_pos[1]},1:{gap_pos[2]-1}]",
+                     'Overscan section for quadrant 4')
+    h["SMJD"] = (int(mjd), 'SDSS Modified Julian Date')
+    h["DPOS"] = (0, "Dither position")
     h['BUFFER'] = (1, 'The buffer number read')
     h['HARTMANN'] = ('0 0     ', 'Left/right. 0=open 1=closed')
 
@@ -207,19 +243,19 @@ def raw_data_header(h, obstime, mjd, exp_name, channel, cam, flb='science', ra=0
     h["BSCALE"] = 1
     h["BZERO"] = bzero
 
-    # h["DATE-OBS"] = ('2012-03-20T06:00:00', 'TAI date at start of integration')
-    # h["OBJSYS"] = ('ICRS    ', 'The TCC objSys')
     if ra is not None:
-        h["RA"] = (ra, 'RA of telescope boresight (deg)')
-        # h["RADEG"] = (ra , 'RA of telescope pointing(deg)')
+        for t in ['Sci', 'SkyE', 'SkyW']:
+            h[f"TE{t.upper()}RA"] = (ra, f'{t} telescope reported RA [deg]')
+            h[f'PO{t.upper()}RA'] = (ra,  f'{t} target RA [deg]')
+        h[f"TESPECRA"] = (ra, 'Spec telescope initial pointing RA [deg]')
     if dec is not None:
-        h["DEC"] = (dec, 'Dec of telescope boresight (deg)')
-        # h["DECDEG"] = (dec, 'Dec of telescope pointing (deg)')
-    if azim is not None:
-        h["AZ"] = (azim, 'Azimuth axis pos. (approx, deg)')
-    if alt is not None:
-        h["ALT"] = (alt, 'Altitude axis pos. (approx, deg)')
-
+        for t in ['Sci', 'SkyE', 'SkyW']:
+            h[f"TE{t.upper()}DE"] = (dec, f'{t} telescope reported Dec [deg]')
+            h[f'PO{t.upper()}DE'] = (dec, f'{t} target Dec [deg]')
+        h[f"TESPECDE"] = (dec, 'Spec telescope initial pointing Dec [deg]')
+    if airmass is not None:
+        for t in ['Sci', 'SkyE', 'SkyW']:
+            h[f'TE{t.upper()}AM'] = (airmass, f'{t} telescope airmass')
     return h
 
 
@@ -238,7 +274,7 @@ def interp_array_1d(data, new_wave):
 def cre_raw_exp(input_spectrum, fibtype, ring, position, wave_ccd, wave, nfib=600, flb='s',
                 channel_type="blue", cam=1, ccd_noise_factor=1.0, n_cr=130, std_cr=5,
                 obstime=None, mjd=None, exp_name='0', exp_time=900.0, ra=0.0,
-                dec=0.0, add_cr_hits=True, list_lamps='00000'):
+                dec=0.0, airmass=1.0, add_cr_hits=True, list_lamps='00000'):
 
     """
     Creates the Raw 2D LVM exposure from the provided spectrum
@@ -375,12 +411,12 @@ def cre_raw_exp(input_spectrum, fibtype, ring, position, wave_ccd, wave, nfib=60
 
     output_hdus = (ccdspec_to_hdu(output, obstime, mjd, exp_name, channel_index[channel_type], cam,
                                   flb=flb, exp_time=exp_time, ra=ra.value, dec=dec.value, bzero=32768,
-                                  ccd_props=ccd_props, list_lamps=list_lamps))
+                                  ccd_props=ccd_props, list_lamps=list_lamps, airmass=airmass))
     return output_hdus
 
 
 def ccdspec_to_hdu(data, obstime, mjd, exp_name, channel=None, cam=None, flb='science', exp_time=0., ra=None, dec=None,
-                   bzero=32768, ccd_props=None, list_lamps='00000'):
+                   airmass=1.0, bzero=32768, ccd_props=None, list_lamps='00000'):
     """
     Saturate the output array and convert it to the fits format with a proper fits header
     Args:
@@ -394,6 +430,7 @@ def ccdspec_to_hdu(data, obstime, mjd, exp_name, channel=None, cam=None, flb='sc
         exp_time: Exposure time
         ra: RA of the pointing
         dec: Dec of the pointing
+        airmass: airmass assumed in simulations
         bzero: bzero level in fits file (corresponds to saturation level + 1)
         ccd_props: row defining the properties of CCD for current channel
         list_lamps: State of the lamps (argon/neon/flat/HgNe/Xenon; 1=enabled, 0=disabled)
@@ -411,14 +448,15 @@ def ccdspec_to_hdu(data, obstime, mjd, exp_name, channel=None, cam=None, flb='sc
     if ccd_props is not None:
         gain = [ccd_props['gain_1'], ccd_props['gain_2'], ccd_props['gain_3'], ccd_props['gain_3']]
         readnoise = [ccd_props['noise']]*4
-        gap_pos = [ccd_props['x1']+2, ccd_props['x2']]  # added +1 to convert to fits coordinates (starts from 1)
+        gap_pos = [ccd_props['x1']+2, ccd_props['x2'], ccd_props['y1']+2, ccd_props['y2']]  # added +1 to convert to fits coordinates (starts from 1)
     else:
         gain = [1, 1, 1, 1]
         readnoise = [3.8]*4
-        gap_pos = [2040, 2080]
+        gap_pos = [2040, 2080, 2040, 2080]
     hdu.header = raw_data_header(hdu.header, obstime, mjd, exp_name, channel, cam, flb=flb,
                                  exp_time=exp_time, ra=ra, dec=dec, bzero=bzero, gain=gain,
-                                 readnoise=readnoise, gap_pos=gap_pos, list_lamps=list_lamps)
+                                 readnoise=readnoise, gap_pos=gap_pos, list_lamps=list_lamps,
+                                 airmass=airmass)
     hlist = fits.HDUList([hdu])
     hlist.update_extend()
     return hlist
