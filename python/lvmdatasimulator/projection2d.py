@@ -24,7 +24,7 @@ from astropy import units as u
 from astropy.time import Time
 
 def spec_fragment_convolve_psf(spec_oversampled_cut=None, xpos_oversampled_cut=None, xpos_ccd=None, ypos_ccd=None,
-                               focus=None, convolve_half_window=10):
+                               y_abs=None, focus=None, convolve_half_window=10):
     # == Convolve with PSF
     ny_conv = int(convolve_half_window * 2 + 1)
     nx_conv = len(spec_oversampled_cut)
@@ -39,8 +39,7 @@ def spec_fragment_convolve_psf(spec_oversampled_cut=None, xpos_oversampled_cut=N
 
     # using real traces
     y_center =  np.take(ypos_ccd, ypos_ccd.size//2)
-
-    y_t += ypos_ccd - y_center
+    y_t += y_abs - ypos_ccd
 
     # psf along the dispersion axis
     psf_x = np.ones(shape=(ny_conv, nx_conv), dtype=float) * focus[0, int(xpos_ccd), int(y_center)]
@@ -72,7 +71,8 @@ def spec_2d_projection_parallel(spec_cur_fiber, pix_grid_input_on_ccd, focus, tr
         if len(pix_oversampled) > 0:
             val = spec_fragment_convolve_psf(spec_oversampled_cut=spec_cur_fiber[pix_oversampled],
                                              xpos_oversampled_cut=pix_grid_input_on_ccd[pix_oversampled],
-                                             xpos_ccd=cur_pix, ypos_ccd=trace[pix_oversampled], focus=focus,
+                                             xpos_ccd=cur_pix, ypos_ccd=trace[pix_oversampled],
+                                             y_abs=y_pos, focus=focus,
                                              convolve_half_window=convolve_half_window_y
                                              )
         else:
@@ -399,7 +399,6 @@ def cre_raw_exp(input_spectrum, fibtype, ring, position, wave_ccd, wave, trace, 
                 current_y_pos[cur_fiber_num], ccd_size,
                 ccd_gap_size, ccd_props['x1'], convolve_half_window_x, convolve_half_window_y)
                                                  for cur_fiber_num in range(nfib) if fib_id_in_ring[cur_fiber_num] >= 0)
-
         for res_element in results:
             output[res_element[1][0]: res_element[1][1]+1, :] += res_element[0]
 
