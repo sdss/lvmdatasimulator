@@ -391,7 +391,7 @@ def cre_raw_exp(input_spectrum, fibtype, ring, position, wave_ccd, wave, trace, 
         # Half size of the window for convolution
         convolve_half_window_x = np.ceil(np.nanmax(focus[0, :, :])*6).astype(int)
         # Value is higher to get the curvature into account
-        convolve_half_window_y = np.ceil(np.nanmax(focus[1, :, :])*6*1.5).astype(int)
+        convolve_half_window_y = np.min([np.ceil(np.nanmax(focus[1, :, :])*6*1.5).astype(int), 30]) # limiting the size of the convolution
         with tqdm_joblib(tqdm(total=np.sum(fib_id_in_ring >= 0))):
             results = Parallel(n_jobs=n_process)(delayed(spec_2d_projection_parallel)(
                 input_spectrum[fib_id_in_ring[cur_fiber_num], :],
