@@ -20,7 +20,6 @@ ROOT_DIR = os.path.realpath(os.path.join(os.path.dirname(__file__), '..', '..'))
 
 # maximal number of processes for parallelization
 n_process = config.get('nprocess')
-large_files_location = config.get('large_files_location')
 
 if config.get('data_dir').startswith("."):
     DATA_DIR = os.path.curdir
@@ -38,9 +37,8 @@ else:
     CLOUDY_MODELS = os.path.join(os.path.join(ROOT_DIR, config.get('data_dir')), config.get('cloudy_models_name'))
 if not os.path.isfile(CLOUDY_MODELS):
     log.warning("Pre-computed grid of Cloudy models ({}) is not found. "
-                "It will be downloaded now".format(CLOUDY_MODELS))
-    url = large_files_location+config.get('cloudy_models_name')
-    urlretrieve(url, CLOUDY_MODELS)
+                "Flux distribution in different lines will be unavailable".format(CLOUDY_MODELS))
+    CLOUDY_MODELS = None
 
 CLOUDY_SPEC_DEFAULTS = config.get('cloudy_default_params')
 
@@ -79,8 +77,7 @@ else:
     STELLAR_LIBS = os.path.join(os.path.join(ROOT_DIR, config.get('data_dir')), config.get('stellar_library_name'))
 if not os.path.isfile(STELLAR_LIBS):
     log.warning("Stellar library is not found. It will be downloaded now")
-    url = large_files_location+config.get('stellar_library_name')
-    urlretrieve(url, STELLAR_LIBS)
+    STELLAR_LIBS = None
 
 # path to the directory where all computational results will be saved
 if config.get('utah_cluster'):

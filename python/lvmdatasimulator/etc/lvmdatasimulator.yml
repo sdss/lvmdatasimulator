@@ -4,8 +4,6 @@ utah_cluster: False # If True, then it will alter the work_dir later for running
 
 nprocess: 8  # number of processes for parallelization
 
-large_files_location: "https://data.sdss5.org/resources/lvmdatasimulator/data/for_download/"  # location of large files
-
 cloudy_models_name: 'LVM_cloudy_models_phys.fits'         # Name for the pre-computed emission-line models to be used
                                                      # (should be stored in 'data' directory)
 mappings_models_name: 'LVM_mappings_models.fits'       # Name for the pre-computed MAPPINGS models to be used
