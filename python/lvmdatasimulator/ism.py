@@ -1151,9 +1151,32 @@ class Cloud3D(Nebula):
             else:
                 with fits.open(self.force_use_cube) as hdu:
                     if hdu[0].data.shape != s_cart:
-                        log.warning(f"Dimentions of the provided cube for Cloud3D/Bubble3D nebula ({hdu[0].data.shape}) "
+                        if (len(hdu[0].data.shape) == 3) or (
+                                (len(hdu[0].data.shape) == 4) and (hdu[0].data.shape[0] == 1)) or (
+                                (len(hdu[0].data.shape) == 4) and ((hdu[0].data.shape[1] != s_cart[0]) or
+                                                                   (hdu[0].data.shape[2] != s_cart[1]) or
+                                                                   (hdu[0].data.shape[3] != s_cart[2]))
+                        ):
+                            log.warning(
+                                f"Dimensions of the provided cube for Cloud3D/Bubble3D nebula ({hdu[0].data.shape}) "
+                                f"are inconsistent with the original simulation ({s_cart}). "
+                                f"Continue with the original simulations. Check your file: {self.force_use_cube}")
+                        elif self.spectrum_id is not None:
+                            # assume that the cube is 4D and we just extract its Halpha flux as output in ext=0
+                            with fits.open(lvmdatasimulator.CLOUDY_MODELS) as hdu_models:
+                                index_ha = np.flatnonzero(hdu_models[self.spectrum_id].data[1:, 0] == 6562.81)
+                            if hdu[0].data.shape[0] < index_ha:
+                                log.warning(
+                                    f"Dimensions of the provided cube for Cloud3D/Bubble3D nebula ({hdu[0].data.shape}) "
                                     f"are inconsistent with the original simulation ({s_cart}). "
                                     f"Continue with the original simulations. Check your file: {self.force_use_cube}")
+                            else:
+                                return np.squeeze(hdu[0].data[index_ha, :,:,:], axis=0)
+                        else:
+                            log.warning(
+                                f"Dimensions of the provided cube for Cloud3D/Bubble3D nebula ({hdu[0].data.shape}) "
+                                f"are inconsistent with the original simulation ({s_cart}). "
+                                f"Continue with the original simulations. Check your file: {self.force_use_cube}")
                     else:
                         return hdu[0].data
         return interpolate_sphere_to_cartesian(self._brightness_3d_spherical, x_grid=self._cartesian_x_grid,
@@ -1172,7 +1195,7 @@ class Cloud3D(Nebula):
             else:
                 with fits.open(self.force_use_cube) as hdu:
                     if hdu[0].data.shape != s_cart:
-                        log.warning(f"Dimentions of the provided cube for Cloud3D/Bubble3D nebula ({hdu[0].data.shape}) "
+                        log.warning(f"Dimensions of the provided cube for Cloud3D/Bubble3D nebula ({hdu[0].data.shape}) "
                                     f"are inconsistent with the original simulation ({s_cart}). "
                                     f"Continue with the original simulations. Check your file: {self.force_use_cube}")
                     else:
