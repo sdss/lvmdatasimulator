@@ -99,7 +99,7 @@ class FiberBundle:
         by their hexagonal ring and by the position in their hexagonal ring
     angle (float, optional):
         rotation to be applied to the final bundle of fiber in degrees. If None, no rotation is
-        applied. Defaults to None
+        applied. Defaults to None. Additional rotation by 90 degrees will be applied to match real LVM footprint
     """
 
     def __init__(self, bundle_name='central', nrings=None, custom_fibers=None, angle=None,
@@ -131,7 +131,10 @@ class FiberBundle:
                 log.warning('The ring number goes from 1 to 25. Setting it to 1.')
                 self.nrings = 1
 
-        self.angle = angle
+        if angle is None:
+            self.angle = 90.
+        else:
+            self.angle = angle + 90.
 
         self.build_bundles()
 
@@ -193,8 +196,8 @@ class FiberBundle:
             mask = selected['ring_id'] <= self.nrings
             selected = selected[mask].copy()
 
-        if self.angle is not None:
-            log.info(f'Rotating the bundle to PA = {self.angle} deg.')
+        if self.angle is not None and (self.angle != 90):
+            log.info(f'Rotating the bundle to PA = {self.angle - 90} deg.')
             selected = self._rotates(selected)
 
         fibers_science = self._generate_fibers(selected)

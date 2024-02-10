@@ -284,9 +284,9 @@ class Nebula:
         whole_list_properties = ['pxscale', 'sys_velocity', 'turbulent_sigma', 'max_brightness', 'total_flux',
                                  'max_extinction',
                                  'perturb_scale', 'radius', 'PA', 'length', 'width', 'vel_gradient', 'r_eff',
-                                 'vel_rot', 'expansion_velocity', 'spectral_axis', 'vel_pa']
+                                 'vel_rot', 'expansion_velocity', 'spectral_axis', 'vel_pa', 'angscale']
         whole_list_units = [u.pc, velunit, velunit, brtunit, fluxunit, u.mag, u.pc, u.pc, u.degree, u.pc, u.pc,
-                            (velunit / u.pc), u.kpc, velunit, velunit, velunit, u.degree]
+                            (velunit / u.pc), u.kpc, velunit, velunit, velunit, u.degree, u.arcsec]
         cur_list_properties = []
         cur_list_units = []
         for prp, unit in zip(whole_list_properties, whole_list_units):
@@ -758,6 +758,8 @@ class Cloud(Nebula):
 
     def __post_init__(self):
         self._assign_all_units()
+        if self._npix_los is None:
+            self._npix_los = 100
         if self._rad_bins == 0:
             self._rad_bins = np.ceil(self.radius.to(u.pc).value / self.pxscale.to(u.pc).value * 3).astype(int)
         delta = np.round((len(self._cartesian_y_grid) - 1) / 2).astype(int)
@@ -893,6 +895,9 @@ class Cloud(Nebula):
         """
         slice = super().brightness_skyplane[1, :]
         map2d = interpolate_slice_to_circle(slice[- (len(slice) - 1) // 2 - 1:].value)
+        if self.total_flux > 0:
+            if self.total_flux > 0:
+                map2d = (map2d/ np.nansum(map2d) * self.total_flux / self.angscale ** 2)
         # if map2d is None:
         #     return None
         # map2d[- (map2d.shape[0] - 1) // 2 - 1:, 0: (map2d.shape[1] - 1) // 2] = \
@@ -910,7 +915,10 @@ class Cloud(Nebula):
         map2d = np.zeros(shape=(slice.shape[0], slice.shape[1], slice.shape[1]), dtype=float)
         for lineind in range(slice.shape[0]):
             map2d[lineind, :, :] = interpolate_slice_to_circle(slice[lineind, - (slice.shape[1] - 1) // 2 - 1:].value)
-        # if map2d is None:
+            if self.total_flux > 0:
+                map2d[lineind, :, :] = (map2d[lineind, :, :] / np.nansum(map2d[self._ref_line_id, :, :]) *
+                                        self.total_flux / self.angscale ** 2)
+                # if map2d is None:
         #     return None
         # map2d[:, - (map2d.shape[1] - 1) // 2 - 1:, 0: (map2d.shape[2] - 1) // 2] = \
         #     np.flip(map2d[:, - (map2d.shape[1] - 1) // 2 - 1:, -(map2d.shape[2] - 1) // 2:], axis=2)
@@ -1035,6 +1043,8 @@ class Cloud3D(Nebula):
 
     def __post_init__(self):
         self._assign_all_units()
+        if self._npix_los is None:
+            self._npix_los = 100
         if self._rad_bins == 0:
             self._rad_bins = np.ceil(self.radius.to(u.pc).value / self.pxscale.to(u.pc).value * 3).astype(int)
         delta = np.round((len(self._cartesian_y_grid) - 1) / 2).astype(int)
@@ -1316,7 +1326,8 @@ class ISM:
         self.vel_grid = np.linspace(-self.vel_amplitude + self.sys_velocity,
                                     self.vel_amplitude + self.sys_velocity,
                                     np.ceil(self.vel_amplitude / self.vel_resolution).astype(int) * 2 + 1)
-        self.pxscale = proj_plane_pixel_scales(self.wcs)[0] * 3600 * self.distance.to(u.pc) / 206265.
+        self.angscale = proj_plane_pixel_scales(self.wcs)[0] * 3600
+        self.pxscale = self.angscale * self.distance.to(u.pc) / 206265.
         self.content[0].header['width'] = (self.width, "Width of field of view, px")
         self.content[0].header['height'] = (self.height, "Height of field of view, px")
         self.content[0].header['PhysRes'] = (self.pxscale.value, "Physical resolution, pc/px")
@@ -1720,6 +1731,8 @@ class ISM:
                                 'vel_pa: 30. * u.degree  # PA of kinematical axis (for vel_gradient or vel_rot)
                                 'force_use_cube': provide path to the 3D/4D cube with emissivities
                                         to be used instead of the generated one
+                                'nlos_pix': number of reslolution elements along the line-of-sight.
+                                    Applicable to Cloud/Bubble
                                 }]
         """
         if type(all_objects) is dict:
@@ -1747,14 +1760,14 @@ class ISM:
                                    'continuum_type', 'continuum_data', 'continuum_flux', 'continuum_mag',
                                    'continuum_wl', 'ext_law', 'ext_rv', 'vel_gradient', 'vel_rot', 'vel_pa',
                                    'n_brightest_lines', 'offset_RA', 'offset_DEC', 'RA', 'DEC',
-                                   'pxsize', 'force_use_cube'],
+                                   'pxsize', 'force_use_cube', 'nlos_pix'],
                                   [0, 0, 0., 1., 0, self.sys_velocity, self.turbulent_sigma, 0, 0.1, 0, 0, self.distance,
                                    None, None, 0, None, 5500., self.ext_law, self.R_V, 0, 0, kin_pa_default, None,
-                                   None, None, None, None, self.pxscale, None],
+                                   None, None, None, None, self.pxscale, None, 100],
                                   [brtunit, fluxunit, u.mag, None, velunit, velunit, velunit, None, None,
                                    u.pc, u.pc, u.kpc, None, None, brtunit/u.AA, u.mag / u.arcsec ** 2, u.Angstrom,
                                    None, None, velunit / u.pc, velunit, u.degree, None, u.arcsec, u.arcsec,
-                                   u.degree, u.degree, None, None]):
+                                   u.degree, u.degree, None, None, None]):
                 set_default_dict_values(cur_obj, k, v, unit=unit)
 
             tot = 0
@@ -1996,7 +2009,7 @@ class ISM:
                                               radius=cur_obj['radius'],
                                               pxscale=self.pxscale * (cur_obj['distance'].to(u.pc) /
                                                                       self.distance.to(u.pc)),
-                                              angscale=self.pxscale,
+                                              angscale=self.angscale,
                                               # perturb_degree=cur_obj['perturb_degree'],
                                               # perturb_amplitude=cur_obj['perturb_amplitude'],
                                               turbulent_sigma=cur_obj['turbulent_sigma'],
@@ -2005,6 +2018,7 @@ class ISM:
                                               spectrum_type=model_type,
                                               n_brightest_lines=cur_obj['n_brightest_lines'],
                                               linerat_constant=cur_obj['linerat_constant'],
+                                              _npix_los=cur_obj['nlos_pix']
                                               )
                 elif cur_obj['type'] == "Cloud":
                     generated_object = Cloud(xc=x, yc=y,
@@ -2015,7 +2029,7 @@ class ISM:
                                              radius=cur_obj['radius'],
                                              pxscale=self.pxscale * (cur_obj['distance'].to(u.pc) /
                                                                      self.distance.to(u.pc)),
-                                             angscale=self.pxscale,
+                                             angscale=self.angscale,
                                              # perturb_degree=cur_obj['perturb_degree'],
                                              # perturb_amplitude=cur_obj['perturb_amplitude'],
                                              spectrum_id=model_index,
@@ -2026,6 +2040,7 @@ class ISM:
                                              linerat_constant=cur_obj['linerat_constant'],
                                              vel_gradient=cur_obj['vel_gradient'],
                                              vel_pa=cur_obj['vel_pa'],
+                                             _npix_los=cur_obj['nlos_pix']
                                              )
 
                 elif cur_obj['type'] == "Bubble3D":
@@ -2039,7 +2054,7 @@ class ISM:
                                                 radius=cur_obj['radius'],
                                                 pxscale=self.pxscale * (cur_obj['distance'].to(u.pc) /
                                                                           self.distance.to(u.pc)),
-                                                angscale=self.pxscale,
+                                                angscale=self.angscale,
                                                 perturb_degree=cur_obj['perturb_degree'],
                                                 perturb_amplitude=cur_obj['perturb_amplitude'],
                                                 turbulent_sigma=cur_obj['turbulent_sigma'],
@@ -2049,6 +2064,7 @@ class ISM:
                                                 n_brightest_lines=cur_obj['n_brightest_lines'],
                                                 linerat_constant=cur_obj['linerat_constant'],
                                                 force_use_cube=cur_obj['force_use_cube'],
+                                                _npix_los=cur_obj['nlos_pix']
                                                 )
                 elif cur_obj['type'] == "Cloud3D":
                     generated_object = Cloud3D(xc=x, yc=y,
@@ -2059,7 +2075,7 @@ class ISM:
                                                radius=cur_obj['radius'],
                                                pxscale=self.pxscale * (cur_obj['distance'].to(u.pc) /
                                                                      self.distance.to(u.pc)),
-                                               angscale=self.pxscale,
+                                               angscale=self.angscale,
                                                perturb_degree=cur_obj['perturb_degree'],
                                                perturb_amplitude=cur_obj['perturb_amplitude'],
                                                spectrum_id=model_index,
@@ -2071,6 +2087,7 @@ class ISM:
                                                vel_gradient=cur_obj['vel_gradient'],
                                                vel_pa=cur_obj['vel_pa'],
                                                force_use_cube=cur_obj['force_use_cube'],
+                                               _npix_los=cur_obj['nlos_pix']
                                              )
 
                 elif cur_obj['type'] == "Filament":
@@ -2090,7 +2107,7 @@ class ISM:
                                                 sys_velocity=cur_obj['sys_velocity'],
                                                 pxscale=self.pxscale * (cur_obj['distance'].to(u.pc) /
                                                                         self.distance.to(u.pc)),
-                                                angscale=self.pxscale,
+                                                angscale=self.angscale,
                                                 )
 
                 elif cur_obj['type'] == "Galaxy":
@@ -2112,7 +2129,7 @@ class ISM:
                                               sys_velocity=cur_obj['sys_velocity'],
                                               pxscale=self.pxscale * (cur_obj['distance'].to(u.pc) /
                                                                       self.distance.to(u.pc)),
-                                              angscale=self.pxscale,
+                                              angscale=self.angscale,
                                               )
                 elif cur_obj['type'] == "Ellipse":
                     generated_object = Ellipse(xc=x, yc=y,
@@ -2133,7 +2150,7 @@ class ISM:
                                                                        self.distance.to(u.pc)),
                                                perturb_scale=cur_obj['perturb_scale'],
                                                perturb_amplitude=cur_obj['perturb_amplitude'],
-                                               angscale=self.pxscale,
+                                               angscale=self.angscale,
                                                )
                 elif cur_obj['type'] == "Circle":
                     generated_object = Circle(xc=x, yc=y,
@@ -2152,7 +2169,7 @@ class ISM:
                                                                       self.distance.to(u.pc)),
                                               perturb_scale=cur_obj['perturb_scale'],
                                               perturb_amplitude=cur_obj['perturb_amplitude'],
-                                              angscale=self.pxscale,
+                                              angscale=self.angscale,
                                               )
                 elif cur_obj['type'] == "Rectangle" or (cur_obj['type'] == "Nebula"):
                     generated_object = Rectangle(xc=x, yc=y,
@@ -2171,7 +2188,7 @@ class ISM:
                                                                          self.distance.to(u.pc)),
                                                  perturb_scale=cur_obj['perturb_scale'],
                                                  perturb_amplitude=cur_obj['perturb_amplitude'],
-                                                 angscale=self.pxscale,
+                                                 angscale=self.angscale,
                                                  )
                 elif cur_obj['type'] == "CustomNebula":
                     generated_object = self.process_custom_nebula(cur_obj, xc=x, yc=y,
