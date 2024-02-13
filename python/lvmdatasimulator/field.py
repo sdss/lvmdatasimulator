@@ -23,6 +23,7 @@ import os
 from lvmdatasimulator import log
 from lvmdatasimulator.utils import assign_units
 from scipy.interpolate import interp1d
+from astropy.table import Table
 
 
 brtunit = u.erg / (u.cm ** 2 * u.s * u.arcsec ** 2)
@@ -490,7 +491,7 @@ class LVMField:
         else:
             self.ism_map = np.zeros(shape=(self.npixels, self.npixels), dtype=float)
 
-    def extract_spectra(self, fibers, wl_grid, obs_coords=None):
+    def extract_spectra(self, fibers, wl_grid, obs_coords=None, save_line_fluxes=None):
         """
         Perform spectra extraction within the given aperture.
 
@@ -501,6 +502,9 @@ class LVMField:
                 wavelength grid for the resulting spectrum
             obs_coords (SkyCoord, optional):
                 Coordinates of the center of the fiber bundle
+            save_line_fluxes (str):
+                If present, then extracted line fluxes in each fiber will be saved
+                to the ascii table at the provided location
         """
 
         if obs_coords is None:
@@ -513,6 +517,7 @@ class LVMField:
         xx, yy = np.meshgrid(np.arange(self.npixels), np.arange(self.npixels))
         aperture_mask = np.zeros(shape=(self.npixels, self.npixels), dtype=int)
         fibers_coords = np.zeros(shape=(len(fibers), 3), dtype=float)
+        fibers_coords_radec = np.zeros(shape=(len(fibers), 3), dtype=float)
         for index, fiber in enumerate(fibers):
             fiber_id.append(fiber.id)
             # I have to check this holds
@@ -521,6 +526,8 @@ class LVMField:
 
             s = (fiber.diameter.to(u.degree) / self.pxsize.to(u.degree)).value / 2
             fibers_coords[index, :] = [xc, yc, s]
+            fibers_coords_radec[index, :] = [cur_fiber_coord.ra.degree, cur_fiber_coord.dec.degree,
+                                             fiber.diameter.to(u.degree).value]
             if (xc - s) < 0 or ((xc + s) >= self.npixels) \
                     or ((yc - s) < 0) or ((yc + s) >= self.npixels):
 
@@ -542,10 +549,26 @@ class LVMField:
                                  fill_value='extrapolate')
                     # !!! APPLY EXTINCTION BY DARK NEBULAE TO STARS !!!
                     spectrum[index, :] += (p(wl_grid.value) * dl.value * fluxunit)
+        fiber_id = np.array(fiber_id)
         if np.max(aperture_mask) < fibers_coords.shape[0]:
             fibers_coords = fibers_coords[:np.max(aperture_mask), :]
+            fibers_coords_radec = fibers_coords_radec[:np.max(aperture_mask), :]
+            fiber_id = fiber_id[:np.max(aperture_mask)]
         log.info("Start extracting nebular spectra")
-        spectrum_ism = self.ism.get_spectrum(wl_grid.to(u.AA), aperture_mask, fibers_coords)
+
+        if save_line_fluxes is not None:
+            colnames = ['FibID', 'RA', 'Dec', 'X', 'Y']
+            fiber_data = np.array([(fiber_id[fib_ind], fibers_coords_radec[fib_ind][0],
+                           fibers_coords_radec[fib_ind][1], fibers_coords[fib_ind][0],
+                           fibers_coords[fib_ind][1]) for fib_ind in range(len(fibers_coords))])
+            table_integrated_flux = Table(data=fiber_data, names=colnames,
+                                          dtype=[int, float, float, float, float])
+        else:
+            table_integrated_flux = None
+        spectrum_ism, table_integrated_flux = self.ism.get_spectrum(wl_grid.to(u.AA), aperture_mask, fibers_coords,
+                                                                    save_fluxes_in_fibers=table_integrated_flux)
         if spectrum_ism is not None:
             spectrum[: len(spectrum_ism), :] += spectrum_ism
-        return np.array(fiber_id), spectrum / dl.value / u.AA
+        if table_integrated_flux is not None:
+            table_integrated_flux.write(save_line_fluxes, overwrite=True, format='ascii.fixed_width_two_line')
+        return fiber_id, spectrum / dl.value / u.AA

@@ -199,6 +199,8 @@ class FiberBundle:
         if self.angle is not None and (self.angle != 90):
             log.info(f'Rotating the bundle to PA = {self.angle - 90} deg.')
             selected = self._rotates(selected)
+        elif self.angle == 90:
+            selected = self._rotates(selected)
 
         fibers_science = self._generate_fibers(selected)
 

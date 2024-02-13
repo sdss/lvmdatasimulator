@@ -185,8 +185,11 @@ class Simulator:
         wl_grid = np.arange(3500, 9910.01, 0.06) * u.AA
 
         log.info(f"Recovering target spectra for {self.bundle.nfibers} fibers.")
+        save_input_fluxes_name = os.path.join(self.outdir,
+                                              f"{self.source.name}_{self.bundle.bundle_name}.txt")
         index, spectra = self.source.extract_spectra(self.bundle.fibers_science, wl_grid,
-                                                     obs_coords=self.observation.target_coords)
+                                                     obs_coords=self.observation.target_coords,
+                                                     save_line_fluxes=save_input_fluxes_name)
 
         log.info('Resampling spectra to the instrument wavelength solution.')
 

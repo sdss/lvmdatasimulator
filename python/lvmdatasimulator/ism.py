@@ -1543,7 +1543,8 @@ class ISM:
         if type(obj_to_add) == Bubble:
             self._add_fits_extension(name="Comp_{0}_LineProfile".format(obj_id), value=obj_to_add.line_profile.value,
                                      obj_to_add=obj_to_add, zorder=zorder, add_fits_kw=add_fits_kw)
-        if type(obj_to_add) in [Bubble, Bubble3D, Cloud, Cloud3D] and not obj_to_add.linerat_constant:
+        if (type(obj_to_add) in [Bubble, Bubble3D, Cloud, Cloud3D] and not obj_to_add.linerat_constant and
+                ((obj_to_add.max_brightness > 0) or (obj_to_add.total_flux > 0))):
             with fits.open(lvmdatasimulator.CLOUDY_MODELS) as hdu:
                 row_te = np.flatnonzero(hdu[obj_to_add.spectrum_id].data[:, 0] == -1)
                 row_ne = np.flatnonzero(hdu[obj_to_add.spectrum_id].data[:, 0] == -2)
@@ -1760,14 +1761,14 @@ class ISM:
                                    'continuum_type', 'continuum_data', 'continuum_flux', 'continuum_mag',
                                    'continuum_wl', 'ext_law', 'ext_rv', 'vel_gradient', 'vel_rot', 'vel_pa',
                                    'n_brightest_lines', 'offset_RA', 'offset_DEC', 'RA', 'DEC',
-                                   'pxsize', 'force_use_cube', 'nlos_pix'],
+                                   'pxsize', 'force_use_cube', 'nlos_pix', 'chunks'],
                                   [0, 0, 0., 1., 0, self.sys_velocity, self.turbulent_sigma, 0, 0.1, 0, 0, self.distance,
                                    None, None, 0, None, 5500., self.ext_law, self.R_V, 0, 0, kin_pa_default, None,
-                                   None, None, None, None, self.pxscale, None, 100],
+                                   None, None, None, None, self.pxscale, None, 100, None],
                                   [brtunit, fluxunit, u.mag, None, velunit, velunit, velunit, None, None,
                                    u.pc, u.pc, u.kpc, None, None, brtunit/u.AA, u.mag / u.arcsec ** 2, u.Angstrom,
                                    None, None, velunit / u.pc, velunit, u.degree, None, u.arcsec, u.arcsec,
-                                   u.degree, u.degree, None, None, None]):
+                                   u.degree, u.degree, None, None, None, None]):
                 set_default_dict_values(cur_obj, k, v, unit=unit)
 
             tot = 0
@@ -2485,19 +2486,20 @@ class ISM:
             map_is_empty = False
         return map_2d * (proj_plane_pixel_scales(self.wcs)[0] * 3600) ** 2
 
-    def get_spectrum(self, wl_grid=None, aperture_mask=None, fibers_coords=None):
+    def get_spectrum(self, wl_grid=None, aperture_mask=None, fibers_coords=None, save_fluxes_in_fibers=None):
         if aperture_mask is None or (np.sum(aperture_mask) == 0) or (self.content[0].header['Nobj'] == 0):
-            log.warning("No overlapping detected between the ISM component and the fibers => no spectra extraction")
-            return None
+            log.error("No overlapping detected between the ISM component and the fibers => no spectra extraction")
+            return None, save_fluxes_in_fibers
         all_extensions = [hdu.header.get('EXTNAME') for hdu in self.content]
         all_extensions_brt = np.array([extname for extname in all_extensions
                                        if extname is not None and ("BRIGHTNESS" in extname) and
                                        check_overlap(self.content[extname], (self.height, self.width))])
         if all([self.content[cur_ext].header.get("DARK") for cur_ext in all_extensions_brt]):
-            return None
+            return None, save_fluxes_in_fibers
         all_extensions_brt = all_extensions_brt[np.argsort([self.content[cur_ext].header.get('ZORDER')
                                                             for cur_ext in all_extensions_brt])]
-
+        if save_fluxes_in_fibers:
+            n_columns_nonflux = len(save_fluxes_in_fibers.colnames)
         pix_size = proj_plane_pixel_scales(self.wcs)[0] * 3600
         wl_logscale = np.log(wl_grid.value)
         wl_logscale_highres = np.arange(np.round((wl_logscale[-1] - wl_logscale[0]) * 1e6).astype(int)
@@ -2522,6 +2524,7 @@ class ISM:
         kern = kernels.CustomKernel(kern_mask.reshape((1, kern_mask.shape[0], kern_mask.shape[1])))
 
         for neb_index, cur_ext in enumerate(all_extensions_brt):
+            print(neb_index, cur_ext)
             cur_neb_in_mask = np.zeros_like(xx_sub)
             y0 = self.content[cur_ext].header.get("Y0")
             x0 = self.content[cur_ext].header.get("X0")
@@ -2595,6 +2598,15 @@ class ISM:
                 spectrum[selected_apertures, :] = \
                     spectrum[selected_apertures, :] * ism_extinction(av=data_in_apertures, r_v=cur_r_v,
                                                                      ext_law=cur_extinction_law, wavelength=wl_grid).T
+
+                if save_fluxes_in_fibers is not None:
+                    for cn in save_fluxes_in_fibers.colnames:
+                        if 'Flux_' not in cn:
+                            continue
+                        cur_wl = float(cn.split('_')[-1])
+                        save_fluxes_in_fibers[cn][selected_apertures] = (
+                                save_fluxes_in_fibers[cn][selected_apertures] * ism_extinction(
+                            av=data_in_apertures, r_v=cur_r_v, ext_law=cur_extinction_law, wavelength=cur_wl).ravel())
 
                 continue
 
@@ -2724,6 +2736,19 @@ class ISM:
                              fill_value='extrapolate')
                 spectrum[selected_apertures, :] += (p(wl_logscale) * delta_lr * highres_factor)
 
+                # === Save fluxes to table
+                if save_fluxes_in_fibers is not None:
+                    for curline_ind, curline in enumerate(all_wavelength):
+                        if curline < 0:
+                            continue
+                        curline_rounded = np.round(float(curline),2)
+                        if f'Flux_{curline_rounded}' not in save_fluxes_in_fibers.colnames:
+                            save_fluxes_in_fibers.add_column(0., name=f'Flux_{curline_rounded}')
+                        save_fluxes_in_fibers[f'Flux_{curline_rounded}'][selected_apertures] += (
+                            flux_norm_in_apertures[:, curline_ind])
+                            # currec = table_integrated_flux[table_integrated_flux['FibID'] == s]
+                            # table_integrated_flux[]
+
             if my_comp + "_CONTINUUM" in self.content:
                 brt_max = self.content[cur_ext].header.get('MAXBRT')
                 if not brt_max and self.content[cur_ext].header.get('TOTFLX'):
@@ -2753,4 +2778,4 @@ class ISM:
                                                                1))
                 spectrum[selected_apertures, :] += continuum[None, :] * data_in_apertures
 
-        return spectrum * pix_size ** 2 * fluxunit
+        return spectrum * pix_size ** 2 * fluxunit, save_fluxes_in_fibers
