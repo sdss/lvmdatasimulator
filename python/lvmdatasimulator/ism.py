@@ -2524,7 +2524,6 @@ class ISM:
         kern = kernels.CustomKernel(kern_mask.reshape((1, kern_mask.shape[0], kern_mask.shape[1])))
 
         for neb_index, cur_ext in enumerate(all_extensions_brt):
-            print(neb_index, cur_ext)
             cur_neb_in_mask = np.zeros_like(xx_sub)
             y0 = self.content[cur_ext].header.get("Y0")
             x0 = self.content[cur_ext].header.get("X0")
