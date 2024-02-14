@@ -915,9 +915,10 @@ class Cloud(Nebula):
         map2d = np.zeros(shape=(slice.shape[0], slice.shape[1], slice.shape[1]), dtype=float)
         for lineind in range(slice.shape[0]):
             map2d[lineind, :, :] = interpolate_slice_to_circle(slice[lineind, - (slice.shape[1] - 1) // 2 - 1:].value)
-            if self.total_flux > 0:
-                map2d[lineind, :, :] = (map2d[lineind, :, :] / np.nansum(map2d[self._ref_line_id, :, :]) *
-                                        self.total_flux / self.angscale ** 2)
+        if self.total_flux > 0:
+            map_norm_ref = np.nansum(map2d[self._ref_line_id, :, :])
+            for lineind in range(slice.shape[0]):
+                map2d[lineind, :, :] = map2d[lineind, :, :] / map_norm_ref / (self.angscale ** 2) * self.total_flux
                 # if map2d is None:
         #     return None
         # map2d[:, - (map2d.shape[1] - 1) // 2 - 1:, 0: (map2d.shape[2] - 1) // 2] = \
