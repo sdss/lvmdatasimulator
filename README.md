@@ -71,12 +71,16 @@ At the moment, we prepared two tutorials for users on how to use the code.
 ## Desrciption of the required and generated files
 <a id="files"></a>
 
-Source field require the pre-calculated Cloudy models for proper work. Default version can be obtained in this way:
-``wget ftp@ftp.das.uchile.cl:/pub/enrico/LVM_cloudy_models_phys.fits``
-It should be stored in the ``data`` directory. This file has a specific format that is described below. Users can generate their own model grids.
+There are some data that the simulator needs to work properly that are too large for github for storage and they have to be
+downloaded from the SAS. To download the data, you can run in an ``ipython`` session the following commands:
 
-Another file that is required for running source field is the templates of stellar population. It can be fetched in this way:
-``wget ftp@ftp.das.uchile.cl:/pub/enrico/pollux_resampled_v0.fits``
+```
+from lvmdatasimulator import download_data
+download_data()
+```
+
+The data will be automatically downloaded and positioned in the correct location within the package directory structures.
+Run this command after installing the simulator, and every once in a while, in case these data changed.
 
 Finally, the Starburst99 models are useful to produce the continuum. They are already in the data directory (``LVM_continuum_models.fits``)
 
