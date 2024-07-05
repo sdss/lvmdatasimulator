@@ -12,6 +12,7 @@ import astropy.units as u
 
 from dataclasses import dataclass
 from astropy.table import Table, vstack
+from astropy.io.misc import yaml
 
 from lvmdatasimulator import DATA_DIR, log
 
@@ -132,9 +133,9 @@ class FiberBundle:
                 self.nrings = 1
 
         if angle is None:
-            self.angle = 90.
+            self.angle = 0.
         else:
-            self.angle = angle + 90.
+            self.angle = angle + 0.
 
         self.build_bundles()
 
@@ -144,7 +145,7 @@ class FiberBundle:
         self.nfibers_sky = self.nfibers_sky1 + self.nfibers_sky2
         self.nfibers_std = len(self.fibers_table_std)
 
-    def build_bundles(self):
+    def build_bundles(self, d=35.3, disp=3):
         """
         Read the database containing the informations on the fibers and setup the bundle to be
         used for the observations.
@@ -156,7 +157,13 @@ class FiberBundle:
 
         #### create science fiber bundle
 
-        fiber_table = self._read_fiber_file(name='science_array.dat')
+        tmp_table = self._read_fiber_file() # reading the fiber file
+        science_mask = tmp_table['targettype'] == 'science'
+        sky1_mask = tmp_table['telescope'] == 'SkyE'
+        sky2_mask = tmp_table['telescope'] == 'SkyW'
+        std_mask = tmp_table['targettype'] == 'standard'
+
+        fiber_table = tmp_table[science_mask]
         if self.custom_fibers is not None:
             log.info('Using custom list of fibers.')
             selected = [row for row in fiber_table
@@ -176,15 +183,16 @@ class FiberBundle:
             log.info('Using the full hexagon pattern')
 
         elif self.bundle_name == 'horizontal':
-            mask = np.abs(fiber_table['y']) < 1
+            mask = np.abs(fiber_table['x']) < 1
             selected = fiber_table[mask].copy()
+            self.angle += 90
             log.info('Using an horizontal line of fibers.')
 
         elif self.bundle_name == 'diagonals':
             # hexagon diagonals are lines with slope +- sqrt(3)
-            mask1 = np.abs(fiber_table['y'] - np.sqrt(3) * fiber_table['x']) < 1
-            mask2 = np.abs(fiber_table['y'] + np.sqrt(3) * fiber_table['x']) < 1
-            mask3 = np.abs(fiber_table['y']) < 1
+            mask1 = np.abs(fiber_table['x'] - np.sqrt(3) * fiber_table['y']) < 1
+            mask2 = np.abs(fiber_table['x'] + np.sqrt(3) * fiber_table['y']) < 1
+            mask3 = np.abs(fiber_table['x']) < 1
             mask = np.any([mask1, mask2, mask3], axis=0)
             selected = fiber_table[mask].copy()
             log.info('Using a diagonal pattern of fibers.')
@@ -196,23 +204,23 @@ class FiberBundle:
             mask = selected['ring_id'] <= self.nrings
             selected = selected[mask].copy()
 
-        if self.angle is not None and (self.angle != 90):
+        if self.angle is not None and (self.angle != 0): #90):
             log.info(f'Rotating the bundle to PA = {self.angle - 90} deg.')
             selected = self._rotates(selected)
-        elif self.angle == 90:
-            selected = self._rotates(selected)
+        # elif self.angle == 90:
+        #     selected = self._rotates(selected)
 
-        fibers_science = self._generate_fibers(selected)
+        fibers_science = self._generate_fibers(selected, d=d, disp=disp)
 
         self.fibers_science = fibers_science
         self.fibers_table_science = selected
 
         ### sky fiber bundles
-        fibers_table_sky1 = self._read_fiber_file(name='sky1_array.dat')
-        fibers_table_sky2 = self._read_fiber_file(name='sky2_array.dat')
+        fibers_table_sky1 = tmp_table[sky1_mask]
+        fibers_table_sky2 = tmp_table[sky2_mask]
 
-        fibers_sky1 = self._generate_fibers(fibers_table_sky1)
-        fibers_sky2 = self._generate_fibers(fibers_table_sky2)
+        fibers_sky1 = self._generate_fibers(fibers_table_sky1, d=d, disp=disp)
+        fibers_sky2 = self._generate_fibers(fibers_table_sky2, d=d, disp=disp)
 
         self.fibers_sky1 = fibers_sky1
         self.fibers_table_sky1 = fibers_table_sky1
@@ -222,16 +230,16 @@ class FiberBundle:
 
         ### standard fiber bundle
 
-        fibers_table_std = self._read_fiber_file(name='std_array.dat')
+        fibers_table_std = tmp_table[std_mask]
 
-        fibers_std = self._generate_fibers(fibers_table_std)
+        fibers_std = self._generate_fibers(fibers_table_std, d=d, disp=disp)
 
         self.fibers_std = fibers_std
         self.fibers_table_std = fibers_table_std
 
 
     @staticmethod
-    def _read_fiber_file(name='science_array.dat'):
+    def _read_fiber_file(name='lvm_fiducial_fibermap.yaml'):
         """
         Reads the file containing the information on each fiber and it returns it as an astropy
         table
@@ -241,8 +249,18 @@ class FiberBundle:
                 table containing the informations about each fiber.
         """
 
-        filename = os.path.join(DATA_DIR, 'instrument', name)
-        table = Table.read(filename, format='ascii.csv')
+        filename = os.path.join(DATA_DIR, 'instrument/fibers', name)
+        with open(filename) as ff:
+            fibers = yaml.load(ff)
+        table = Table(rows=fibers['fibers'], names=['fiber_id', 'spectrographid', 'blockid',
+                                                    'finblock', 'targettype', 'ifulabel',
+                                                    'finifu', 'telescope', 'xpmm', 'ypmm',
+                                                    'ring_id','orig_ifulabel', 'orig_slitlabel',
+                                                    'finsector', 'fmap', 'ypix', 'fibstatus'])
+
+        conv = 37/0.33 # conversion factor from mm to arcsec
+        table['x'] = table['xpmm'] * conv
+        table['y'] = table['ypmm'] * conv
 
         return table
 
@@ -274,7 +292,7 @@ class FiberBundle:
         return table
 
     @staticmethod
-    def _generate_fibers(table):
+    def _generate_fibers(table, d=35.3, disp=3):
 
         out = []
         for i, row in enumerate(table):
@@ -283,7 +301,7 @@ class FiberBundle:
                                 row['fiber_id'],
                                 row['x'] * u.arcsec,
                                 row['y'] * u.arcsec,
-                                row['d'] * u.arcsec,
-                                row['disp'] * u.pix,
-                                row['type']))
+                                d * u.arcsec,
+                                disp * u.pix,
+                                row['targettype']))
         return out
