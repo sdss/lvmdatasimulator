@@ -81,7 +81,7 @@ class StarsList:
                  unit_ra=u.deg, unit_dec=u.deg, unit_radius=u.arcmin,
                  colnames=['star_id', 'ra', 'dec', 'phot_g_mean_mag', 'phot_bp_mean_mag',
                            'phot_rp_mean_mag', 'teff_val', 'a_g_val', 'e_bp_min_rp_val',
-                           'radial_velocity', 'gaia', 'source_id'],
+                           'radial_velocity', 'gaia', 'SOURCE_ID'],
                  types=[int, float, float, float, float, float, float, float,
                         float, float, bool, int],
                  units=[None, u.deg, u.deg, u.mag, u.mag, u.mag, u.K, u.mag, u.mag, kms, None,
@@ -160,7 +160,7 @@ class StarsList:
                    'a_g_val': ag,
                    'radial_velocity': v,
                    'gaia': False,
-                   'source_id': 0,
+                   'SOURCE_ID': 0,
                    }
         if standard:
             log.info('Standard star {} with Teff {}, Gmag {:0.2f} added.'
