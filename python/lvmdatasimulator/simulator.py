@@ -18,7 +18,7 @@
 
 import numpy as np
 import astropy.units as u
-
+from astropy.modeling import fitting, models
 from multiprocessing import Pool
 from collections import OrderedDict
 from scipy import special
@@ -224,7 +224,17 @@ class Simulator:
             convolved = util.convolve_for_gaussian(original, lsf_fwhm, boundary="extend")
             resampled_v1 = util.resample_spectrum(branch.wavecoord.wave.value, wl_grid.value,
                                                   convolved, fast=self.fast)
-
+            # rec = np.flatnonzero((wl_grid.value > 6555) & (wl_grid.value < 6575))
+            # rec1 = np.flatnonzero((branch.wavecoord.wave.value > 6555) & (branch.wavecoord.wave.value < 6575))
+            # log.info(f"{np.sum(resampled_v1[rec1])/np.sum(original[rec])*(branch.wavecoord.wave.value[1]-branch.wavecoord.wave.value[0])/(wl_grid.value[1]-wl_grid.value[0])}")
+            # fitter = fitting.LevMarLSQFitter()
+            # g1 = models.Gaussian1D(mean=6562.8, stddev=1.5/2.35428, amplitude=np.max(resampled_v1[rec1]))
+            # g2 = models.Gaussian1D(mean=6562.8, stddev=1.5 / 2.35428, amplitude=np.max(original[rec]))
+            # res1 = fitter(g1, branch.wavecoord.wave.value[rec1], resampled_v1[rec1])
+            # res2 = fitter(g2, wl_grid.value[rec], original[rec])
+            # log.info(
+            #     f"{np.sum(resampled_v1[rec1]) / np.sum(original[rec]) * (branch.wavecoord.wave.value[1] - branch.wavecoord.wave.value[0]) / (wl_grid.value[1] - wl_grid.value[0])},"
+            #     f"{res1.amplitude*res1.stddev*np.sqrt(2*np.pi)/np.sum(original[rec])/(wl_grid.value[1] - wl_grid.value[0])}")
             fiber_spec[branch.name] = resampled_v1 * (u.erg / (u.cm ** 2 * u.s * u.AA))
 
         return fiber.id, fiber_spec
@@ -311,6 +321,20 @@ class Simulator:
                 noises.append(item[1])
                 calibs.append(item[2])
                 realizations.append(item[3])
+
+            # wave = self.spectrograph.branches[0].wavecoord.wave.value
+            # rec = np.flatnonzero((wave > 6555) & (wave < 6575))
+            #
+            # for sp_id, sp in enumerate(self.target_spectra.keys()):
+            #     print(np.sum(calibs[sp_id]['target']['linear'][rec])/ np.sum(self.target_spectra[sp_id]['linear'][rec]))
+                # log.info(
+                # f"{sp_id}, {np.sum(calibs[sp_id]) / np.sum(self.target_spectra[sp])}")
+            # fitter = fitting.LevMarLSQFitter()
+            # g1 = models.Gaussian1D(mean=6562.8, stddev=1.5 / 2.35428, amplitude=np.max(resampled_v1[rec1]))
+            # g2 = models.Gaussian1D(mean=6562.8, stddev=1.5 / 2.35428, amplitude=np.max(original[rec]))
+            # res1 = fitter(g1, branch.wavecoord.wave.value[rec1], resampled_v1[rec1])
+            # res2 = fitter(g2, wl_grid.value[rec], original[rec])
+
 
             self.output_no_noise[exptime] = OrderedDict(zip(ids, realizations))
             self.output_noise[exptime] = OrderedDict(zip(ids, noises))

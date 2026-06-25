@@ -2745,7 +2745,7 @@ class ISM:
                         if f'Flux_{curline_rounded}' not in save_fluxes_in_fibers.colnames:
                             save_fluxes_in_fibers.add_column(0., name=f'Flux_{curline_rounded}')
                         save_fluxes_in_fibers[f'Flux_{curline_rounded}'][selected_apertures] += (
-                            flux_norm_in_apertures[:, curline_ind])
+                            flux_norm_in_apertures[:, curline_ind] * self.angscale ** 2)
                             # currec = table_integrated_flux[table_integrated_flux['FibID'] == s]
                             # table_integrated_flux[]
 
@@ -2777,5 +2777,19 @@ class ISM:
                 data_in_apertures = data_in_apertures.reshape((data_in_apertures.shape[0] * data_in_apertures.shape[1],
                                                                1))
                 spectrum[selected_apertures, :] += continuum[None, :] * data_in_apertures
+
+        # # Test if the saved fluxes are correct
+        # if save_fluxes_in_fibers is not None:
+        #     selected_spec = spectrum[selected_apertures, :]
+        #     for curline_ind, curline in enumerate(all_wavelength):
+        #         if curline < 0:
+        #             continue
+        #         curline_rounded = np.round(float(curline), 2)
+        #
+        #         if f'Rat_{curline_rounded}' not in save_fluxes_in_fibers.colnames:
+        #             save_fluxes_in_fibers.add_column(0., name=f'Rat_{curline_rounded}')
+        #         rec = np.flatnonzero((wl_grid.to(u.AA).value > (float(curline)-3.)) & ( wl_grid.to(u.AA).value < (float(curline)+3.)))
+        #         save_fluxes_in_fibers[f'Rat_{curline_rounded}'][selected_apertures] = (
+        #             save_fluxes_in_fibers[f'Flux_{curline_rounded}'][selected_apertures]/np.sum(selected_spec[:,rec],axis=1)*(wl_grid.to(u.AA).value[5]-wl_grid.to(u.AA).value[4]))
 
         return spectrum * pix_size ** 2 * fluxunit, save_fluxes_in_fibers
