@@ -259,7 +259,8 @@ def run_simulator_1d(params):
     log.info('Done. Elapsed time: {:0.1f}'.format(time.time()-start))
 
 
-def run_lvm_etc(params, check_lines=None, desired_snr=None, continuum=False, delete=True, dlam=1, saveplot=None):
+def run_lvm_etc(params, check_lines=None, desired_snr=None, continuum=False, delete=True, dlam=1, saveplot=None,
+                telescope='lvm160'):
     """
         Simple run the simulations in the mode of exposure time calculator.
 
@@ -281,6 +282,8 @@ def run_lvm_etc(params, check_lines=None, desired_snr=None, continuum=False, del
                 width of the window to extract the line flux, in angstrom
             saveplot (str):
                 if present, then the output plot will be saved in the file
+            telescope (str):
+                telescope name. Defaults to 'lvm160'. Use 'mcdonald21' for AS5
     """
 
     if isinstance(params, str):
@@ -378,7 +381,9 @@ def run_lvm_etc(params, check_lines=None, desired_snr=None, continuum=False, del
 
     default_exptimes = list(np.round(np.logspace(np.log10(10), np.log10(90000), 15)).astype(int))
     exptimes = params.get('exptimes', default_exptimes)
-    tel = get_telescope(params.get('telescope', 'lvm160'))
+    if telescope is None:
+        telescope = 'lvm160'
+    tel = get_telescope(params.get('telescope', telescope))
     obs = Observation.for_telescope(
         tel,
         name=name,
