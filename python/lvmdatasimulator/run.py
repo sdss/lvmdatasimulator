@@ -3,7 +3,7 @@ import astropy.units as u
 
 from lvmdatasimulator.field import LVMField
 from lvmdatasimulator.observation import Observation
-from lvmdatasimulator.telescope import LVM160
+from lvmdatasimulator.telescope import get_telescope
 from lvmdatasimulator.instrument import LinearSpectrograph
 from lvmdatasimulator.simulator import Simulator
 from lvmdatasimulator.fibers import FiberBundle
@@ -72,7 +72,8 @@ def save_input_params(params):
                    custom_fibers=None,
 
                    # parameters of the simulator
-                   fast=True
+                   fast=True,
+                   telescope='lvm160',
                    )
 
     # filling missing keys with default values
@@ -176,7 +177,8 @@ def run_test(name='LVMsimulator_test'):
         angle=0,  # rotation to apply to the bundle.
 
         # parameters of the simulator
-        fast=True  # use normal interpolation or precise resampling.
+        fast=True,  # use normal interpolation or precise resampling.
+        telescope='lvm160',
     )
     log.info('Start test simulations. It should take several minutes')
     run_simulator_1d(parameters)
@@ -223,23 +225,28 @@ def run_simulator_1d(params):
     my_lvmfield.get_map(wavelength_ranges=params.get('wavelength_ranges', [[6550, 6570]]),
                         unit_range=params.get('unit_range', u.AA))
 
-    obs = Observation(name=params.get('name', 'LVM_field'),
-                      ra=params.get('ra_bundle', params.get('ra', 10)),
-                      dec=params.get('dec_bundle', params.get('dec', -10)),
-                      unit_ra=params.get('unit_ra_bundle', u.deg),
-                      unit_dec=params.get('unit_dec_bundle', u.deg),
-                      time=params.get('time', '2022-01-01T00:00:00.00'),
-                      utcoffset=params.get('utcoffset', -3 * u.hour),
-                      exptimes=params.get('exptimes', 900.0),
-                      airmass=params.get('airmass', None),
-                      days_moon=params.get('days_moon', None),
-                      sky_template=params.get('sky_template', None))
-    tel = LVM160()
+    tel = get_telescope(params.get('telescope', 'lvm160'))
+    obs = Observation.for_telescope(
+        tel,
+        name=params.get('name', 'LVM_field'),
+        ra=params.get('ra_bundle', params.get('ra', 10)),
+        dec=params.get('dec_bundle', params.get('dec', -10)),
+        unit_ra=params.get('unit_ra_bundle', u.deg),
+        unit_dec=params.get('unit_dec_bundle', u.deg),
+        time=params.get('time', '2022-01-01T00:00:00.00'),
+        exptimes=params.get('exptimes', 900.0),
+        airmass=params.get('airmass', None),
+        days_moon=params.get('days_moon', None),
+        sky_template=params.get('sky_template', None),
+        location=params.get('location', tel.location),
+        utcoffset=params.get('utcoffset', tel.utcoffset),
+    )
     spec = LinearSpectrograph()
     bundle = FiberBundle(bundle_name=params.get('bundle_name', 'full'),
                          nrings=params.get('nrings', 24),
                          angle=params.get('angle', 0),
-                         custom_fibers=params.get('custom_fibers', None))
+                         custom_fibers=params.get('custom_fibers', None),
+                         telescope=tel)
 
     sim = Simulator(my_lvmfield, obs, spec, bundle, tel, fast=params.get('fast', True))
     sim.simulate_observations()
@@ -371,20 +378,24 @@ def run_lvm_etc(params, check_lines=None, desired_snr=None, continuum=False, del
 
     default_exptimes = list(np.round(np.logspace(np.log10(10), np.log10(90000), 15)).astype(int))
     exptimes = params.get('exptimes', default_exptimes)
-    obs = Observation(name=name,
-                      ra=10,
-                      dec=-10,
-                      unit_ra=u.deg,
-                      unit_dec=u.deg,
-                      exptimes=exptimes,
-                      airmass=params.get('airmass', 1.5),
-                      days_moon=params.get('days_moon', 0),
-                      sky_template=params.get('sky_template', None),
-                      geocoronal=params.get('geocoronal', None))
-
-    tel = LVM160()
+    tel = get_telescope(params.get('telescope', 'lvm160'))
+    obs = Observation.for_telescope(
+        tel,
+        name=name,
+        ra=10,
+        dec=-10,
+        unit_ra=u.deg,
+        unit_dec=u.deg,
+        exptimes=exptimes,
+        airmass=params.get('airmass', 1.5),
+        days_moon=params.get('days_moon', 0),
+        sky_template=params.get('sky_template', None),
+        geocoronal=params.get('geocoronal', None),
+        location=params.get('location', tel.location),
+        utcoffset=params.get('utcoffset', tel.utcoffset),
+    )
     spec = LinearSpectrograph()
-    bundle = FiberBundle(bundle_name='central')
+    bundle = FiberBundle(bundle_name='central', telescope=tel)
     sim = Simulator(my_lvmfield, obs, spec, bundle, tel, fast=True, aperture=10*u.pix)
 
     if spectrum_name is not None:

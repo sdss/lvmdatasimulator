@@ -35,7 +35,7 @@ class Branch:
         wavecoord (w.WaveCoord):
             Wavelength solution associated to the branch
         lsf_fwhm (astropy.Quantity):
-            FWHM of the LSF of the instrument. Defaults to 0.5 * u.AA.
+            FWHM of the LSF of the instrument. Defaults to 1.5 * u.AA.
         gain (astropy.Quantity):
             Gain of the sensor. Defaults to 1.0 * u.electron / u.adu
         ron (astropy.Quantity):

@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from astropy.table import Table, vstack
 
 from lvmdatasimulator import DATA_DIR, log
+from lvmdatasimulator.telescope import IFU_REFERENCE_DIAMETER
 
 
 @dataclass
@@ -100,9 +101,17 @@ class FiberBundle:
     angle (float, optional):
         rotation to be applied to the final bundle of fiber in degrees. If None, no rotation is
         applied. Defaults to None. Additional rotation by 90 degrees will be applied to match real LVM footprint
+    telescope (Telescope, optional):
+        If given, on-sky fiber positions and diameters are scaled by
+        ``telescope.ifu_angular_scale`` so that a fixed physical IFU matches the
+        plate scale of the selected primary. Defaults to None (no scaling).
+    angular_scale (float, optional):
+        Explicit on-sky scale factor for fiber ``x``, ``y``, and ``d``. Overrides
+        ``telescope.ifu_angular_scale`` when both are given.
     """
 
     def __init__(self, bundle_name='central', nrings=None, custom_fibers=None, angle=None,
+                 telescope=None, angular_scale=None,
                  max_fibers=1944, max_obj_fibers=1801, max_sky_fibers=119, max_std_fibers=24):
 
         if bundle_name not in [None, 'central', 'full', 'horizontal', 'diagonals']:
@@ -135,6 +144,19 @@ class FiberBundle:
             self.angle = 90.
         else:
             self.angle = angle + 90.
+
+        if angular_scale is not None:
+            self.angular_scale = float(angular_scale)
+        elif telescope is not None:
+            self.angular_scale = telescope.ifu_angular_scale
+        else:
+            self.angular_scale = 1.0
+
+        if self.angular_scale != 1.0:
+            log.info(
+                f'Scaling IFU on-sky geometry by {self.angular_scale:.6f} '
+                f'(layout reference primary diameter = {IFU_REFERENCE_DIAMETER:.2f})'
+            )
 
         self.build_bundles()
 
@@ -273,17 +295,16 @@ class FiberBundle:
 
         return table
 
-    @staticmethod
-    def _generate_fibers(table):
+    def _generate_fibers(self, table):
 
         out = []
         for i, row in enumerate(table):
             out.append(Fiber(i,
                                 row['ring_id'],
                                 row['fiber_id'],
-                                row['x'] * u.arcsec,
-                                row['y'] * u.arcsec,
-                                row['d'] * u.arcsec,
+                                row['x'] * self.angular_scale * u.arcsec,
+                                row['y'] * self.angular_scale * u.arcsec,
+                                row['d'] * self.angular_scale * u.arcsec,
                                 row['disp'] * u.pix,
                                 row['type']))
         return out

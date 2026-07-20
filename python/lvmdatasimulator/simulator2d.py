@@ -214,8 +214,10 @@ class Simulator2D:
 
         self._project_2d_calibs(None, 'bias', 0, self.observation.nbias, overwrite=overwrite)
 
-    def extract_extinction(self, extinction_file=os.path.join(DATA_DIR, 'sky',
-                                                              'LVM_LVM160_KLAM.dat')):
+    def extract_extinction(self, extinction_file=None):
+
+        if extinction_file is None:
+            extinction_file = self.telescope.extinction_file
 
         log.info('Reading the atmospheric extinction from file.')
         self.extinction_file = extinction_file
@@ -229,7 +231,8 @@ class Simulator2D:
         """
         # science sky template
         flux, wave = util.open_sky_file(self.observation.sky_template,
-                                        self.observation.days_moon, self.telescope.name,
+                                        self.observation.days_moon,
+                                        self.telescope.sky_telescope_name,
                                         ha=self.observation.geocoronal,
                                         area=self._area_fiber.value)
 
@@ -240,7 +243,8 @@ class Simulator2D:
             log.info('Using different template for sky array n. 1')
 
             flux1, wave1 = util.open_sky_file(self.observation.sky1_template,
-                                            self.observation.days_moon, self.telescope.name,
+                                            self.observation.days_moon,
+                                            self.telescope.sky_telescope_name,
                                             ha=self.observation.geocoronal,
                                             area=self._area_fiber.value)
 
@@ -251,7 +255,8 @@ class Simulator2D:
 
             log.info('Using different template for sky array n. 1')
             flux2, wave2 = util.open_sky_file(self.observation.sky2_template,
-                                            self.observation.days_moon, self.telescope.name,
+                                            self.observation.days_moon,
+                                            self.telescope.sky_telescope_name,
                                             ha=self.observation.geocoronal,
                                             area=self._area_fiber.value)
 

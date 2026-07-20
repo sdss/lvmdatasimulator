@@ -89,16 +89,18 @@ class Simulator:
         self.sky = None
         self.target_spectra = None
 
-    def extract_extinction(self, extinction_file=os.path.join(lvmdatasimulator.DATA_DIR, 'sky',
-                                                              'LVM_LVM160_KLAM.dat')):
+    def extract_extinction(self, extinction_file=None):
         """
         Returns atmospheric extinction coefficient sampled at instrumental wavelengths
 
         Args:
             extinction_file (str, optional):
                 File containing the athmospheric extinction curve.
-                Defaults to f'{DATA_DIR}/sky/LVM_LVM160_KLAM.dat'.
+                Defaults to the extinction curve associated with the configured telescope.
         """
+
+        if extinction_file is None:
+            extinction_file = self.telescope.extinction_file
 
         log.info('Reading the atmospheric extinction from file.')
         self.extinction_file = extinction_file
@@ -113,7 +115,8 @@ class Simulator:
         """
         area_fiber = np.pi * (self.bundle.fibers_science[0].diameter / 2) ** 2  # all fibers same diam.
         flux, wave = util.open_sky_file(self.observation.sky_template,
-                                        self.observation.days_moon, self.telescope.name,
+                                        self.observation.days_moon,
+                                        self.telescope.sky_telescope_name,
                                         ha=self.observation.geocoronal,
                                         area=area_fiber)
 

@@ -162,6 +162,21 @@ class Observation:
         elif self.airmass < 1:
             raise ValueError(f'airmass must be >= 1, but it is {self.airmass}')
 
+    @classmethod
+    def for_telescope(cls, telescope, **kwargs):
+        """
+        Build an observation using the site defaults of a telescope.
+
+        Any keyword arguments override the telescope defaults (for example ``ra``,
+        ``dec``, or ``exptimes``).
+        """
+        defaults = {
+            'location': telescope.location,
+            'utcoffset': telescope.utcoffset,
+        }
+        defaults.update(kwargs)
+        return cls(**defaults)
+
     @cached_property
     def localtime(self):
         """ Return the local time based on the UT time and on the UTC offset"""

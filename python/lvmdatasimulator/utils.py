@@ -636,9 +636,13 @@ def convolve_for_gaussian(spectrum, fwhm, boundary):
     """
 
     stddev = fwhm / 2.355  # from fwhm to sigma
-    size = round_up_to_odd(stddev)  # size of the kernel
+    # The kernel must extend over several sigma. Using a size of ~1 sigma (the previous
+    # behaviour) truncated the Gaussian to its flat core, turning the LSF into a too-narrow
+    # boxcar and under-broadening the lines. ~8 sigma captures the full profile.
+    size = round_up_to_odd(8 * stddev)  # full kernel width (~8 sigma, forced odd)
 
-    kernel = Gaussian1DKernel(stddev=stddev.value, x_size=size.value)  # gaussian kernel
+    kernel = Gaussian1DKernel(stddev=stddev.value,
+                              x_size=int(getattr(size, "value", size)))  # gaussian kernel
     return convolve(spectrum, kernel, boundary=boundary)
 
 
